@@ -60,24 +60,6 @@ class MorphContext:
 CatProbs = collections.namedtuple('CatProbs', ['PRE', 'STM', 'SUF', 'ZZZ'])
 
 
-class ClassProbs:
-    """An accumulator for marginalizing the class probabilities P(Category)
-    from all the individual conditional probabilities P(Category|Morph)
-    """
-
-    def __init__(self, total_morph_tokens):
-        self.total_morph_tokens = float(total_morph_tokens)
-        self.probs = [0.0] * len(CatProbs._fields)
-
-    def add(self, rcount, catprobs):
-        freq = float(rcount) / self.total_morph_tokens
-        for i, x in enumerate(catprobs):
-            self.probs[i] += freq * float(x)
-
-    def get(self):
-        return CatProbs(*self.probs)
-
-
 class CatmapModel:
     """Morfessor Categories-MAP model class."""
 
@@ -104,13 +86,16 @@ class CatmapModel:
         learning.
         """
         self.contexts = collections.defaultdict(MorphContext)
-        self.catprobs = dict()
+        self.condprobs = dict()
         total_morph_tokens = 0
 
         for rcount, segments in segmentations:
             # Collect information about the contexts in which the morphs occur
-            if not self.use_word_tokens:
-                rcount = 1
+            if self.use_word_tokens:
+                pcount = rcount
+            else:
+                # pcount used for perplexity, rcount is real count
+                pcount = 1
             total_morph_tokens += len(segments)
             for (i, morph) in enumerate(segments):
                 if i == 0:
@@ -120,7 +105,7 @@ class CatmapModel:
                     if len(neighbour) < self.min_perplexity_length:
                         neighbour = None
                 if neighbour is not None:
-                    self.contexts[morph].left[neighbour] += rcount
+                    self.contexts[morph].left[neighbour] += pcount
 
                 if i == len(segments) - 1:
                     neighbour = CatmapModel.word_boundary
@@ -129,18 +114,41 @@ class CatmapModel:
                     if len(neighbour) < self.min_perplexity_length:
                         neighbour = None
                 if neighbour is not None:
-                    self.contexts[morph].right[neighbour] += rcount
+                    self.contexts[morph].right[neighbour] += pcount
 
                 self.contexts[morph].rcount += rcount
 
-        # Calculate probabilities based on the encountered contexts
-        classprobs = ClassProbs(total_morph_tokens)
+        class Marginalizer:
+            """An accumulator for marginalizing the class probabilities P(Category)
+            from all the individual conditional probabilities P(Category|Morph)
+            """
+
+            def __init__(self, total_morph_tokens):
+                self.total_morph_tokens = float(total_morph_tokens)
+                self.probs = [0.0] * len(CatProbs._fields)
+
+            def add(self, rcount, condprobs):
+                freq = float(rcount) / self.total_morph_tokens
+                for i, x in enumerate(condprobs):
+                    self.probs[i] += freq * float(x)
+
+            def normalize(self):
+                total = float(sum(self.probs))
+                self.probs = [ x / total for x in self.probs ]
+
+            def get(self):
+                return CatProbs(*self.probs)
+
+
+        # Calculate conditional probabilities from the encountered contexts
+        classprobs = Marginalizer(total_morph_tokens)
         for morph in sorted(self.contexts, cmp=lambda x, y: len(x) < len(y)):
-            self.catprobs[morph] = self._contextToProbability(morph,
+            self.condprobs[morph] = self._contextToProbability(morph,
                 self.contexts[morph])
             # Marginalize (scale by frequency and accumulate elementwise)
-            classprobs.add(self.contexts[morph].rcount, self.catprobs[morph])
-        tmp = classprobs.get()
+            classprobs.add(self.contexts[morph].rcount, self.condprobs[morph])
+        classprobs.normalize()
+        self.catpriors = classprobs.get()
 
     def _contextToProbability(self, morph, context):
         """Calculate conditional probabilities P(Category|Morph) from the

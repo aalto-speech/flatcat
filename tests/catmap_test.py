@@ -20,7 +20,8 @@ REFERENCE_PROBS = REFERENCE_DIR + 'baseline.probs.gz'
 class TestProbabilityEstimation(unittest.TestCase):
     def setUp(self):
         self.perplexities = dict()
-        self.catprobs = dict()
+        self.condprobs = dict()
+        catpriors_tmp = dict()
 
         baseline = morfessor.BaselineModel()
         io = morfessor.MorfessorIO(encoding='latin-1')
@@ -40,9 +41,12 @@ class TestProbabilityEstimation(unittest.TestCase):
         pattern_quoted = r'"([^"]*)"'
         ppl_re = re.compile(r'^#Features\(' + pattern_quoted + r'\)\s+' +
             pattern_float + r'\s+' + pattern_float + r'\s+' + pattern_int)
-        catprob_re = re.compile(r'^#P\(Tag\|' + pattern_quoted + r'\)\s+' +
+        condprobs_re = re.compile(r'^#P\(Tag\|' + pattern_quoted + r'\)\s+' +
             pattern_float + r'\s+' + pattern_float + r'\s+' +
             pattern_float + r'\s+' + pattern_float)
+        catpriors_re = re.compile(r'^#PTag\(' + pattern_quoted + r'\)\s+' +
+                                  pattern_float)
+        
 
         for line in comments_io._read_text_file(REFERENCE_PROBS):
             m = ppl_re.match(line)
@@ -50,12 +54,18 @@ class TestProbabilityEstimation(unittest.TestCase):
                 self.perplexities[m.group(1)] = (float(m.group(2)),
                                                  float(m.group(3)),
                                                  int(m.group(4)))
-            m = catprob_re.match(line)
+            m = condprobs_re.match(line)
             if m:
-                self.catprobs[m.group(1)] = (float(m.group(2)),
+                self.condprobs[m.group(1)] = (float(m.group(2)),
                                              float(m.group(3)),
                                              float(m.group(4)),
                                              float(m.group(5)))
+
+            m = catpriors_re.match(line)
+            if m:
+                catpriors_tmp[m.group(1)] = float(m.group(2))
+        self.catpriors = catmap.CatProbs(*(catpriors_tmp[x] for x in
+                                           catmap.CatProbs._fields))
 
     def test_perplexities(self):
         for morph in self.perplexities:
@@ -73,20 +83,25 @@ class TestProbabilityEstimation(unittest.TestCase):
             # checking lenght of morph is useless,
             # when we know it already was found
 
-    def test_catprobs(self):
-        for morph in self.catprobs:
-            reference = self.catprobs[morph]
-            if morph not in self.model.catprobs:
+    def test_condprobs(self):
+        for morph in self.condprobs:
+            reference = self.condprobs[morph]
+            if morph not in self.model.condprobs:
                 raise KeyError('%s not in observed morphs' % (morph,))
-            observed = self.model.catprobs[morph]
+            observed = self.model.condprobs[morph]
             msg = 'P(%s | "%s"), %s not almost equal to %s'
 
             for (i, category) in enumerate(catmap.CatProbs._fields):
                 self.assertAlmostEqual(observed[i], reference[i], places=9,
                     msg=msg % (category, morph, observed[i], reference[i]))
 
-    #def test_classprobs(self):
-    #    pass
+    def test_catpriors(self):
+        for (i, category) in enumerate(catmap.CatProbs._fields):
+            reference = self.catpriors
+            observed = self.model.catpriors
+            msg = 'P(%s), %s not almost equal to %s'
+            self.assertAlmostEqual(observed[i], reference[i], places=9,
+                msg=msg % (category, observed[i], reference[i]))
 
     #def test_posteriors(self):
     #    pass

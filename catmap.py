@@ -43,8 +43,9 @@ class MorphContext:
     @staticmethod
     def _perplexity(contexts):
         entropy = 0
+        total_tokens = float(sum(contexts.values()))
         for c in contexts:
-            p = float(contexts[c]) / float(len(contexts))
+            p = float(contexts[c]) / total_tokens
             entropy -= p * math.log(p)
         return math.exp(entropy)
 
@@ -65,7 +66,7 @@ class ClassProbs:
             self.probs[i] += freq * float(x)
 
     def get(self):
-        return CatProbs(self.probs)
+        return CatProbs(*self.probs)
 
 
 class CatmapModel:
@@ -74,10 +75,12 @@ class CatmapModel:
     word_boundary = object()
 
     def __init__(self, ppl_treshold=100, ppl_slope=None, length_treshold=3,
-                 length_slope=2):
+                 length_slope=2, use_word_tokens=True, min_perplexity_length=4):
         self.ppl_treshold = float(ppl_treshold)
         self.length_treshold = float(length_treshold)
         self.length_slope = float(length_slope)
+        self.use_word_tokens = bool(use_word_tokens)
+        self.min_perplexity_length = int(min_perplexity_length)
         if ppl_slope is not None:
             self.ppl_slope = float(ppl_slope)
         else:
@@ -87,29 +90,45 @@ class CatmapModel:
         self.contexts = collections.defaultdict(MorphContext)
         total_morph_tokens = 0
         for rcount, segments in segmentations:
+            if not self.use_word_tokens:
+                rcount = 1
             total_morph_tokens += len(segments)
             for (i, morph) in enumerate(segments):
                 if i == 0:
                     neighbour = CatmapModel.word_boundary
                 else:
                     neighbour = segments[i - 1]
-                self.contexts[morph].left[neighbour] += rcount
+                    if len(neighbour) < self.min_perplexity_length:
+                        neighbour = None
+                if neighbour is not None:
+                    self.contexts[morph].left[neighbour] += rcount
+
                 if i == len(segments) - 1:
-                    neighbour = segments[i - 1]
-                else:
                     neighbour = CatmapModel.word_boundary
-                self.contexts[morph].right[neighbour] += rcount
+                else:
+                    neighbour = segments[i + 1]
+                    if len(neighbour) < self.min_perplexity_length:
+                        neighbour = None
+                if neighbour is not None:
+                    self.contexts[morph].right[neighbour] += rcount
+
                 self.contexts[morph].rcount += rcount
 
         classprobs = ClassProbs(total_morph_tokens)
-        for morph in self.contexts:
-            catprobs = self._contextToProbability(morph, self.contexts[morph])
+        for morph in sorted(self.contexts, cmp=lambda x, y: len(x) < len(y)):
+            catprobs = self._contextToPrior(morph, self.contexts[morph])
             # Scale by frequency and accumulate elementwise
             classprobs.add(self.contexts[morph].rcount, catprobs)
-            print("%s: %s" % (morph, catprobs))         # FIXME debug
-        print("classprobs: %s" % (classprobs.probs,))   # FIXME debug
+            print(u'#P(Tag|"{0:s}")\t{1:.10f}\t{2:.10f}\t{3:.10f}\t{4:.10f}'.format(morph, *catprobs))  # FIXME debug
+        tmp = classprobs.get()
+        print('#PTag("PRE")\t{0:.10f}'.format(tmp.PRE))   # FIXME debug
+        print('#PTag("STM")\t{0:.10f}'.format(tmp.STM))   # FIXME debug
+        print('#PTag("SUF")\t{0:.10f}'.format(tmp.SUF))   # FIXME debug
+        print('#PTag("ZZZ")\t{0:.10f}'.format(tmp.ZZZ))   # FIXME debug
 
-    def _contextToProbability(self, morph, context):
+    def _contextToPrior(self, morph, context):
+        crap = u'#Features("{0:s}")\t{1:.4f}\t{2:.4f}\t{3:d}'.format(morph, context.right_perplexity, context.left_perplexity, len(morph)) # FIXME debug
+        print(crap) # FIXME debug
         prelike = sigmoid(context.right_perplexity, self.ppl_treshold,
                             self.ppl_slope)
         suflike = sigmoid(context.left_perplexity, self.ppl_treshold,
@@ -138,3 +157,22 @@ class CatmapModel:
 
 def sigmoid(value, treshold, slope):
     return 1.0 / (1.0 + math.exp(-slope * (value - treshold)))
+
+
+def debug_trainbaseline():
+    baseline = morfessor.BaselineModel()
+    io = morfessor.MorfessorIO(encoding='latin-1')
+    data = io.read_corpus_list_file('mydata.gz')
+    c = baseline.load_data(data)
+    e, c = baseline.train_batch('recursive')
+    return baseline
+
+# FIXME temporary rough test against old morfessor
+
+baseline = morfessor.BaselineModel()
+io = morfessor.MorfessorIO(encoding='latin-1')
+
+baseline.load_segmentations(io.read_segmentation_file('/akulabra/home/t40511/sgronroo/Downloads/morfessor_catmap0.9.2/train/baselineseg.final.gz'))
+model = CatmapModel(ppl_treshold=10, ppl_slope=1, length_treshold=3, length_slope=2, use_word_tokens=False)
+model.load_baseline(baseline.get_segmentations())
+

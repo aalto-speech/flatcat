@@ -119,8 +119,9 @@ class CatmapModel:
                 self.contexts[morph].rcount += rcount
 
         class Marginalizer:
-            """An accumulator for marginalizing the class probabilities P(Category)
-            from all the individual conditional probabilities P(Category|Morph)
+            """An accumulator for marginalizing the class probabilities
+            P(Category) from all the individual conditional probabilities
+            P(Category|Morph)
             """
 
             def __init__(self, total_morph_tokens):
@@ -134,11 +135,10 @@ class CatmapModel:
 
             def normalize(self):
                 total = float(sum(self.probs))
-                self.probs = [ x / total for x in self.probs ]
+                self.probs = [x / total for x in self.probs]
 
             def get(self):
                 return CatProbs(*self.probs)
-
 
         # Calculate conditional probabilities from the encountered contexts
         classprobs = Marginalizer(total_morph_tokens)

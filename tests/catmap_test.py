@@ -46,7 +46,6 @@ class TestProbabilityEstimation(unittest.TestCase):
             pattern_float + r'\s+' + pattern_float)
         catpriors_re = re.compile(r'^#PTag\(' + pattern_quoted + r'\)\s+' +
                                   pattern_float)
-        
 
         for line in comments_io._read_text_file(REFERENCE_PROBS):
             m = ppl_re.match(line)

@@ -3,6 +3,8 @@
 Morfessor 2.0 Categories-MAP variant.
 """
 
+__all__ = ['CatmapIO', 'CatmapModel']
+
 import collections
 import logging
 import math
@@ -14,6 +16,7 @@ _logger = logging.getLogger(__name__)
 
 class CatmapIO(morfessor.MorfessorIO):
     """Extends data file formats to include category tags."""
+    # FIXME unimplemented
 
     def __init__(self, encoding=None, construction_separator=' + ',
                  comment_start='#', compound_separator='\s+',
@@ -27,6 +30,10 @@ class CatmapIO(morfessor.MorfessorIO):
 
 
 class MorphContext:
+    """Represents the different contexts in which a morph has been
+    encountered.
+    """
+
     def __init__(self):
         self.rcount = 0
         self.left = collections.defaultdict(int)
@@ -54,13 +61,15 @@ CatProbs = collections.namedtuple('CatProbs', ['PRE', 'STM', 'SUF', 'ZZZ'])
 
 
 class ClassProbs:
+    """An accumulator for marginalizing the class probabilities P(Category)
+    from all the individual conditional probabilities P(Category|Morph)
+    """
+
     def __init__(self, total_morph_tokens):
         self.total_morph_tokens = float(total_morph_tokens)
-        self.probs = None
+        self.probs = [0.0] * len(CatProbs._fields)
 
     def add(self, rcount, catprobs):
-        if self.probs is None:
-            self.probs = [0.0] * len(catprobs)
         freq = float(rcount) / self.total_morph_tokens
         for i, x in enumerate(catprobs):
             self.probs[i] += freq * float(x)
@@ -75,7 +84,8 @@ class CatmapModel:
     word_boundary = object()
 
     def __init__(self, ppl_treshold=100, ppl_slope=None, length_treshold=3,
-                 length_slope=2, use_word_tokens=True, min_perplexity_length=4):
+                 length_slope=2, use_word_tokens=True,
+                 min_perplexity_length=4):
         self.ppl_treshold = float(ppl_treshold)
         self.length_treshold = float(length_treshold)
         self.length_slope = float(length_slope)
@@ -87,9 +97,18 @@ class CatmapModel:
             self.ppl_slope = 10.0 / self.ppl_treshold
 
     def load_baseline(self, segmentations):
+        """Initialize the model using the segmentation produced by a morfessor
+        baseline model.
+
+        Initialization is required before the model is ready for the Cat-MAP
+        learning.
+        """
         self.contexts = collections.defaultdict(MorphContext)
+        self.catprobs = dict()
         total_morph_tokens = 0
+
         for rcount, segments in segmentations:
+            # Collect information about the contexts in which the morphs occur
             if not self.use_word_tokens:
                 rcount = 1
             total_morph_tokens += len(segments)
@@ -114,21 +133,20 @@ class CatmapModel:
 
                 self.contexts[morph].rcount += rcount
 
+        # Calculate probabilities based on the encountered contexts
         classprobs = ClassProbs(total_morph_tokens)
         for morph in sorted(self.contexts, cmp=lambda x, y: len(x) < len(y)):
-            catprobs = self._contextToPrior(morph, self.contexts[morph])
-            # Scale by frequency and accumulate elementwise
-            classprobs.add(self.contexts[morph].rcount, catprobs)
-            print(u'#P(Tag|"{0:s}")\t{1:.10f}\t{2:.10f}\t{3:.10f}\t{4:.10f}'.format(morph, *catprobs))  # FIXME debug
+            self.catprobs[morph] = self._contextToProbability(morph,
+                self.contexts[morph])
+            # Marginalize (scale by frequency and accumulate elementwise)
+            classprobs.add(self.contexts[morph].rcount, self.catprobs[morph])
         tmp = classprobs.get()
-        print('#PTag("PRE")\t{0:.10f}'.format(tmp.PRE))   # FIXME debug
-        print('#PTag("STM")\t{0:.10f}'.format(tmp.STM))   # FIXME debug
-        print('#PTag("SUF")\t{0:.10f}'.format(tmp.SUF))   # FIXME debug
-        print('#PTag("ZZZ")\t{0:.10f}'.format(tmp.ZZZ))   # FIXME debug
 
-    def _contextToPrior(self, morph, context):
-        crap = u'#Features("{0:s}")\t{1:.4f}\t{2:.4f}\t{3:d}'.format(morph, context.right_perplexity, context.left_perplexity, len(morph)) # FIXME debug
-        print(crap) # FIXME debug
+    def _contextToProbability(self, morph, context):
+        """Calculate conditional probabilities P(Category|Morph) from the
+        contexts in which the morphs occur.
+        """
+
         prelike = sigmoid(context.right_perplexity, self.ppl_treshold,
                             self.ppl_slope)
         suflike = sigmoid(context.left_perplexity, self.ppl_treshold,
@@ -159,6 +177,8 @@ def sigmoid(value, treshold, slope):
     return 1.0 / (1.0 + math.exp(-slope * (value - treshold)))
 
 
+# Temporary helper function for my common testing setup
+# FIXME: remove when command-line configurable main function is written
 def debug_trainbaseline():
     baseline = morfessor.BaselineModel()
     io = morfessor.MorfessorIO(encoding='latin-1')
@@ -166,13 +186,3 @@ def debug_trainbaseline():
     c = baseline.load_data(data)
     e, c = baseline.train_batch('recursive')
     return baseline
-
-# FIXME temporary rough test against old morfessor
-
-baseline = morfessor.BaselineModel()
-io = morfessor.MorfessorIO(encoding='latin-1')
-
-baseline.load_segmentations(io.read_segmentation_file('/akulabra/home/t40511/sgronroo/Downloads/morfessor_catmap0.9.2/train/baselineseg.final.gz'))
-model = CatmapModel(ppl_treshold=10, ppl_slope=1, length_treshold=3, length_slope=2, use_word_tokens=False)
-model.load_baseline(baseline.get_segmentations())
-

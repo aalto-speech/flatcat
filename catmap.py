@@ -58,6 +58,7 @@ class MorphContext:
 
 
 CatProbs = collections.namedtuple('CatProbs', ['PRE', 'STM', 'SUF', 'ZZZ'])
+ProbN = collections.namedtuple('ProbN', ['PROB', 'N'])
 
 
 class CatmapModel:
@@ -98,8 +99,12 @@ class CatmapModel:
         learning.
         """
         total_morph_tokens = 0
+        num_word_types = 0
+        num_word_tokens = 0
 
         for rcount, segments in segmentations:
+            num_word_types += 1
+            num_word_tokens += rcount
             # Collect information about the contexts in which the morphs occur
             if self._use_word_tokens:
                 pcount = rcount
@@ -144,24 +149,29 @@ class CatmapModel:
                     self.probs[i] += float(rcount) * float(x)
 
             def normalized(self):
-                total = sum(self.probs)
+                total = self.total_token_count
                 return CatProbs(*[x / total for x in self.probs])
 
-            def get(self):
+            @property
+            def total_token_count(self):
+                return sum(self.probs)
+
+            @property
+            def category_token_count(self):
                 return CatProbs(*self.probs)
 
         # Calculate conditional probabilities from the encountered contexts
-        classprobs = Marginalizer()
+        marginalizer = Marginalizer()
         for morph in sorted(self._contexts, cmp=lambda x, y: len(x) < len(y)):
-            self._condprobs[morph] = self._contextToProbability(morph,
+            self._condprobs[morph] = self._context_to_probability(morph,
                 self._contexts[morph])
             # Marginalize (scale by frequency and accumulate elementwise)
-            classprobs.add(self._contexts[morph].rcount,
+            marginalizer.add(self._contexts[morph].rcount,
                            self._condprobs[morph])
-        self._catpriors = classprobs.normalized()
+        self._catpriors = marginalizer.normalized()
 
         # Calculate posterior emission probabilities
-        category_totals = classprobs.get()
+        category_totals = marginalizer.category_token_count
         for morph in self._contexts:
             tmp = []
             for (i, total) in enumerate(category_totals):
@@ -169,7 +179,10 @@ class CatmapModel:
                            self._contexts[morph].rcount / category_totals[i])
             self._emissionprobs[morph] = CatProbs(*tmp)
 
-    def _contextToProbability(self, morph, context):
+        self._transitionprobs = CatmapModel._unigram_transition_probabilities(
+            category_totals, num_word_tokens)
+
+    def _context_to_probability(self, morph, context):
         """Calculate conditional probabilities P(Category|Morph) from the
         contexts in which the morphs occur.
         """
@@ -198,6 +211,45 @@ class CatmapModel:
             p_stm = 1.0 - p_pre - p_suf - p_nonmorpheme
 
         return CatProbs(p_pre, p_stm, p_suf, p_nonmorpheme)
+
+    @staticmethod
+    def _unigram_transition_probabilities(category_token_count,
+                                          num_word_tokens):
+        """Initial transition probabilities based on unigram distribution
+
+        Each tag is presumed to be succeeded by the expectation over all data
+        of the number of prefixes, suffixes, stems, non-morphemes and word
+        boundaries.
+        """
+
+        wb = CatmapModel.word_boundary
+        zeros = ((wb, wb), ('PRE', wb), ('PRE', 'SUF'), (wb, 'SUF'))
+
+        transitions = dict()
+        nclass = {wb: num_word_tokens}
+        for (i, category) in enumerate(CatProbs._fields):
+            nclass[category] = float(category_token_count[i])
+
+        num_tokens_tagged = collections.defaultdict(int)
+        for cat1 in nclass:
+            for cat2 in nclass:
+                if (cat1, cat2) in zeros:
+                    continue
+                # count all possible valid transitions
+                num_tokens_tagged[cat1] += nclass[cat2]
+
+        for cat1 in nclass:
+            for cat2 in nclass:
+                if (cat1, cat2) in zeros:
+                    continue
+                transitions[(cat1, cat2)] = ProbN(nclass[cat2] /
+                                                  num_tokens_tagged[cat1],
+                                                  nclass[cat2])
+
+        for pair in zeros:
+            transitions[pair] = ProbN(0.0, 0)
+
+        return transitions
 
 
 def sigmoid(value, treshold, slope):

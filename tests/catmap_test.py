@@ -22,6 +22,7 @@ class TestProbabilityEstimation(unittest.TestCase):
         self.perplexities = dict()
         self.condprobs = dict()
         self.posteriors = dict()
+        self.transitions = dict()
         catpriors_tmp = dict()
 
         baseline = morfessor.BaselineModel()
@@ -37,8 +38,8 @@ class TestProbabilityEstimation(unittest.TestCase):
         comments_io = morfessor.MorfessorIO(encoding='latin-1',
                                             comment_start='++++++++++')
 
-        pattern_float = r'([0-9.]*)'
-        pattern_int = r'([0-9]*)'
+        pattern_float = r'([0-9.]+)'
+        pattern_int = r'([0-9]+)'
         pattern_quoted = r'"([^"]*)"'
         ppl_re = re.compile(r'^#Features\(' + pattern_quoted + r'\)\s+' +
             pattern_float + r'\s+' + pattern_float + r'\s+' + pattern_int)
@@ -50,6 +51,8 @@ class TestProbabilityEstimation(unittest.TestCase):
         posteriors_re = re.compile(r'^(\S*)\s+' +
             pattern_float + r'\s+' + pattern_float + r'\s+' +
             pattern_float + r'\s+' + pattern_float)
+        transitions_re = re.compile(r'^P\((\S+) .. ([^\)]+)\) = ' +
+             pattern_float + r' \(N = ' + pattern_int + '\)')
 
         for line in comments_io._read_text_file(REFERENCE_PROBS):
             m = ppl_re.match(line)
@@ -78,6 +81,17 @@ class TestProbabilityEstimation(unittest.TestCase):
                     float(m.group(2)), float(m.group(3)),
                     float(m.group(4)), float(m.group(5)))
                 continue
+
+            m = transitions_re.match(line)
+            if m:
+                def _tr_wb(x):
+                    if x == '#':
+                        return catmap.CatmapModel.word_boundary
+                    else:
+                        return x
+
+                cats = tuple([_tr_wb(x) for x in (m.group(1), m.group(2))])
+                self.transitions[cats] = (float(m.group(3)), int(m.group(4)))
 
         self.catpriors = catmap.CatProbs(*(catpriors_tmp[x] for x in
                                            catmap.CatProbs._fields))
@@ -129,6 +143,21 @@ class TestProbabilityEstimation(unittest.TestCase):
             for (i, category) in enumerate(catmap.CatProbs._fields):
                 self.assertAlmostEqual(observed[i], reference[i], places=9,
                     msg=msg % (morph, category, observed[i], reference[i]))
+
+    def test_transitions(self):
+        categories = list(catmap.CatProbs._fields)
+        categories.append(catmap.CatmapModel.word_boundary)
+        msg = 'P(%s -> %s), %s not almost equal to %s'
+        reference = self.transitions
+        observed = self.model._transitionprobs
+        for cat1 in categories:
+            for cat2 in categories:
+                pair = (cat1, cat2)
+                self.assertAlmostEqual(observed[pair][0], reference[pair][0],
+                                       places=9,
+                                       msg=msg % (cat1, cat2,
+                                                  observed[pair][0],
+                                                  reference[pair][0]))
 
 if __name__ == '__main__':
     unittest.main()

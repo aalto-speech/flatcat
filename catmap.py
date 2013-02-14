@@ -87,6 +87,7 @@ class CatmapModel:
         """
         self.contexts = collections.defaultdict(MorphContext)
         self.condprobs = dict()
+        self.emissionprobs = dict()
         total_morph_tokens = 0
 
         for rcount, segments in segmentations:
@@ -99,9 +100,11 @@ class CatmapModel:
             total_morph_tokens += len(segments)
             for (i, morph) in enumerate(segments):
                 if i == 0:
+                    # word boundaries are counted as separate contexts
                     neighbour = CatmapModel.word_boundary
                 else:
                     neighbour = segments[i - 1]
+                    # contexts shorter than treshold don't affect perplexity
                     if len(neighbour) < self.min_perplexity_length:
                         neighbour = None
                 if neighbour is not None:
@@ -124,31 +127,37 @@ class CatmapModel:
             P(Category|Morph)
             """
 
-            def __init__(self, total_morph_tokens):
-                self.total_morph_tokens = float(total_morph_tokens)
+            def __init__(self):
                 self.probs = [0.0] * len(CatProbs._fields)
 
             def add(self, rcount, condprobs):
-                freq = float(rcount) / self.total_morph_tokens
                 for i, x in enumerate(condprobs):
-                    self.probs[i] += freq * float(x)
+                    self.probs[i] += float(rcount) * float(x)
 
-            def normalize(self):
-                total = float(sum(self.probs))
-                self.probs = [x / total for x in self.probs]
+            def normalized(self):
+                total = sum(self.probs)
+                return CatProbs(*[x / total for x in self.probs])
 
             def get(self):
                 return CatProbs(*self.probs)
 
         # Calculate conditional probabilities from the encountered contexts
-        classprobs = Marginalizer(total_morph_tokens)
+        classprobs = Marginalizer()
         for morph in sorted(self.contexts, cmp=lambda x, y: len(x) < len(y)):
             self.condprobs[morph] = self._contextToProbability(morph,
                 self.contexts[morph])
             # Marginalize (scale by frequency and accumulate elementwise)
             classprobs.add(self.contexts[morph].rcount, self.condprobs[morph])
-        classprobs.normalize()
-        self.catpriors = classprobs.get()
+        self.catpriors = classprobs.normalized()
+
+        # Calculate posterior emission probabilities
+        category_totals = classprobs.get()
+        for morph in self.contexts:
+            tmp = []
+            for (i, total) in enumerate(category_totals):
+                tmp.append(self.condprobs[morph][i] *
+                           self.contexts[morph].rcount / category_totals[i])
+            self.emissionprobs[morph] = CatProbs(*tmp)
 
     def _contextToProbability(self, morph, context):
         """Calculate conditional probabilities P(Category|Morph) from the
@@ -156,11 +165,11 @@ class CatmapModel:
         """
 
         prelike = sigmoid(context.right_perplexity, self.ppl_treshold,
-                            self.ppl_slope)
+                          self.ppl_slope)
         suflike = sigmoid(context.left_perplexity, self.ppl_treshold,
-                            self.ppl_slope)
+                          self.ppl_slope)
         stmlike = sigmoid(len(morph), self.length_treshold,
-                            self.length_slope)
+                          self.length_slope)
 
         p_nonmorpheme = (1. - prelike) * (1. - suflike) * (1. - stmlike)
 

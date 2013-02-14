@@ -85,9 +85,9 @@ class TestProbabilityEstimation(unittest.TestCase):
     def test_perplexities(self):
         for morph in self.perplexities:
             reference = self.perplexities[morph]
-            if morph not in self.model.contexts:
+            if morph not in self.model._contexts:
                 raise KeyError('%s not in observed morphs' % (morph,))
-            observed = self.model.contexts[morph]
+            observed = self.model._contexts[morph]
             msg = '%s perplexity of %s, %s not almost equal to %s'
             tmp = observed.right_perplexity
             self.assertAlmostEqual(tmp, reference[0], places=3,
@@ -101,9 +101,9 @@ class TestProbabilityEstimation(unittest.TestCase):
     def test_condprobs(self):
         for morph in self.condprobs:
             reference = self.condprobs[morph]
-            if morph not in self.model.condprobs:
+            if morph not in self.model._condprobs:
                 raise KeyError('%s not in observed morphs' % (morph,))
-            observed = self.model.condprobs[morph]
+            observed = self.model._condprobs[morph]
             msg = 'P(%s | "%s"), %s not almost equal to %s'
 
             for (i, category) in enumerate(catmap.CatProbs._fields):
@@ -113,7 +113,7 @@ class TestProbabilityEstimation(unittest.TestCase):
     def test_catpriors(self):
         for (i, category) in enumerate(catmap.CatProbs._fields):
             reference = self.catpriors
-            observed = self.model.catpriors
+            observed = self.model._catpriors
             msg = 'P(%s), %s not almost equal to %s'
             self.assertAlmostEqual(observed[i], reference[i], places=9,
                 msg=msg % (category, observed[i], reference[i]))
@@ -121,9 +121,9 @@ class TestProbabilityEstimation(unittest.TestCase):
     def test_posterior_emission_probs(self):
         for morph in self.posteriors:
             reference = self.posteriors[morph]
-            if morph not in self.model.emissionprobs:
+            if morph not in self.model._emissionprobs:
                 raise KeyError('%s not in observed morphs' % (morph,))
-            observed = self.model.emissionprobs[morph]
+            observed = self.model._emissionprobs[morph]
             msg = 'P(%s | "%s"), %s not almost equal to %s'
 
             for (i, category) in enumerate(catmap.CatProbs._fields):

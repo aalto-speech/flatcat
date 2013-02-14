@@ -292,7 +292,8 @@ class CatmapModel:
         # This function uses internally indices of categories,
         # instead of names and the word boundary object,
         # to remove the need to look them up constantly.
-        categories = list(catmap.CatProbs._fields) + [CatmapModel.word_boundary]
+        categories = list(catmap.CatProbs._fields)
+        categories.append(CatmapModel.word_boundary)
         # Last category is word boundary.
         wb = num_categories - 1
 
@@ -304,16 +305,15 @@ class CatmapModel:
 
         # Probability one that first state is a word boundary
         delta[wb] = 0
-        
+
         for (i, morph) in enumerate(segments):
             for next_cat in range(len(categories) - 1):
                 for prev_cat in range(len(categories)):
                     name_pair = (categories[prev_cat], categories[next_cat])
-                    cost = delta[prev_tag] +
-                           self._log_transitionprobs(name_pair) +
-                           self._log_emissionprobs[morph][next_cat]
+                    cost = (delta[prev_tag] +
+                            self._log_transitionprobs(name_pair) +
+                            self._log_emissionprobs[morph][next_cat])
                     # FIXME half-implemented
-
 
 
 def sigmoid(value, treshold, slope):

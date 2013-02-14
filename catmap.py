@@ -65,15 +65,35 @@ class CatmapModel:
     """Morfessor Categories-MAP model class."""
 
     word_boundary = object()
+    logprobzero = 1000
 
     def __init__(self, ppl_treshold=100, ppl_slope=None, length_treshold=3,
                  length_slope=2, use_word_tokens=True,
-                 min_perplexity_length=4):
+                 min_perplexity_length=4, transition_cutoff=0.00000000001):
+        """Initialize a new model instance.
+
+        Arguments:
+            ppl_treshold -- Treshold value for sigmoid used to calculate
+                            probabilities from left and right perplexities.
+            ppl_slope -- Slope value for sigmoid used to calculate
+                         probabilities from left and right perplexities.
+            length_treshold -- Treshold value for sigmoid used to calculate
+                               probabilities from length of morph.
+            length_slope -- Slope value for sigmoid used to calculate
+                            probabilities from length of morph.
+            use_word_tokens -- If true, perplexity is based on word tokens.
+                               If false, perplexity is based on word types.
+            min_perplexity_length -- Morphs shorter than this length are
+                                     ignored when calculating perplexity.
+            transition_cutoff -- FIXME
+        """
+
         self._ppl_treshold = float(ppl_treshold)
         self._length_treshold = float(length_treshold)
         self._length_slope = float(length_slope)
         self._use_word_tokens = bool(use_word_tokens)
         self._min_perplexity_length = int(min_perplexity_length)
+        self._transition_cutoff = float(transition_cutoff)
         if ppl_slope is not None:
             self._ppl_slope = float(ppl_slope)
         else:
@@ -82,14 +102,20 @@ class CatmapModel:
         # Counts of different contexts in which a morph occurs
         self._contexts = collections.defaultdict(MorphContext)
 
-        # Conditional probabilities P(Category|Morph)
+        # Conditional probabilities P(Category|Morph).
+        # A dict of CatProbs objects.
         self._condprobs = dict()
 
-        # Priors for categories P(Category)
-        self_catpriors = None
+        # Priors for categories P(Category). Single CatProbs object.
+        self._catpriors = None
 
-        # Posterior emission probabilities P(Morph|Category)
+        # Posterior emission probabilities P(Morph|Category).
+        # A dict of CatProbs objects.
         self._emissionprobs = dict()
+
+        # Probabilities of transition between categories.
+        #P(Category -> Category). A dict of ProbN objects.
+        self._transitionprobs = dict()
 
     def load_baseline(self, segmentations):
         """Initialize the model using the segmentation produced by a morfessor
@@ -97,6 +123,10 @@ class CatmapModel:
 
         Initialization is required before the model is ready for the Cat-MAP
         learning.
+
+        Arguments:
+            segmentations -- Segmentation of corpus using the baseline method.
+                             Format: (count, (morph1, morph2, ...))
         """
         total_morph_tokens = 0
         num_word_types = 0
@@ -142,23 +172,29 @@ class CatmapModel:
             """
 
             def __init__(self):
-                self.probs = [0.0] * len(CatProbs._fields)
+                self._counts = [0.0] * len(CatProbs._fields)
 
             def add(self, rcount, condprobs):
+                """Add the conditional probabilities P(Category|Morph)
+                for one observed morph. Once all observed morphs have been
+                added, the marginalization is complete."""
                 for i, x in enumerate(condprobs):
-                    self.probs[i] += float(rcount) * float(x)
+                    self._counts[i] += float(rcount) * float(x)
 
             def normalized(self):
+                """Returns the marginal probabilities for all categories."""
                 total = self.total_token_count
-                return CatProbs(*[x / total for x in self.probs])
+                return CatProbs(*[x / total for x in self._counts])
 
             @property
             def total_token_count(self):
-                return sum(self.probs)
+                """Total number of tokens seen."""
+                return sum(self._counts)
 
             @property
             def category_token_count(self):
-                return CatProbs(*self.probs)
+                """Tokens seen per category."""
+                return CatProbs(*self._counts)
 
         # Calculate conditional probabilities from the encountered contexts
         marginalizer = Marginalizer()

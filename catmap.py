@@ -288,6 +288,33 @@ class CatmapModel:
 
         return transitions
 
+    def viterbi_tag(self, segments):
+        # This function uses internally indices of categories,
+        # instead of names and the word boundary object,
+        # to remove the need to look them up constantly.
+        categories = list(catmap.CatProbs._fields) + [CatmapModel.word_boundary]
+        # Last category is word boundary.
+        wb = num_categories - 1
+
+        # The lowest accumulated cost ending in each possible state.
+        # Initialized to pseudo-zero for all states
+        delta = [LOGPROB_ZERO] * len(categories)
+        # Back pointers that indicate the best path
+        psi = [[wb] * len(categories)]
+
+        # Probability one that first state is a word boundary
+        delta[wb] = 0
+        
+        for (i, morph) in enumerate(segments):
+            for next_cat in range(len(categories) - 1):
+                for prev_cat in range(len(categories)):
+                    name_pair = (categories[prev_cat], categories[next_cat])
+                    cost = delta[prev_tag] +
+                           self._log_transitionprobs(name_pair) +
+                           self._log_emissionprobs[morph][next_cat]
+                    # FIXME half-implemented
+
+
 
 def sigmoid(value, treshold, slope):
     return 1.0 / (1.0 + math.exp(-slope * (value - treshold)))

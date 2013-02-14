@@ -13,6 +13,8 @@ import morfessor
 
 _logger = logging.getLogger(__name__)
 
+LOGPROB_ZERO = 1000
+
 
 class CatmapIO(morfessor.MorfessorIO):
     """Extends data file formats to include category tags."""
@@ -65,7 +67,6 @@ class CatmapModel:
     """Morfessor Categories-MAP model class."""
 
     word_boundary = object()
-    logprobzero = 1000
 
     def __init__(self, ppl_treshold=100, ppl_slope=None, length_treshold=3,
                  length_slope=2, use_word_tokens=True,
@@ -103,19 +104,20 @@ class CatmapModel:
         self._contexts = collections.defaultdict(MorphContext)
 
         # Conditional probabilities P(Category|Morph).
-        # A dict of CatProbs objects.
+        # A dict of CatProbs objects. Actual probabilities.
         self._condprobs = dict()
 
-        # Priors for categories P(Category). Single CatProbs object.
-        self._catpriors = None
+        # Priors for categories P(Category).
+        # Single CatProbs object. Log-probabilities.
+        self._log_catpriors = None
 
         # Posterior emission probabilities P(Morph|Category).
-        # A dict of CatProbs objects.
-        self._emissionprobs = dict()
+        # A dict of CatProbs objects. Log-probabilities.
+        self._log_emissionprobs = dict()
 
         # Probabilities of transition between categories.
-        #P(Category -> Category). A dict of ProbN objects.
-        self._transitionprobs = dict()
+        #P(Category -> Category). A dict of ProbN objects. Log-probabilities.
+        self._log_transitionprobs = dict()
 
     def load_baseline(self, segmentations):
         """Initialize the model using the segmentation produced by a morfessor
@@ -204,7 +206,7 @@ class CatmapModel:
             # Marginalize (scale by frequency and accumulate elementwise)
             marginalizer.add(self._contexts[morph].rcount,
                            self._condprobs[morph])
-        self._catpriors = marginalizer.normalized()
+        self._catpriors = _log_catprobs(marginalizer.normalized())
 
         # Calculate posterior emission probabilities
         category_totals = marginalizer.category_token_count
@@ -213,9 +215,9 @@ class CatmapModel:
             for (i, total) in enumerate(category_totals):
                 tmp.append(self._condprobs[morph][i] *
                            self._contexts[morph].rcount / category_totals[i])
-            self._emissionprobs[morph] = CatProbs(*tmp)
+            self._log_emissionprobs[morph] = _log_catprobs(CatProbs(*tmp))
 
-        self._transitionprobs = CatmapModel._unigram_transition_probabilities(
+        self._log_transitionprobs = CatmapModel._unigram_transition_probs(
             category_totals, num_word_tokens)
 
     def _context_to_probability(self, morph, context):
@@ -249,8 +251,7 @@ class CatmapModel:
         return CatProbs(p_pre, p_stm, p_suf, p_nonmorpheme)
 
     @staticmethod
-    def _unigram_transition_probabilities(category_token_count,
-                                          num_word_tokens):
+    def _unigram_transition_probs(category_token_count, num_word_tokens):
         """Initial transition probabilities based on unigram distribution
 
         Each tag is presumed to be succeeded by the expectation over all data
@@ -278,18 +279,34 @@ class CatmapModel:
             for cat2 in nclass:
                 if (cat1, cat2) in zeros:
                     continue
-                transitions[(cat1, cat2)] = ProbN(nclass[cat2] /
-                                                  num_tokens_tagged[cat1],
+                transitions[(cat1, cat2)] = ProbN(_zlog(nclass[cat2] /
+                                                  num_tokens_tagged[cat1]),
                                                   nclass[cat2])
 
         for pair in zeros:
-            transitions[pair] = ProbN(0.0, 0)
+            transitions[pair] = ProbN(LOGPROB_ZERO, 0)
 
         return transitions
 
 
 def sigmoid(value, treshold, slope):
     return 1.0 / (1.0 + math.exp(-slope * (value - treshold)))
+
+
+def _zlog(x):
+    """Logarithm which uses constant value for log(0) instead of
+    raising exception"""
+
+    if x == 0:
+        return LOGPROB_ZERO
+    return -math.log(x)
+
+
+def _log_catprobs(probs):
+    """Convenience function to convert a CatProbs object containing actual
+    probabilities into one with log probabilities"""
+
+    return CatProbs(*[_zlog(x) for x in probs])
 
 
 # Temporary helper function for my common testing setup

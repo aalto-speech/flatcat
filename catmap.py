@@ -361,6 +361,7 @@ class CategorizedSegment:
         return (self.segment == other.segment and
                 self.category == other.category)
 
+
 def sigmoid(value, treshold, slope):
     return 1.0 / (1.0 + np.exp(-slope * (value - treshold)))
 

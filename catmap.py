@@ -7,7 +7,7 @@ __all__ = ['CatmapIO', 'CatmapModel']
 
 import collections
 import logging
-import math
+import numpy as np
 
 import morfessor
 
@@ -55,8 +55,8 @@ class MorphContext:
         total_tokens = float(sum(contexts.values()))
         for c in contexts:
             p = float(contexts[c]) / total_tokens
-            entropy -= p * math.log(p)
-        return math.exp(entropy)
+            entropy -= p * np.log(p)
+        return np.exp(entropy)
 
 
 CatProbs = collections.namedtuple('CatProbs', ['PRE', 'STM', 'SUF', 'ZZZ'])
@@ -292,41 +292,83 @@ class CatmapModel:
         # This function uses internally indices of categories,
         # instead of names and the word boundary object,
         # to remove the need to look them up constantly.
-        categories = list(catmap.CatProbs._fields)
+        categories = list(CatProbs._fields)
         categories.append(CatmapModel.word_boundary)
         # Last category is word boundary.
-        wb = num_categories - 1
+        wb = len(categories) - 1
 
         # The lowest accumulated cost ending in each possible state.
         # Initialized to pseudo-zero for all states
-        delta = [LOGPROB_ZERO] * len(categories)
+        delta = LOGPROB_ZERO * np.ones(len(categories))
         # Back pointers that indicate the best path
-        psi = [[wb] * len(categories)]
+        psi = -1 * np.ones((len(segments) + 1,
+                            len(categories)), dtype='int')
+        # First row of back pointers point to word boundary
+        #psi[0] = wb * np.ones(len(categories))
 
         # Probability one that first state is a word boundary
         delta[wb] = 0
+
+        # Cumulative costs for each category at current time step
+        cost = LOGPROB_ZERO * np.ones(len(categories))
+        # Temporaries
+        best_cat = -1 * np.ones(len(categories), dtype='int')
+        best_cost = LOGPROB_ZERO * np.ones(len(categories))
 
         for (i, morph) in enumerate(segments):
             for next_cat in range(len(categories) - 1):
                 for prev_cat in range(len(categories)):
                     name_pair = (categories[prev_cat], categories[next_cat])
-                    cost = (delta[prev_tag] +
-                            self._log_transitionprobs(name_pair) +
-                            self._log_emissionprobs[morph][next_cat])
-                    # FIXME half-implemented
+                    # Cost of selecting prev_cat as previous state
+                    # if now at next_cat
+                    cost[prev_cat] = (delta[prev_cat] +
+                        self._log_transitionprobs[name_pair].PROB +
+                        self._log_emissionprobs[morph][next_cat])
+                best_cat[next_cat] = np.argmin(cost)
+                best_cost[next_cat] = cost[best_cat[next_cat]]
+            # Update delta and psi to prepare for next iteration
+            delta = best_cost
+            psi[i] = best_cat
+            # clear best costs
+            best_cost = LOGPROB_ZERO * np.ones(len(categories))
+
+        # Last transition must be to word boundary
+        for prev_cat in range(len(categories)):
+            name_pair = (categories[prev_cat], CatmapModel.word_boundary)
+            cost[prev_cat] = (delta[prev_cat] +
+                              self._log_transitionprobs[name_pair].PROB)
+            backtrace = np.argmin(cost)
+
+        # Backtrace for the best category sequence
+        result = [CategorizedSegment(segments[-1], categories[backtrace])]
+        for i in range(len(segments) - 1, 0, -1):
+            backtrace = psi[i, backtrace]
+            result.insert(0, CategorizedSegment(segments[i - 1],
+                                                categories[backtrace]))
+
+        return result
+
+
+class CategorizedSegment:
+    def __init__(self, segment, category):
+        self.segment = segment
+        self.category = category
+
+    def __repr__(self):
+        return '%s/%s' % (self.segment, self.category)
 
 
 def sigmoid(value, treshold, slope):
-    return 1.0 / (1.0 + math.exp(-slope * (value - treshold)))
+    return 1.0 / (1.0 + np.exp(-slope * (value - treshold)))
 
 
 def _zlog(x):
-    """Logarithm which uses constant value for log(0) instead of
-    raising exception"""
+    """Logarithm which uses constant value for log(0) instead of -inf"""
+    # FIXME not sure if this is needed anymore when using numpy
 
     if x == 0:
         return LOGPROB_ZERO
-    return -math.log(x)
+    return -np.log(x)
 
 
 def _log_catprobs(probs):
@@ -341,7 +383,18 @@ def _log_catprobs(probs):
 def debug_trainbaseline():
     baseline = morfessor.BaselineModel()
     io = morfessor.MorfessorIO(encoding='latin-1')
-    data = io.read_corpus_list_file('mydata.gz')
-    c = baseline.load_data(data)
-    e, c = baseline.train_batch('recursive')
+    #data = io.read_corpus_list_file('mydata.gz')
+    #c = baseline.load_data(data)
+    #e, c = baseline.train_batch('recursive')
+    baseline.load_segmentations(io.read_segmentation_file(
+        'tests/reference_data/baselineseg.final.gz'))
     return baseline
+
+
+def debug_traincatmap():
+    baseline = debug_trainbaseline()
+    model = CatmapModel(ppl_treshold=10, ppl_slope=1,
+                        length_treshold=3, length_slope=2,
+                        use_word_tokens=False)
+    model.load_baseline(baseline.get_segmentations())
+    return model

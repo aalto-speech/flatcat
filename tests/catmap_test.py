@@ -3,7 +3,7 @@
 Tests for Morfessor 2.0 Categories-MAP variant.
 """
 
-import math
+import numpy as np
 import re
 import unittest
 
@@ -162,7 +162,7 @@ class TestProbabilityEstimation(unittest.TestCase):
 def _zexp(x):
     if x == catmap.LOGPROB_ZERO:
         return 0.0
-    return math.exp(-x)
+    return np.exp(-x)
 
 
 def _exp_catprobs(probs):

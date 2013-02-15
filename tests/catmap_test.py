@@ -16,6 +16,25 @@ REFERENCE_DIR = 'reference_data/'
 REFERENCE_BASELINE_SEGMENTATION = REFERENCE_DIR + 'baselineseg.final.gz'
 # Probabilities estimated from the above baseline segmentation
 REFERENCE_PROBS = REFERENCE_DIR + 'baseline.probs.gz'
+# Initial viterbi tagging
+REFERENCE_BASELINE_TAGGED = REFERENCE_DIR + 'baseline.i.tagged.gz'
+
+
+def _load_baseline():
+        baseline = morfessor.BaselineModel()
+        io = morfessor.MorfessorIO(encoding='latin-1')
+
+        baseline.load_segmentations(io.read_segmentation_file(
+            REFERENCE_BASELINE_SEGMENTATION))
+        return baseline
+
+
+def _load_catmap(baseline):
+        model = catmap.CatmapModel(ppl_treshold=10, ppl_slope=1,
+                                   length_treshold=3, length_slope=2,
+                                   use_word_tokens=False)
+        model.load_baseline(baseline.get_segmentations())
+        return model
 
 
 class TestProbabilityEstimation(unittest.TestCase):
@@ -26,15 +45,8 @@ class TestProbabilityEstimation(unittest.TestCase):
         self.transitions = dict()
         catpriors_tmp = dict()
 
-        baseline = morfessor.BaselineModel()
-        io = morfessor.MorfessorIO(encoding='latin-1')
-
-        baseline.load_segmentations(io.read_segmentation_file(
-            REFERENCE_BASELINE_SEGMENTATION))
-        self.model = catmap.CatmapModel(ppl_treshold=10, ppl_slope=1,
-                                   length_treshold=3, length_slope=2,
-                                   use_word_tokens=False)
-        self.model.load_baseline(baseline.get_segmentations())
+        self.baseline = _load_baseline()
+        self.model = _load_catmap(self.baseline)
 
         comments_io = morfessor.MorfessorIO(encoding='latin-1',
                                             comment_start='++++++++++')
@@ -157,6 +169,41 @@ class TestProbabilityEstimation(unittest.TestCase):
                 self.assertAlmostEqual(obsval, reference[pair][0], places=9,
                                        msg=msg % (cat1, cat2,
                                                   obsval, reference[pair][0]))
+
+
+class TestBaselineSegmentation(unittest.TestCase):
+    def setUp(self):
+        self.baseline = _load_baseline()
+        self.model = _load_catmap(self.baseline)
+
+        io = morfessor.MorfessorIO(encoding='latin-1')
+        line_re = re.compile(r'^[0-9]* (.*)')
+        separator_re = re.compile(r' \+ ')
+        tag_re = re.compile(r'([^/]*)/(.*)')
+
+        self.detagged = []
+        self.references = []
+        for line in io._read_text_file(REFERENCE_BASELINE_TAGGED):
+            m = line_re.match(line)
+            if not m:
+                continue
+            segments = separator_re.split(m.group(1))
+            detagged_tmp = []
+            ref_tmp = []
+            for segment in segments:
+                m = tag_re.match(segment)
+                assert m, 'Could not parse "%s" in "%s"' % (segment, line)
+                ref_tmp.append(catmap.CategorizedSegment(m.group(1), m.group(2)))
+                detagged_tmp.append(m.group(1))
+            self.references.append(ref_tmp)
+            self.detagged.append(detagged_tmp)
+                
+    def test_viterbitag(self):
+        for (reference, tagless) in zip(self.references, self.detagged):
+            observed = self.model.viterbi_tag(tagless)
+            msg = 'crap' #u'"%s" does not match "%s"' % (observed, reference)
+            for (r, o) in zip(reference, observed):
+                self.assertEqual(r, o, msg=msg)
 
 
 def _zexp(x):

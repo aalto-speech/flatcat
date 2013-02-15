@@ -355,8 +355,11 @@ class CategorizedSegment:
         self.category = category
 
     def __repr__(self):
-        return '%s/%s' % (self.segment, self.category)
+        return u'%s/%s' % (self.segment, self.category)
 
+    def __eq__(self, other):
+        return (self.segment == other.segment and
+                self.category == other.category)
 
 def sigmoid(value, treshold, slope):
     return 1.0 / (1.0 + np.exp(-slope * (value - treshold)))
@@ -376,25 +379,3 @@ def _log_catprobs(probs):
     probabilities into one with log probabilities"""
 
     return CatProbs(*[_zlog(x) for x in probs])
-
-
-# Temporary helper function for my common testing setup
-# FIXME: remove when command-line configurable main function is written
-def debug_trainbaseline():
-    baseline = morfessor.BaselineModel()
-    io = morfessor.MorfessorIO(encoding='latin-1')
-    #data = io.read_corpus_list_file('mydata.gz')
-    #c = baseline.load_data(data)
-    #e, c = baseline.train_batch('recursive')
-    baseline.load_segmentations(io.read_segmentation_file(
-        'tests/reference_data/baselineseg.final.gz'))
-    return baseline
-
-
-def debug_traincatmap():
-    baseline = debug_trainbaseline()
-    model = CatmapModel(ppl_treshold=10, ppl_slope=1,
-                        length_treshold=3, length_slope=2,
-                        use_word_tokens=False)
-    model.load_baseline(baseline.get_segmentations())
-    return model

@@ -12,6 +12,7 @@ import numpy as np
 import morfessor
 
 _logger = logging.getLogger(__name__)
+_logger.level = logging.DEBUG   # FIXME development convenience
 
 LOGPROB_ZERO = 1000
 
@@ -102,12 +103,19 @@ class CatmapModel:
         #P(Category -> Category). A dict of ProbN objects. Log-probabilities.
         self._log_transitionprobs = dict()
 
+    def train(self, segmentations):
+        """Perform Cat-MAP training on the model.
+
+        Arguments:
+            segmentations -- Segmentation of corpus using the baseline method.
+                             Format: (count, (morph1, morph2, ...))
+        """
+        self.load_baseline(segmentations)
+        until_convergence(self._estimate_transition_probs, segmentations)
+
     def load_baseline(self, segmentations):
         """Initialize the model using the segmentation produced by a morfessor
         baseline model.
-
-        This initialization is required before the model is ready for
-        the Cat-MAP learning.
 
         Arguments:
             segmentations -- Segmentation of corpus using the baseline method.
@@ -189,6 +197,10 @@ class CatmapModel:
     def _context_to_probability(self, morph, context):
         """Calculate conditional probabilities P(Category|Morph) from the
         contexts in which the morphs occur.
+
+        Arguments:
+            morph -- A string representation of the morph type.
+            context -- MorphContext object for morph type.
         """
 
         prelike = sigmoid(context.right_perplexity, self._ppl_treshold,
@@ -218,11 +230,17 @@ class CatmapModel:
 
     def _unigram_transition_probs(self, category_token_count,
                                   num_word_tokens):
-        """Initial transition probabilities based on unigram distribution
+        """Initial transition probabilities based on unigram distribution.
 
         Each tag is presumed to be succeeded by the expectation over all data
         of the number of prefixes, suffixes, stems, non-morphemes and word
         boundaries.
+
+        Arguments:
+            category_token_count -- A CatProbs with unnormalized
+                                    morph token counts.
+            num_word_tokens -- Total number of word tokens, for word boundary
+                               probability.
         """
 
         transitions = dict()
@@ -251,6 +269,14 @@ class CatmapModel:
         self._log_transitionprobs = transitions
 
     def _estimate_transition_probs(self, segmentations):
+        """Estimate transition probabilities from a category-tagged segmented
+        corpus.
+
+        Arguments:
+            segmentations -- Category-tagged segmented words.
+                List of format:
+                (count, (CategorizedMorph1, CategorizedMorph2, ...)), ...
+        """
         total_transitions_from = collections.defaultdict(int)
         num_transitions = collections.defaultdict(int)
         for rcount, segments in segmentations:
@@ -282,6 +308,16 @@ class CatmapModel:
         self._log_transitionprobs = transitions
 
     def viterbi_tag(self, segments):
+        """Tag a pre-segmented word using the learned model.
+
+        Arguments:
+            segments -- A list of morphs to tag.
+                        Raises KeyError if morph is not present in the
+                        training data.
+                        For segmenting and tagging new words,
+                        use viterbi_segment(compound).
+        """
+
         # This function uses internally indices of categories,
         # instead of names and the word boundary object,
         # to remove the need to look them up constantly.
@@ -336,11 +372,60 @@ class CatmapModel:
             backtrace = psi[i, backtrace]
             result.insert(0, CategorizedMorph(segments[i - 1],
                                                 categories[backtrace]))
-
         return result
+
+    def viterbi_tag_segmentations(self, segmentations):
+        """Convenience wrapper around viterbi_tag for a list of segmentations
+        with attached counts."""
+        tagged = []
+        for (count, segmentation) in segmentations:
+            tagged.append((count, self.viterbi_tag(segmentation)))
+        return tagged
+
+    def until_convergence(self, func, segmentations, max_differences=0,
+                          max_iterations=15):
+        """Iterates the specified training function until the segmentations
+        produced by the model for the given input no longer change more than
+        the specified treshold, or until maximum number of iterations is
+        reached.
+
+        Arguments:
+            func -- A method of CatmapModel that takes one argument:
+                    segmentations, and which causes some aspect of the model
+                    to be trained.
+            segmentations -- list of (count, segmentation) pairs. Can be
+                             either tagged or untagged.
+            max_differences -- Maximum number of changed category tags in
+                               the final iteration. Default 0.
+            max_iterations -- Maximum number of iterations. Default 15.
+        """
+
+        detagged = CatmapModel._detag_segmentations(segmentations)
+        previous_segmentation = self.viterbi_tag_segmentations(detagged)
+        for iteration in range(max_iterations):
+            _logger.info('Iteration number %d/%d.' % (iteration,
+                                                      max_iterations))
+            # perform the optimization
+            func(previous_segmentation)
+
+            current_segmentation = self.viterbi_tag_segmentations(detagged)
+            differences = 0
+            for (r, o) in zip(previous_segmentation, current_segmentation):
+                if r != o:
+                    differences += 1
+            if differences <= max_differences:
+                _logger.info('Converged, with ' +
+                    '%d differences in final iteration.' % (differences,))
+                break
+            _logger.info('%d differences.' % (differences,))
+            previous_segmentation = current_segmentation
 
     @staticmethod
     def get_categories(wb=False):
+        """The category tags supported by this model.
+        Argumments:
+            wb -- If True, the word boundary will be included. Default: False.
+        """
         categories = list(CatProbs._fields)
         if wb:
             categories.append(CatmapModel.word_boundary)

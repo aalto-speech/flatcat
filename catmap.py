@@ -63,10 +63,51 @@ CatProbs = collections.namedtuple('CatProbs', ['PRE', 'STM', 'SUF', 'ZZZ'])
 ProbN = collections.namedtuple('ProbN', ['PROB', 'N'])
 
 
+class WordBoundary:
+    def __repr__(self):
+        return '#'
+
+
+class Marginalizer:
+    """An accumulator for marginalizing the class probabilities
+    P(Category) from all the individual conditional probabilities
+    P(Category|Morph) and observed morph probabilities P(Morph).
+
+    First the unnormalized distribution is obtained by summing over
+    #(Morph) * P(Category|Morph) over each morph, separately for each
+    category. P(Category) is then obtained by normalizing the
+    distribution.
+    """
+
+    def __init__(self):
+        self._counts = [0.0] * len(CatProbs._fields)
+
+    def add(self, rcount, condprobs):
+        """Add the products #(Morph) * P(Category|Morph)
+        for one observed morph."""
+        for i, x in enumerate(condprobs):
+            self._counts[i] += float(rcount) * float(x)
+
+    def normalized(self):
+        """Returns the marginal probabilities for all categories."""
+        total = self.total_token_count
+        return CatProbs(*[x / total for x in self._counts])
+
+    @property
+    def total_token_count(self):
+        """Total number of tokens seen."""
+        return sum(self._counts)
+
+    @property
+    def category_token_count(self):
+        """Tokens seen per category."""
+        return CatProbs(*self._counts)
+
+
 class CatmapModel:
     """Morfessor Categories-MAP model class."""
 
-    word_boundary = object()
+    word_boundary = WordBoundary()
 
     def __init__(self, ppl_treshold=100, ppl_slope=None, length_treshold=3,
                  length_slope=2, use_word_tokens=True,
@@ -137,25 +178,27 @@ class CatmapModel:
         for rcount, segments in segmentations:
             num_word_types += 1
             num_word_tokens += rcount
-            # Collect information about the contexts in which the morphs occur
             if self._use_word_tokens:
                 pcount = rcount
             else:
                 # pcount used for perplexity, rcount is real count
                 pcount = 1
             total_morph_tokens += len(segments)
+            # Collect information about the contexts in which the morphs occur
             for (i, morph) in enumerate(segments):
+                # Previous morph
                 if i == 0:
-                    # word boundaries are counted as separate contexts
+                    # Word boundaries are counted as separate contexts
                     neighbour = CatmapModel.word_boundary
                 else:
                     neighbour = segments[i - 1]
-                    # contexts shorter than treshold don't affect perplexity
+                    # Contexts shorter than treshold don't affect perplexity
                     if len(neighbour) < self._min_perplexity_length:
                         neighbour = None
                 if neighbour is not None:
                     self._contexts[morph].left[neighbour] += pcount
 
+                # Next morph
                 if i == len(segments) - 1:
                     neighbour = CatmapModel.word_boundary
                 else:
@@ -166,37 +209,6 @@ class CatmapModel:
                     self._contexts[morph].right[neighbour] += pcount
 
                 self._contexts[morph].rcount += rcount
-
-        class Marginalizer:
-            """An accumulator for marginalizing the class probabilities
-            P(Category) from all the individual conditional probabilities
-            P(Category|Morph)
-            """
-
-            def __init__(self):
-                self._counts = [0.0] * len(CatProbs._fields)
-
-            def add(self, rcount, condprobs):
-                """Add the conditional probabilities P(Category|Morph)
-                for one observed morph. Once all observed morphs have been
-                added, the marginalization is complete."""
-                for i, x in enumerate(condprobs):
-                    self._counts[i] += float(rcount) * float(x)
-
-            def normalized(self):
-                """Returns the marginal probabilities for all categories."""
-                total = self.total_token_count
-                return CatProbs(*[x / total for x in self._counts])
-
-            @property
-            def total_token_count(self):
-                """Total number of tokens seen."""
-                return sum(self._counts)
-
-            @property
-            def category_token_count(self):
-                """Tokens seen per category."""
-                return CatProbs(*self._counts)
 
         # Calculate conditional probabilities from the encountered contexts
         marginalizer = Marginalizer()
@@ -329,7 +341,6 @@ class CatmapModel:
             # Update delta and psi to prepare for next iteration
             delta = best_cost
             psi[i] = best_cat
-            # clear best costs
             best_cost = LOGPROB_ZERO * np.ones(len(categories))
 
         # Last transition must be to word boundary
@@ -340,25 +351,33 @@ class CatmapModel:
             backtrace = np.argmin(cost)
 
         # Backtrace for the best category sequence
-        result = [CategorizedSegment(segments[-1], categories[backtrace])]
+        result = [CategorizedMorph(segments[-1], categories[backtrace])]
         for i in range(len(segments) - 1, 0, -1):
             backtrace = psi[i, backtrace]
-            result.insert(0, CategorizedSegment(segments[i - 1],
+            result.insert(0, CategorizedMorph(segments[i - 1],
                                                 categories[backtrace]))
 
         return result
 
 
-class CategorizedSegment:
-    def __init__(self, segment, category):
-        self.segment = segment
-        self.category = category
+class CategorizedMorph:
+    """Represents a morph with attached category information."""
+    no_category = object()
+
+    def __init__(self, morph, category=None):
+        self.morph = morph
+        if category is not None:
+            self.category = category
+        else:
+            self.category = CategorizedMorph.no_category
 
     def __repr__(self):
-        return u'%s/%s' % (self.segment, self.category)
+        if self.category == CategorizedMorph.no_category:
+            return u'%s' % (self.morph,)
+        return u'%s/%s' % (self.morph, self.category)
 
     def __eq__(self, other):
-        return (self.segment == other.segment and
+        return (self.morph == other.morph and
                 self.category == other.category)
 
 

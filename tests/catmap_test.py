@@ -193,8 +193,8 @@ class TestBaselineSegmentation(unittest.TestCase):
             for segment in segments:
                 m = tag_re.match(segment)
                 assert m, 'Could not parse "%s" in "%s"' % (segment, line)
-                ref_tmp.append(catmap.CategorizedSegment(m.group(1),
-                                                         m.group(2)))
+                ref_tmp.append(catmap.CategorizedMorph(m.group(1),
+                                                       m.group(2)))
                 detagged_tmp.append(m.group(1))
             self.references.append(ref_tmp)
             self.detagged.append(detagged_tmp)

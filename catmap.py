@@ -31,34 +31,6 @@ class CatmapIO(morfessor.MorfessorIO):
         self.category_separator = category_separator
 
 
-class MorphContext:
-    """Represents the different contexts in which a morph has been
-    encountered.
-    """
-
-    def __init__(self):
-        self.rcount = 0
-        self.left = collections.defaultdict(int)
-        self.right = collections.defaultdict(int)
-
-    @property
-    def left_perplexity(self):
-        return MorphContext._perplexity(self.left)
-
-    @property
-    def right_perplexity(self):
-        return MorphContext._perplexity(self.right)
-
-    @staticmethod
-    def _perplexity(contexts):
-        entropy = 0
-        total_tokens = float(sum(contexts.values()))
-        for c in contexts:
-            p = float(contexts[c]) / total_tokens
-            entropy -= p * np.log(p)
-        return np.exp(entropy)
-
-
 CatProbs = collections.namedtuple('CatProbs', ['PRE', 'STM', 'SUF', 'ZZZ'])
 ProbN = collections.namedtuple('ProbN', ['PROB', 'N'])
 
@@ -68,46 +40,16 @@ class WordBoundary:
         return '#'
 
 
-class Marginalizer:
-    """An accumulator for marginalizing the class probabilities
-    P(Category) from all the individual conditional probabilities
-    P(Category|Morph) and observed morph probabilities P(Morph).
-
-    First the unnormalized distribution is obtained by summing over
-    #(Morph) * P(Category|Morph) over each morph, separately for each
-    category. P(Category) is then obtained by normalizing the
-    distribution.
-    """
-
-    def __init__(self):
-        self._counts = [0.0] * len(CatProbs._fields)
-
-    def add(self, rcount, condprobs):
-        """Add the products #(Morph) * P(Category|Morph)
-        for one observed morph."""
-        for i, x in enumerate(condprobs):
-            self._counts[i] += float(rcount) * float(x)
-
-    def normalized(self):
-        """Returns the marginal probabilities for all categories."""
-        total = self.total_token_count
-        return CatProbs(*[x / total for x in self._counts])
-
-    @property
-    def total_token_count(self):
-        """Total number of tokens seen."""
-        return sum(self._counts)
-
-    @property
-    def category_token_count(self):
-        """Tokens seen per category."""
-        return CatProbs(*self._counts)
-
-
 class CatmapModel:
     """Morfessor Categories-MAP model class."""
 
     word_boundary = WordBoundary()
+
+    # These transitions are impossible
+    zero_transitions = ((word_boundary, word_boundary),
+                        ('PRE', word_boundary),
+                        ('PRE', 'SUF'),
+                        (word_boundary, 'SUF'))
 
     def __init__(self, ppl_treshold=100, ppl_slope=None, length_treshold=3,
                  length_slope=2, use_word_tokens=True,
@@ -164,26 +106,39 @@ class CatmapModel:
         """Initialize the model using the segmentation produced by a morfessor
         baseline model.
 
-        Initialization is required before the model is ready for the Cat-MAP
-        learning.
+        This initialization is required before the model is ready for
+        the Cat-MAP learning.
 
         Arguments:
             segmentations -- Segmentation of corpus using the baseline method.
                              Format: (count, (morph1, morph2, ...))
         """
-        total_morph_tokens = 0
-        num_word_types = 0
-        num_word_tokens = 0
+
+        self._estimate_probabilities(segmentations)
+
+        self._unigram_transition_probs(self._category_totals,
+                                       self._num_word_tokens)
+
+    def _estimate_probabilities(self, segmentations):
+        """Estimates P(Category|Morph), P(Category) and P(Morph|Category).
+        """
+
+        self._total_morph_tokens = 0
+        self._num_word_types = 0
+        self._num_word_tokens = 0
 
         for rcount, segments in segmentations:
-            num_word_types += 1
-            num_word_tokens += rcount
+            # Category tags are not needed for these calculations
+            segments = [CatmapModel._detag_morph(x) for x in segments]
+
+            self._num_word_types += 1
+            self._num_word_tokens += rcount
             if self._use_word_tokens:
                 pcount = rcount
             else:
                 # pcount used for perplexity, rcount is real count
                 pcount = 1
-            total_morph_tokens += len(segments)
+            self._total_morph_tokens += len(segments)
             # Collect information about the contexts in which the morphs occur
             for (i, morph) in enumerate(segments):
                 # Previous morph
@@ -218,19 +173,18 @@ class CatmapModel:
             # Marginalize (scale by frequency and accumulate elementwise)
             marginalizer.add(self._contexts[morph].rcount,
                            self._condprobs[morph])
+        # Category priors from marginalization
         self._catpriors = _log_catprobs(marginalizer.normalized())
 
         # Calculate posterior emission probabilities
-        category_totals = marginalizer.category_token_count
+        self._category_totals = marginalizer.category_token_count
         for morph in self._contexts:
             tmp = []
-            for (i, total) in enumerate(category_totals):
+            for (i, total) in enumerate(self._category_totals):
                 tmp.append(self._condprobs[morph][i] *
-                           self._contexts[morph].rcount / category_totals[i])
+                           self._contexts[morph].rcount /
+                           self._category_totals[i])
             self._log_emissionprobs[morph] = _log_catprobs(CatProbs(*tmp))
-
-        self._log_transitionprobs = CatmapModel._unigram_transition_probs(
-            category_totals, num_word_tokens)
 
     def _context_to_probability(self, morph, context):
         """Calculate conditional probabilities P(Category|Morph) from the
@@ -262,8 +216,8 @@ class CatmapModel:
 
         return CatProbs(p_pre, p_stm, p_suf, p_nonmorpheme)
 
-    @staticmethod
-    def _unigram_transition_probs(category_token_count, num_word_tokens):
+    def _unigram_transition_probs(self, category_token_count,
+                                  num_word_tokens):
         """Initial transition probabilities based on unigram distribution
 
         Each tag is presumed to be succeeded by the expectation over all data
@@ -271,43 +225,69 @@ class CatmapModel:
         boundaries.
         """
 
-        wb = CatmapModel.word_boundary
-        zeros = ((wb, wb), ('PRE', wb), ('PRE', 'SUF'), (wb, 'SUF'))
-
         transitions = dict()
-        nclass = {wb: num_word_tokens}
-        for (i, category) in enumerate(CatProbs._fields):
+        nclass = {CatmapModel.word_boundary: num_word_tokens}
+        for (i, category) in enumerate(CatmapModel.get_categories()):
             nclass[category] = float(category_token_count[i])
 
         num_tokens_tagged = collections.defaultdict(int)
         for cat1 in nclass:
             for cat2 in nclass:
-                if (cat1, cat2) in zeros:
+                if (cat1, cat2) in CatmapModel.zero_transitions:
                     continue
                 # count all possible valid transitions
                 num_tokens_tagged[cat1] += nclass[cat2]
 
         for cat1 in nclass:
             for cat2 in nclass:
-                if (cat1, cat2) in zeros:
+                if (cat1, cat2) in CatmapModel.zero_transitions:
                     continue
                 transitions[(cat1, cat2)] = ProbN(_zlog(nclass[cat2] /
                                                   num_tokens_tagged[cat1]),
                                                   nclass[cat2])
 
-        for pair in zeros:
+        for pair in CatmapModel.zero_transitions:
             transitions[pair] = ProbN(LOGPROB_ZERO, 0)
+        self._log_transitionprobs = transitions
 
-        return transitions
+    def _estimate_transition_probs(self, segmentations):
+        total_transitions_from = collections.defaultdict(int)
+        num_transitions = collections.defaultdict(int)
+        for rcount, segments in segmentations:
+            # Only the categories matter
+            categories = [x.category for x in segments]
+            # Include word boundaries
+            categories.insert(0, CatmapModel.word_boundary)
+            categories.append(CatmapModel.word_boundary)
+            for (prev_cat, next_cat) in ngrams(categories, 2):
+                num_transitions[(prev_cat, next_cat)] += float(rcount)
+                total_transitions_from[prev_cat] += float(rcount)
+
+        transitions = dict()
+        for prev_cat in CatmapModel.get_categories(wb=True):
+            for next_cat in CatmapModel.get_categories(wb=True):
+                pair = (prev_cat, next_cat)
+                if pair not in num_transitions:
+                    transitions[pair] = ProbN(LOGPROB_ZERO, 0)
+                    continue
+                if pair in CatmapModel.zero_transitions:
+                    if num_transitions[pair] > 0:
+                        _logger.warning('Impossible transition ' +
+                                        '%s -> %s had nonzero count' % pair)
+                    transitions[pair] = ProbN(LOGPROB_ZERO, 0)
+                else:
+                    transitions[pair] = ProbN(_zlog(num_transitions[pair] /
+                                            total_transitions_from[prev_cat]),
+                                            num_transitions[pair])
+        self._log_transitionprobs = transitions
 
     def viterbi_tag(self, segments):
         # This function uses internally indices of categories,
         # instead of names and the word boundary object,
         # to remove the need to look them up constantly.
-        categories = list(CatProbs._fields)
-        categories.append(CatmapModel.word_boundary)
-        # Last category is word boundary.
-        wb = len(categories) - 1
+        categories = CatmapModel.get_categories(wb=True)
+        # Index of word boundary.
+        wb = categories.index(CatmapModel.word_boundary)
 
         # The lowest accumulated cost ending in each possible state.
         # Initialized to pseudo-zero for all states
@@ -359,6 +339,27 @@ class CatmapModel:
 
         return result
 
+    @staticmethod
+    def get_categories(wb=False):
+        categories = list(CatProbs._fields)
+        if wb:
+            categories.append(CatmapModel.word_boundary)
+        return tuple(categories)
+
+    @staticmethod
+    def _detag_morph(morph):
+        if isinstance(morph, CategorizedMorph):
+            return morph.morph
+        return morph
+
+    @staticmethod
+    def _detag_segmentations(segmentations):
+        detagged = []
+        for rcount, segments in segmentations:
+            detagged.append((rcount,
+                             [CatmapModel._detag_morph(x) for x in segments]))
+        return detagged
+
 
 class CategorizedMorph:
     """Represents a morph with attached category information."""
@@ -381,8 +382,83 @@ class CategorizedMorph:
                 self.category == other.category)
 
 
+class MorphContext:
+    """Represents the different contexts in which a morph has been
+    encountered.
+    """
+
+    def __init__(self):
+        self.rcount = 0
+        self.left = collections.defaultdict(int)
+        self.right = collections.defaultdict(int)
+
+    @property
+    def left_perplexity(self):
+        return MorphContext._perplexity(self.left)
+
+    @property
+    def right_perplexity(self):
+        return MorphContext._perplexity(self.right)
+
+    @staticmethod
+    def _perplexity(contexts):
+        entropy = 0
+        total_tokens = float(sum(contexts.values()))
+        for c in contexts:
+            p = float(contexts[c]) / total_tokens
+            entropy -= p * np.log(p)
+        return np.exp(entropy)
+
+
+class Marginalizer:
+    """An accumulator for marginalizing the class probabilities
+    P(Category) from all the individual conditional probabilities
+    P(Category|Morph) and observed morph probabilities P(Morph).
+
+    First the unnormalized distribution is obtained by summing over
+    #(Morph) * P(Category|Morph) over each morph, separately for each
+    category. P(Category) is then obtained by normalizing the
+    distribution.
+    """
+
+    def __init__(self):
+        self._counts = [0.0] * len(CatProbs._fields)
+
+    def add(self, rcount, condprobs):
+        """Add the products #(Morph) * P(Category|Morph)
+        for one observed morph."""
+        for i, x in enumerate(condprobs):
+            self._counts[i] += float(rcount) * float(x)
+
+    def normalized(self):
+        """Returns the marginal probabilities for all categories."""
+        total = self.total_token_count
+        return CatProbs(*[x / total for x in self._counts])
+
+    @property
+    def total_token_count(self):
+        """Total number of tokens seen."""
+        return sum(self._counts)
+
+    @property
+    def category_token_count(self):
+        """Tokens seen per category."""
+        return CatProbs(*self._counts)
+
+
 def sigmoid(value, treshold, slope):
     return 1.0 / (1.0 + np.exp(-slope * (value - treshold)))
+
+
+def ngrams(sequence, n=2):
+    window = []
+    for item in sequence:
+        window.append(item)
+        if len(window) > n:
+            # trim back to size
+            window = window[-n:]
+        if len(window) == n:
+            yield(tuple(window))
 
 
 def _zlog(x):

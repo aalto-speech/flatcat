@@ -15,9 +15,11 @@ REFERENCE_DIR = 'reference_data/'
 # A baseline segmentation, e.g. produced by morphessor 0.9.2
 REFERENCE_BASELINE_SEGMENTATION = REFERENCE_DIR + 'baselineseg.final.gz'
 # Probabilities estimated from the above baseline segmentation
-REFERENCE_PROBS = REFERENCE_DIR + 'baseline.probs.gz'
+REFERENCE_BASELINE_PROBS = REFERENCE_DIR + 'baseline.probs.gz'
 # Initial viterbi tagging
 REFERENCE_BASELINE_TAGGED = REFERENCE_DIR + 'baseline.i.tagged.gz'
+# Probabilities re-estimated based on above viterbi tagging
+REFERENCE_REESTIMATE_PROBS = REFERENCE_DIR + 'baseline.i.probs.gz'
 
 
 def _load_baseline():
@@ -38,6 +40,12 @@ def _load_catmap(baseline):
 
 
 class TestProbabilityEstimation(unittest.TestCase):
+    def _config(self):
+        """Overridden later to test re-estimation"""
+        self.reference_file = REFERENCE_BASELINE_PROBS
+        self.baseline = _load_baseline()
+        self.model = _load_catmap(self.baseline)
+
     def setUp(self):
         self.perplexities = dict()
         self.condprobs = dict()
@@ -45,10 +53,9 @@ class TestProbabilityEstimation(unittest.TestCase):
         self.transitions = dict()
         catpriors_tmp = dict()
 
-        self.baseline = _load_baseline()
-        self.model = _load_catmap(self.baseline)
+        self._config()
 
-        comments_io = morfessor.MorfessorIO(encoding='latin-1',
+        self.comments_io = morfessor.MorfessorIO(encoding='latin-1',
                                             comment_start='++++++++++')
 
         pattern_float = r'([0-9.]+)'
@@ -67,7 +74,7 @@ class TestProbabilityEstimation(unittest.TestCase):
         transitions_re = re.compile(r'^P\((\S+) .. ([^\)]+)\) = ' +
              pattern_float + r' \(N = ' + pattern_int + '\)')
 
-        for line in comments_io._read_text_file(REFERENCE_PROBS):
+        for line in self.comments_io._read_text_file(self.reference_file):
             m = ppl_re.match(line)
             if m:
                 self.perplexities[m.group(1)] = (float(m.group(2)),
@@ -171,6 +178,24 @@ class TestProbabilityEstimation(unittest.TestCase):
                                                   obsval, reference[pair][0]))
 
 
+class TestProbabilityReEstimation(TestProbabilityEstimation):
+    def _config(self):
+        self.reference_file = REFERENCE_REESTIMATE_PROBS
+        self.baseline = _load_baseline()
+        self.model = _load_catmap(self.baseline)
+        self.retagged = []
+
+        io = morfessor.MorfessorIO(encoding='latin-1')
+        segmentations = io.read_segmentation_file(
+            REFERENCE_BASELINE_SEGMENTATION)
+        for (count, segmentation) in segmentations:
+            self.retagged.append((count, self.model.viterbi_tag(segmentation)))
+
+        detagged = catmap.CatmapModel._detag_segmentations(self.retagged)
+        self.model._estimate_probabilities(detagged)
+        self.model._estimate_transition_probs(self.retagged)
+
+
 class TestBaselineSegmentation(unittest.TestCase):
     def setUp(self):
         self.baseline = _load_baseline()
@@ -202,7 +227,9 @@ class TestBaselineSegmentation(unittest.TestCase):
     def test_viterbitag(self):
         for (reference, tagless) in zip(self.references, self.detagged):
             observed = self.model.viterbi_tag(tagless)
-            msg = 'crap'  # u'"%s" does not match "%s"' % (observed, reference)
+            # causes UnicodeEncodeError, so sadly you don't get the details
+            # u'"%s" does not match "%s"' % (observed, reference)
+            msg = 'FIXME'
             for (r, o) in zip(reference, observed):
                 self.assertEqual(r, o, msg=msg)
 

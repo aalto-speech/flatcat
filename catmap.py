@@ -14,7 +14,7 @@ import morfessor
 _logger = logging.getLogger(__name__)
 _logger.level = logging.DEBUG   # FIXME development convenience
 
-LOGPROB_ZERO = 1000
+LOGPROB_ZERO = 1000000
 
 
 class CatmapIO(morfessor.MorfessorIO):
@@ -135,6 +135,8 @@ class CatmapModel:
         self._num_word_types = 0
         self._num_word_tokens = 0
 
+        num_letter_tokens = collections.defaultdict(int)
+
         for rcount, segments in segmentations:
             # Category tags are not needed for these calculations
             segments = [CatmapModel._detag_morph(x) for x in segments]
@@ -147,6 +149,7 @@ class CatmapModel:
                 # pcount used for perplexity, rcount is real count
                 pcount = 1
             self._total_morph_tokens += len(segments)
+            num_letter_tokens[CatmapModel.word_boundary] += pcount
             # Collect information about the contexts in which the morphs occur
             for (i, morph) in enumerate(segments):
                 # Previous morph
@@ -172,6 +175,8 @@ class CatmapModel:
                     self._contexts[morph].right[neighbour] += pcount
 
                 self._contexts[morph].rcount += rcount
+                for letter in morph:
+                    num_letter_tokens[letter] += pcount
 
         # Calculate conditional probabilities from the encountered contexts
         marginalizer = Marginalizer()
@@ -193,6 +198,14 @@ class CatmapModel:
                            self._contexts[morph].rcount /
                            self._category_totals[i])
             self._log_emissionprobs[morph] = _log_catprobs(CatProbs(*tmp))
+
+        # Calculate letter log probabilities
+        self._total_letter_tokens = sum(num_letter_tokens.values())
+        log_tlt = np.log(self._total_letter_tokens)
+        self._log_letterprobs = dict()
+        for letter in num_letter_tokens:
+            self._log_letterprobs[letter] = (log_tlt -
+                                            np.log(num_letter_tokens[letter]))
 
     def _context_to_probability(self, morph, context):
         """Calculate conditional probabilities P(Category|Morph) from the

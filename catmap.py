@@ -88,7 +88,7 @@ class CatmapModel:
         self._contexts = collections.defaultdict(MorphContext)
 
         # Conditional probabilities P(Category|Morph).
-        # A dict of CatProbs objects. Actual probabilities.
+        # A dict of CatProbs objects indexed by morph. Actual probabilities.
         self._condprobs = dict()
 
         # Priors for categories P(Category).
@@ -96,11 +96,12 @@ class CatmapModel:
         self._log_catpriors = None
 
         # Posterior emission probabilities P(Morph|Category).
-        # A dict of CatProbs objects. Log-probabilities.
+        # A dict of CatProbs objects indexed by morph. Log-probabilities.
         self._log_emissionprobs = dict()
 
         # Probabilities of transition between categories.
-        #P(Category -> Category). A dict of ProbN objects. Log-probabilities.
+        # P(Category -> Category). A dict of ProbN objects indexed by a tuple
+        # of categories. Log-probabilities.
         self._log_transitionprobs = dict()
 
     def train(self, segmentations):
@@ -187,7 +188,7 @@ class CatmapModel:
             marginalizer.add(self._contexts[morph].rcount,
                            self._condprobs[morph])
         # Category priors from marginalization
-        self._catpriors = _log_catprobs(marginalizer.normalized())
+        self._log_catpriors = _log_catprobs(marginalizer.normalized())
 
         # Calculate posterior emission probabilities
         self._category_totals = marginalizer.category_token_count
@@ -457,6 +458,12 @@ class CatmapModel:
             detagged.append((rcount,
                              [CatmapModel._detag_morph(x) for x in segments]))
         return detagged
+
+    @property
+    def _log_unknownletterprob(self):
+        """The probability of an unknown letter is defined to be the squared
+        probability of the rarest known letter"""
+        return 2 * max(self._log_letterprobs.values())
 
 
 class CategorizedMorph:

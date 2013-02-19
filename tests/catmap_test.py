@@ -146,7 +146,7 @@ class TestProbabilityEstimation(unittest.TestCase):
     def test_catpriors(self):
         for (i, category) in enumerate(catmap.CatProbs._fields):
             reference = self.catpriors
-            observed = _exp_catprobs(self.model._catpriors)
+            observed = _exp_catprobs(self.model._log_catpriors)
             msg = 'P(%s), %s not almost equal to %s'
             self.assertAlmostEqual(observed[i], reference[i], places=9,
                 msg=msg % (category, observed[i], reference[i]))

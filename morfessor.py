@@ -7,7 +7,7 @@ __all__ = ['MorfessorException', 'MorfessorIO', 'BaselineModel',
            'AnnotationsModelUpdate', 'Encoding', 'CorpusEncoding',
            'AnnotatedCorpusEncoding', 'LexiconEncoding']
 
-__version__ = '2.0.0pre1'
+__version__ = '2.0.0alpha1'
 __author__ = 'Sami Virpioja, Peter Smit'
 __author_email__ = "morfessor@cis.hut.fi"
 
@@ -290,6 +290,8 @@ class MorfessorIO:
         """Open a file with the appropriate compression and encoding"""
         if file_name == '-':
             file_obj = sys.stdout
+            if PY3:
+                return file_obj
         elif file_name.endswith('.gz'):
             file_obj = gzip.open(file_name, 'wb')
         else:
@@ -307,21 +309,19 @@ class MorfessorIO:
         """
         encoding = self.encoding
         if encoding is None:
-            if file_name == '-':
-                encoding = locale.getpreferredencoding()
-            else:
+            if file_name != '-':
                 encoding = self._find_encoding(file_name)
 
         if file_name == '-':
+
             if PY3:
-                if self.encoding == sys.stdin.encoding:
-                    inp = sys.stdin
-                else:
-                    inp = io.TextIOWrapper(sys.stdin.buffer, encoding=encoding)
+                inp = sys.stdin
             else:
                 class StdinUnicodeReader:
                     def __init__(self, encoding):
                         self.encoding = encoding
+                        if self.encoding is None:
+                            self.encoding = locale.getpreferredencoding()
 
                     def __iter__(self):
                         return self
@@ -362,7 +362,7 @@ class MorfessorIO:
         of the default encodings would work.
 
         """
-        test_encodings = [locale.getpreferredencoding(), 'utf-8']
+        test_encodings = ['utf-8', locale.getpreferredencoding()]
         for encoding in test_encodings:
             ok = True
             for f in files:

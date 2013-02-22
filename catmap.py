@@ -181,7 +181,7 @@ class CatmapModel:
 
         # Calculate conditional probabilities from the encountered contexts
         marginalizer = Marginalizer()
-        for morph in sorted(self._contexts, cmp=lambda x, y: len(x) < len(y)):
+        for morph in sorted(self._contexts, key=lambda x: len(x)):
             self._condprobs[morph] = self._context_to_probability(morph,
                 self._contexts[morph])
             # Marginalize (scale by frequency and accumulate elementwise)
@@ -479,8 +479,8 @@ class CategorizedMorph:
 
     def __repr__(self):
         if self.category == CategorizedMorph.no_category:
-            return u'%s' % (self.morph,)
-        return u'%s/%s' % (self.morph, self.category)
+            return unicode(self.morph)
+        return '%{}/%{}'.format(self.morph, self.category)
 
     def __eq__(self, other):
         return (self.morph == other.morph and

@@ -597,23 +597,31 @@ class CatmapEncoding(morfessor.Encoding):
         # Single Counter object (ByCategory is unsuitable, need break also).
         self._cat_tagcount = collections.Counter()
 
+        # Cache for transition logprobs, to avoid wasting effort recalculating.
+        self._log_transitionprob_cache = dict()
+
     def set_log_emissionprobs(self, morph, lep):
         self._log_emissionprobs[morph] = lep
 
     def clear_transitions(self):
         self._transition_counts.clear()
         self._cat_tagcount.clear()
+        self._log_transitionprob_cache.clear()
 
     def add_transitions(self, prev_cat, next_cat, rcount):
         rcount = float(rcount)
         self._transition_counts[(prev_cat, next_cat)] += rcount
         self._cat_tagcount[prev_cat] += rcount
+        # invalidate cache
+        self._log_transitionprob_cache.clear()
 
     def log_transitionprob(self, prev_cat, next_cat):
-        # FIXME this makes viterbi slow: build a cache
-        #print("%s, %s" % (self._transition_counts[(prev_cat, next_cat)], self._cat_tagcount[prev_cat]))
-        return (_zlog(self._transition_counts[(prev_cat, next_cat)]) -
+        pair = (prev_cat, next_cat)
+        if pair not in self._log_transitionprob_cache:
+            self._log_transitionprob_cache[pair] = (
+                _zlog(self._transition_counts[(prev_cat, next_cat)]) -
                 _zlog(self._cat_tagcount[prev_cat]))
+        return self._log_transitionprob_cache[pair]
 
     def log_emissionprobs(self, morph):
         return self._log_emissionprobs[morph].copy()

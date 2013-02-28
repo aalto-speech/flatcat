@@ -35,6 +35,8 @@ class CatmapIO(morfessor.MorfessorIO):
 class ByCategory:
     __slots__ = ('PRE', 'STM', 'SUF', 'ZZZ')
     def __init__(self, *args):
+        if len(args) == 0:
+            args = [0.0] * len(self.__slots__)
         tmp = tuple(args)
         msg = 'ByCategory initialized with %d values (expecting %d)' % (
             len(tmp), len(self.__slots__))
@@ -58,6 +60,10 @@ class ByCategory:
         if isinstance(index, int):
             return setattr(self, self.__slots__[index], value)
         return setattr(self, index, value)
+
+    def copy(self):
+        tmp = tuple(iter(self))
+        return ByCategory(*tmp)
 
 
 class WordBoundary:
@@ -154,10 +160,11 @@ class CatmapModel:
         """Estimates P(Category|Morph), P(Category) and P(Morph|Category).
         """
 
-        num_letter_tokens = collections.defaultdict(int)
+        num_letter_tokens = collections.Counter()
         self._num_word_tokens = 0
 
         for rcount, segments in segmentations:
+            self._num_word_tokens += rcount
             # Category tags are not needed for these calculations
             segments = [CatmapModel._detag_morph(x) for x in segments]
 
@@ -280,12 +287,12 @@ class CatmapModel:
                                probability.
         """
 
-        transitions = dict()
+        transitions = collections.Counter()
         nclass = {CatmapModel.word_boundary: num_word_tokens}
         for (i, category) in enumerate(CatmapModel.get_categories()):
             nclass[category] = float(category_token_count[i])
 
-        num_tokens_tagged = collections.defaultdict(int)
+        num_tokens_tagged = collections.Counter()
         for cat1 in nclass:
             for cat2 in nclass:
                 if (cat1, cat2) in CatmapModel.zero_transitions:
@@ -297,13 +304,13 @@ class CatmapModel:
             for cat2 in nclass:
                 if (cat1, cat2) in CatmapModel.zero_transitions:
                     continue
-                transitions[(cat1, cat2)] = ProbN(_zlog(nclass[cat2] /
-                                                  num_tokens_tagged[cat1]),
-                                                  nclass[cat2])
+                transitions[(cat1, cat2)] = nclass[cat2] 
 
         for pair in CatmapModel.zero_transitions:
-            transitions[pair] = ProbN(LOGPROB_ZERO, 0)
-        self._transition_counts = transitions
+            transitions[pair] = 0
+        # FIXME: ugly using privates of delegate class
+        self._catmap_coding._transition_counts = transitions
+        self._catmap_coding._cat_tagcount = num_tokens_tagged
 
     def _estimate_transition_probs(self, segmentations):
         """Estimate transition probabilities from a category-tagged segmented
@@ -314,8 +321,8 @@ class CatmapModel:
                 List of format:
                 (count, (CategorizedMorph1, CategorizedMorph2, ...)), ...
         """
-        total_transitions_from = collections.defaultdict(int)
-        num_transitions = collections.defaultdict(int)
+        # FIXME: rename to _calculate_transitions
+        self._catmap_coding.clear_transitions()
         for rcount, segments in segmentations:
             # Only the categories matter
             categories = [x.category for x in segments]
@@ -323,26 +330,11 @@ class CatmapModel:
             categories.insert(0, CatmapModel.word_boundary)
             categories.append(CatmapModel.word_boundary)
             for (prev_cat, next_cat) in ngrams(categories, 2):
-                num_transitions[(prev_cat, next_cat)] += float(rcount)
-                total_transitions_from[prev_cat] += float(rcount)
-
-        transitions = dict()
-        for prev_cat in CatmapModel.get_categories(wb=True):
-            for next_cat in CatmapModel.get_categories(wb=True):
-                pair = (prev_cat, next_cat)
-                if pair not in num_transitions:
-                    transitions[pair] = ProbN(LOGPROB_ZERO, 0)
-                    continue
-                if pair in CatmapModel.zero_transitions:
-                    if num_transitions[pair] > 0:
+                if (prev_cat, next_cat) in CatmapModel.zero_transitions:
                         _logger.warning('Impossible transition ' +
-                                        '%s -> %s had nonzero count' % pair)
-                    transitions[pair] = ProbN(LOGPROB_ZERO, 0)
-                else:
-                    transitions[pair] = ProbN(_zlog(num_transitions[pair] /
-                                            total_transitions_from[prev_cat]),
-                                            num_transitions[pair])
-        self._transition_counts = transitions
+                                        '%s -> %s' % (prev_cat, next_cat))
+                self._catmap_coding.add_transitions(prev_cat, next_cat,
+                                                    rcount)
 
     def viterbi_tag(self, segments):
         """Tag a pre-segmented word using the learned model.
@@ -383,12 +375,12 @@ class CatmapModel:
         for (i, morph) in enumerate(segments):
             for next_cat in range(len(categories) - 1):
                 for prev_cat in range(len(categories)):
-                    name_pair = (categories[prev_cat], categories[next_cat])
+                    pair = (categories[prev_cat], categories[next_cat])
                     # Cost of selecting prev_cat as previous state
                     # if now at next_cat
                     cost[prev_cat] = (delta[prev_cat] +
-                        self._transition_counts[name_pair].PROB +
-                        self._log_emissionprobs[morph][next_cat])
+                        self._catmap_coding.transit_emit_cost(
+                            pair[0], pair[1], morph))
                 best_cat[next_cat] = np.argmin(cost)
                 best_cost[next_cat] = cost[best_cat[next_cat]]
             # Update delta and psi to prepare for next iteration
@@ -398,9 +390,9 @@ class CatmapModel:
 
         # Last transition must be to word boundary
         for prev_cat in range(len(categories)):
-            name_pair = (categories[prev_cat], CatmapModel.word_boundary)
+            pair = (categories[prev_cat], CatmapModel.word_boundary)
             cost[prev_cat] = (delta[prev_cat] +
-                              self._transition_counts[name_pair].PROB)
+                              self._catmap_coding.log_transitionprob(*pair))
             backtrace = np.argmin(cost)
 
         # Backtrace for the best category sequence
@@ -456,6 +448,9 @@ class CatmapModel:
                 break
             _logger.info('%d differences.' % (differences,))
             previous_segmentation = current_segmentation
+
+    def log_emissionprobs(self, morph):
+        return self._catmap_coding.log_emissionprobs(morph)
 
     @staticmethod
     def get_categories(wb=False):
@@ -514,8 +509,8 @@ class MorphContext:
 
     def __init__(self):
         self.rcount = 0
-        self.left = collections.defaultdict(int)
-        self.right = collections.defaultdict(int)
+        self.left = collections.Counter()
+        self.right = collections.Counter()
 
     @property
     def left_perplexity(self):
@@ -547,8 +542,7 @@ class Marginalizer(ByCategory):
     """
 
     def __init__(self):
-        tmp = [0.0] * len(ByCategory.__slots__)
-        ByCategory.__init__(self, *tmp)
+        ByCategory.__init__(self)
 
     def add(self, rcount, condprobs):
         """Add the products #(Morph) * P(Category|Morph)
@@ -597,14 +591,38 @@ class CatmapEncoding(morfessor.Encoding):
         # P(Category -> Category) can be calculated from these.
         # A dict of integers indexed by a tuple of categories.
         # Counts occurences.
-        self._transition_counts = dict()
+        self._transition_counts = collections.Counter()
 
-        # Counts of observed category taggings.
-        # Single ByCategory object.
-        self._cat_tagcount = None
+        # Counts of observed category tags.
+        # Single Counter object (ByCategory is unsuitable, need break also).
+        self._cat_tagcount = collections.Counter()
 
     def set_log_emissionprobs(self, morph, lep):
         self._log_emissionprobs[morph] = lep
+
+    def clear_transitions(self):
+        self._transition_counts.clear()
+        self._cat_tagcount.clear()
+
+    def add_transitions(self, prev_cat, next_cat, rcount):
+        rcount = float(rcount)
+        self._transition_counts[(prev_cat, next_cat)] += rcount
+        self._cat_tagcount[prev_cat] += rcount
+
+    def log_transitionprob(self, prev_cat, next_cat):
+        # FIXME this makes viterbi slow: build a cache
+        #print("%s, %s" % (self._transition_counts[(prev_cat, next_cat)], self._cat_tagcount[prev_cat]))
+        return (_zlog(self._transition_counts[(prev_cat, next_cat)]) -
+                _zlog(self._cat_tagcount[prev_cat]))
+
+    def log_emissionprobs(self, morph):
+        return self._log_emissionprobs[morph].copy()
+
+    def transit_emit_cost(self, prev_cat, next_cat, morph):
+        """Cost of transitioning from prev_cat to next_cat and emitting
+        the morph."""
+        return (self.log_transitionprob(prev_cat, next_cat) +
+                self._log_emissionprobs[morph][next_cat])
 
 # morfessor.LexiconEncoding can be used without modification
 

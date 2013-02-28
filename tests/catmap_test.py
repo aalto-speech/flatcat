@@ -97,7 +97,7 @@ class TestProbabilityEstimation(unittest.TestCase):
 
             m = posteriors_re.match(line)
             if m:
-                self.posteriors[m.group(1)] = catmap.CatProbs(
+                self.posteriors[m.group(1)] = catmap.ByCategory(
                     float(m.group(2)), float(m.group(3)),
                     float(m.group(4)), float(m.group(5)))
                 continue
@@ -112,8 +112,8 @@ class TestProbabilityEstimation(unittest.TestCase):
                 cats = tuple([_tr_wb(x) for x in (m.group(1), m.group(2))])
                 self.transitions[cats] = (float(m.group(3)), int(m.group(4)))
 
-        self.catpriors = catmap.CatProbs(*(catpriors_tmp[x] for x in
-                                           catmap.CatProbs._fields))
+        self.catpriors = catmap.ByCategory(*(catpriors_tmp[x] for x in
+                                           catmap.ByCategory.__slots__))
 
     def test_perplexities(self):
         for morph in self.perplexities:
@@ -139,12 +139,12 @@ class TestProbabilityEstimation(unittest.TestCase):
             observed = self.model._condprobs[morph]
             msg = 'P(%s | "%s"), %s not almost equal to %s'
 
-            for (i, category) in enumerate(catmap.CatProbs._fields):
+            for (i, category) in enumerate(catmap.ByCategory.__slots__):
                 self.assertAlmostEqual(observed[i], reference[i], places=9,
                     msg=msg % (category, morph, observed[i], reference[i]))
 
     def test_catpriors(self):
-        for (i, category) in enumerate(catmap.CatProbs._fields):
+        for (i, category) in enumerate(catmap.ByCategory.__slots__):
             reference = self.catpriors
             observed = _exp_catprobs(self.model._log_catpriors)
             msg = 'P(%s), %s not almost equal to %s'
@@ -154,25 +154,26 @@ class TestProbabilityEstimation(unittest.TestCase):
     def test_posterior_emission_probs(self):
         for morph in self.posteriors:
             reference = self.posteriors[morph]
-            if morph not in self.model._log_emissionprobs:
+            try:
+                observed = _exp_catprobs(self.model.log_emissionprobs(morph))
+            except KeyError:
                 raise KeyError('%s not in observed morphs' % (morph,))
-            observed = _exp_catprobs(self.model._log_emissionprobs[morph])
             msg = 'P(%s | "%s"), %s not almost equal to %s'
 
-            for (i, category) in enumerate(catmap.CatProbs._fields):
+            for (i, category) in enumerate(catmap.ByCategory.__slots__):
                 self.assertAlmostEqual(observed[i], reference[i], places=9,
                     msg=msg % (morph, category, observed[i], reference[i]))
 
     def test_transitions(self):
-        categories = list(catmap.CatProbs._fields)
+        categories = list(catmap.ByCategory.__slots__)
         categories.append(catmap.CatmapModel.word_boundary)
         msg = 'P(%s -> %s), %s not almost equal to %s'
         reference = self.transitions
-        observed = self.model._log_transitionprobs
         for cat1 in categories:
             for cat2 in categories:
                 pair = (cat1, cat2)
-                obsval = _zexp(observed[pair][0])
+                obsval = _zexp(self.model._catmap_coding.log_transitionprob(
+                                                                    *pair))
                 self.assertAlmostEqual(obsval, reference[pair][0], places=9,
                                        msg=msg % (cat1, cat2,
                                                   obsval, reference[pair][0]))
@@ -240,9 +241,9 @@ def _zexp(x):
 
 
 def _exp_catprobs(probs):
-    """Convenience function to convert a CatProbs object containing log
+    """Convenience function to convert a ByCategory object containing log
     probabilities into one with actual probabilities"""
-    return catmap.CatProbs(*[_zexp(x) for x in probs])
+    return catmap.ByCategory(*[_zexp(x) for x in probs])
 
 
 if __name__ == '__main__':

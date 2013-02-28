@@ -17,24 +17,31 @@ _logger.level = logging.DEBUG   # FIXME development convenience
 LOGPROB_ZERO = 1000000
 
 
-class CatmapIO(morfessor.MorfessorIO):
-    """Extends data file formats to include category tags."""
-    # FIXME unimplemented
+class WordBoundary:
+    def __repr__(self):
+        return '#'
 
-    def __init__(self, encoding=None, construction_separator=' + ',
-                 comment_start='#', compound_separator='\s+',
-                 atom_separator=None, category_separator='/'):
-        morfessor.MorfessorIO.__init__(
-            self, encoding=encoding,
-            construction_separator=construction_separator,
-            comment_start=comment_start, compound_separator=compound_separator,
-            atom_separator=atom_separator)
-        self.category_separator = category_separator
+WORD_BOUNDARY = WordBoundary()
+
+##################################
+### Categorization-dependent code:
+### to change the categories, only code in this section needs to be changed.
 
 
 class ByCategory:
+    """A data structure with one value for each category.
+
+    Commonly used for counts or probabilities, which have a usage pattern
+    in which values for all of the categories are needed at the same time.
+    """
+
+    # This defines the set of possible categories
     __slots__ = ('PRE', 'STM', 'SUF', 'ZZZ')
+
     def __init__(self, *args):
+        """Initialize the structure.
+        You must either give as arguments values to all categories,
+        or none (which sets all values to zero)."""
         if len(args) == 0:
             args = [0.0] * len(self.__slots__)
         tmp = tuple(args)
@@ -66,26 +73,21 @@ class ByCategory:
         return ByCategory(*tmp)
 
 
-class WordBoundary:
-    def __repr__(self):
-        return '#'
-
-
-class CatmapModel:
-    """Morfessor Categories-MAP model class."""
-
-    word_boundary = WordBoundary()
+class MorphUsageProperties:
+    """This class describes how the prior probabilities are calculated
+    from the usage of morphs.
+    """
 
     # These transitions are impossible
-    zero_transitions = ((word_boundary, word_boundary),
-                        ('PRE', word_boundary),
+    zero_transitions = ((WORD_BOUNDARY, WORD_BOUNDARY),
+                        ('PRE', WORD_BOUNDARY),
                         ('PRE', 'SUF'),
-                        (word_boundary, 'SUF'))
+                        (WORD_BOUNDARY, 'SUF'))
 
     def __init__(self, ppl_treshold=100, ppl_slope=None, length_treshold=3,
                  length_slope=2, use_word_tokens=True,
-                 min_perplexity_length=4, transition_cutoff=0.00000000001):
-        """Initialize a new model instance.
+                 min_perplexity_length=4):
+        """Initialize the model parameters describing morph usage.
 
         Arguments:
             ppl_treshold -- Treshold value for sigmoid used to calculate
@@ -100,27 +102,129 @@ class CatmapModel:
                                If false, perplexity is based on word types.
             min_perplexity_length -- Morphs shorter than this length are
                                      ignored when calculating perplexity.
-            transition_cutoff -- FIXME
         """
 
         self._ppl_treshold = float(ppl_treshold)
         self._length_treshold = float(length_treshold)
         self._length_slope = float(length_slope)
-        self._use_word_tokens = bool(use_word_tokens)
+        self.use_word_tokens = bool(use_word_tokens)
         self._min_perplexity_length = int(min_perplexity_length)
-        self._transition_cutoff = float(transition_cutoff)
         if ppl_slope is not None:
             self._ppl_slope = float(ppl_slope)
         else:
             self._ppl_slope = 10.0 / self._ppl_treshold
 
+        # Counts of different contexts in which a morph occurs
+        self._contexts = collections.defaultdict(MorphContext)
+
+    def add_context(self, morph, pcount, rcount, i, segments):
+        """Collect information about the contexts in which the morph occurs"""
+        # Previous morph.
+        if i == 0:
+            # Word boundaries are counted as separate contexts
+            neighbour = WORD_BOUNDARY
+        else:
+            neighbour = segments[i - 1]
+            # Contexts shorter than treshold don't affect perplexity
+            if len(neighbour) < self._min_perplexity_length:
+                neighbour = None
+        if neighbour is not None:
+            self._contexts[morph].left[neighbour] += pcount
+
+        # Next morph.
+        if i == len(segments) - 1:
+            neighbour = WORD_BOUNDARY
+        else:
+            neighbour = segments[i + 1]
+            if len(neighbour) < self._min_perplexity_length:
+                neighbour = None
+        if neighbour is not None:
+            self._contexts[morph].right[neighbour] += pcount
+
+        self._contexts[morph].rcount += rcount
+
+    def condprob(self, morph):
+        """Calculate conditional probabilities P(Category|Morph) from the
+        contexts in which the morphs occur.
+
+        Arguments:
+            morph -- A string representation of the morph type.
+        """
+        context = self._contexts[morph]
+
+        prelike = sigmoid(context.right_perplexity, self._ppl_treshold,
+                          self._ppl_slope)
+        suflike = sigmoid(context.left_perplexity, self._ppl_treshold,
+                          self._ppl_slope)
+        stmlike = sigmoid(len(morph), self._length_treshold,
+                          self._length_slope)
+
+        p_nonmorpheme = (1. - prelike) * (1. - suflike) * (1. - stmlike)
+
+        if p_nonmorpheme == 1:
+            p_pre = 0.0
+            p_suf = 0.0
+            p_stm = 0.0
+        else:
+            if p_nonmorpheme < 0.001:
+                p_nonmorpheme = 0.001
+
+            normcoeff = ((1.0 - p_nonmorpheme) /
+                         ((prelike ** 2) + (suflike ** 2) + (stmlike ** 2)))
+            p_pre = (prelike ** 2) * normcoeff
+            p_suf = (suflike ** 2) * normcoeff
+            p_stm = 1.0 - p_pre - p_suf - p_nonmorpheme
+
+        return ByCategory(p_pre, p_stm, p_suf, p_nonmorpheme)
+
+    def seen_morphs(self):
+        """All morphs that have defined contexts."""
+        return self._contexts.keys()
+
+    def rcount(self, morph):
+        """The real counts in the corpus of morphs with contexts."""
+        return self._contexts[morph].rcount
+
+### End of categorization-dependent code
+########################################
+
+
+class CatmapIO(morfessor.MorfessorIO):
+    """Extends data file formats to include category tags."""
+    # FIXME unimplemented
+
+    def __init__(self, encoding=None, construction_separator=' + ',
+                 comment_start='#', compound_separator='\s+',
+                 atom_separator=None, category_separator='/'):
+        morfessor.MorfessorIO.__init__(
+            self, encoding=encoding,
+            construction_separator=construction_separator,
+            comment_start=comment_start, compound_separator=compound_separator,
+            atom_separator=atom_separator)
+        self.category_separator = category_separator
+
+
+class CatmapModel:
+    """Morfessor Categories-MAP model class."""
+
+    word_boundary = WORD_BOUNDARY
+
+    def __init__(self, morph_usage, transition_cutoff=0.00000000001):
+        """Initialize a new model instance.
+
+        Arguments:
+            morph_usage -- A MorphUsageProperties object describing how
+                           the usage of a morph affects the category.
+            transition_cutoff -- FIXME
+        """
+
+        self._morph_usage = morph_usage
+        self._transition_cutoff = float(transition_cutoff)
+
         # Cost variables
         self._lexicon_coding = morfessor.LexiconEncoding()
         # Catmap encoding also stores the HMM parameters
         self._catmap_coding = CatmapEncoding(self._lexicon_coding)
-
-        # Counts of different contexts in which a morph occurs
-        self._contexts = collections.defaultdict(MorphContext)
 
         # Conditional probabilities P(Category|Morph).
         # A dict of ByCategory objects indexed by morph. Actual probabilities.
@@ -140,7 +244,7 @@ class CatmapModel:
                              Format: (count, (morph1, morph2, ...))
         """
         self.load_baseline(segmentations)
-        until_convergence(self._estimate_transition_probs, segmentations)
+        until_convergence(self._calculate_transition_counts, segmentations)
 
     def load_baseline(self, segmentations):
         """Initialize the model using the segmentation produced by a morfessor
@@ -168,63 +272,43 @@ class CatmapModel:
             # Category tags are not needed for these calculations
             segments = [CatmapModel._detag_morph(x) for x in segments]
 
-            if self._use_word_tokens:
+            if self._morph_usage.use_word_tokens:
                 pcount = rcount
             else:
                 # pcount used for perplexity, rcount is real count
                 pcount = 1
-            num_letter_tokens[CatmapModel.word_boundary] += pcount
+            num_letter_tokens[WORD_BOUNDARY] += pcount
 
             for (i, morph) in enumerate(segments):
                 # Add previously unseen morph to lexicon cost
-                if morph not in self._contexts:
+                if morph not in self._morph_usage.seen_morphs():
                     self._lexicon_coding.add(morph)
 
                 # Collect information about the contexts in which
-                # the morphs occur. Previous morph.
-                if i == 0:
-                    # Word boundaries are counted as separate contexts
-                    neighbour = CatmapModel.word_boundary
-                else:
-                    neighbour = segments[i - 1]
-                    # Contexts shorter than treshold don't affect perplexity
-                    if len(neighbour) < self._min_perplexity_length:
-                        neighbour = None
-                if neighbour is not None:
-                    self._contexts[morph].left[neighbour] += pcount
+                # the morphs occur.
+                self._morph_usage.add_context(morph, pcount, rcount,
+                                              i, segments)
 
-                # Next morph.
-                if i == len(segments) - 1:
-                    neighbour = CatmapModel.word_boundary
-                else:
-                    neighbour = segments[i + 1]
-                    if len(neighbour) < self._min_perplexity_length:
-                        neighbour = None
-                if neighbour is not None:
-                    self._contexts[morph].right[neighbour] += pcount
-
-                self._contexts[morph].rcount += rcount
                 for letter in morph:
                     num_letter_tokens[letter] += pcount
 
         # Calculate conditional probabilities from the encountered contexts
         marginalizer = Marginalizer()
-        for morph in sorted(self._contexts, key=lambda x: len(x)):
-            self._condprobs[morph] = self._context_to_probability(morph,
-                self._contexts[morph])
+        for morph in self._morph_usage.seen_morphs():
+            self._condprobs[morph] = self._morph_usage.condprob(morph)
             # Marginalize (scale by frequency and accumulate elementwise)
-            marginalizer.add(self._contexts[morph].rcount,
-                           self._condprobs[morph])
+            marginalizer.add(self._morph_usage.rcount(morph),
+                             self._condprobs[morph])
         # Category priors from marginalization
         self._log_catpriors = _log_catprobs(marginalizer.normalized())
 
         # Calculate posterior emission probabilities
         self._category_totals = marginalizer.category_token_count
-        for morph in self._contexts:
+        for morph in self._morph_usage.seen_morphs():
             tmp = []
             for (i, total) in enumerate(self._category_totals):
                 tmp.append(self._condprobs[morph][i] *
-                           self._contexts[morph].rcount /
+                           self._morph_usage.rcount(morph) /
                            total)
             lep = _log_catprobs(ByCategory(*tmp))
             self._catmap_coding.set_log_emissionprobs(morph, lep)
@@ -236,41 +320,6 @@ class CatmapModel:
         for letter in num_letter_tokens:
             self._log_letterprobs[letter] = (log_tlt -
                                             np.log(num_letter_tokens[letter]))
-
-    def _context_to_probability(self, morph, context):
-        """Calculate conditional probabilities P(Category|Morph) from the
-        contexts in which the morphs occur.
-
-        Arguments:
-            morph -- A string representation of the morph type.
-            context -- MorphContext object for morph type.
-        """
-        # FIXME move out of model into categorization-specific part
-
-        prelike = sigmoid(context.right_perplexity, self._ppl_treshold,
-                          self._ppl_slope)
-        suflike = sigmoid(context.left_perplexity, self._ppl_treshold,
-                          self._ppl_slope)
-        stmlike = sigmoid(len(morph), self._length_treshold,
-                          self._length_slope)
-
-        p_nonmorpheme = (1. - prelike) * (1. - suflike) * (1. - stmlike)
-
-        if p_nonmorpheme == 1:
-            p_pre = 0.0
-            p_suf = 0.0
-            p_stm = 0.0
-        else:
-            if p_nonmorpheme < 0.001:
-                p_nonmorpheme = 0.001
-
-            normcoeff = ((1.0 - p_nonmorpheme) /
-                         ((prelike ** 2) + (suflike ** 2) + (stmlike ** 2)))
-            p_pre = (prelike ** 2) * normcoeff
-            p_suf = (suflike ** 2) * normcoeff
-            p_stm = 1.0 - p_pre - p_suf - p_nonmorpheme
-
-        return ByCategory(p_pre, p_stm, p_suf, p_nonmorpheme)
 
     def _unigram_transition_probs(self, category_token_count,
                                   num_word_tokens):
@@ -288,51 +337,52 @@ class CatmapModel:
         """
 
         transitions = collections.Counter()
-        nclass = {CatmapModel.word_boundary: num_word_tokens}
+        nclass = {WORD_BOUNDARY: num_word_tokens}
         for (i, category) in enumerate(CatmapModel.get_categories()):
             nclass[category] = float(category_token_count[i])
 
         num_tokens_tagged = collections.Counter()
         for cat1 in nclass:
             for cat2 in nclass:
-                if (cat1, cat2) in CatmapModel.zero_transitions:
+                if (cat1, cat2) in MorphUsageProperties.zero_transitions:
                     continue
                 # count all possible valid transitions
                 num_tokens_tagged[cat1] += nclass[cat2]
 
         for cat1 in nclass:
             for cat2 in nclass:
-                if (cat1, cat2) in CatmapModel.zero_transitions:
+                if (cat1, cat2) in MorphUsageProperties.zero_transitions:
                     continue
-                transitions[(cat1, cat2)] = nclass[cat2] 
+                transitions[(cat1, cat2)] = nclass[cat2]
 
-        for pair in CatmapModel.zero_transitions:
+        for pair in MorphUsageProperties.zero_transitions:
             transitions[pair] = 0
         # FIXME: ugly using privates of delegate class
         self._catmap_coding._transition_counts = transitions
         self._catmap_coding._cat_tagcount = num_tokens_tagged
 
-    def _estimate_transition_probs(self, segmentations):
-        """Estimate transition probabilities from a category-tagged segmented
-        corpus.
+    def _calculate_transition_counts(self, segmentations):
+        """Count the number of transitions of each type.
+        Can be used to estimate transition probabilities from
+        a category-tagged segmented corpus.
 
         Arguments:
             segmentations -- Category-tagged segmented words.
                 List of format:
                 (count, (CategorizedMorph1, CategorizedMorph2, ...)), ...
         """
-        # FIXME: rename to _calculate_transitions
         self._catmap_coding.clear_transitions()
         for rcount, segments in segmentations:
             # Only the categories matter
             categories = [x.category for x in segments]
             # Include word boundaries
-            categories.insert(0, CatmapModel.word_boundary)
-            categories.append(CatmapModel.word_boundary)
+            categories.insert(0, WORD_BOUNDARY)
+            categories.append(WORD_BOUNDARY)
             for (prev_cat, next_cat) in ngrams(categories, 2):
-                if (prev_cat, next_cat) in CatmapModel.zero_transitions:
+                pair = (prev_cat, next_cat)
+                if pair in MorphUsageProperties.zero_transitions:
                         _logger.warning('Impossible transition ' +
-                                        '%s -> %s' % (prev_cat, next_cat))
+                                        '%s -> %s' % pair)
                 self._catmap_coding.add_transitions(prev_cat, next_cat,
                                                     rcount)
 
@@ -352,7 +402,7 @@ class CatmapModel:
         # to remove the need to look them up constantly.
         categories = CatmapModel.get_categories(wb=True)
         # Index of word boundary.
-        wb = categories.index(CatmapModel.word_boundary)
+        wb = categories.index(WORD_BOUNDARY)
 
         # The lowest accumulated cost ending in each possible state.
         # Initialized to pseudo-zero for all states
@@ -390,7 +440,7 @@ class CatmapModel:
 
         # Last transition must be to word boundary
         for prev_cat in range(len(categories)):
-            pair = (categories[prev_cat], CatmapModel.word_boundary)
+            pair = (categories[prev_cat], WORD_BOUNDARY)
             cost[prev_cat] = (delta[prev_cat] +
                               self._catmap_coding.log_transitionprob(*pair))
             backtrace = np.argmin(cost)
@@ -460,7 +510,7 @@ class CatmapModel:
         """
         categories = list(ByCategory.__slots__)
         if wb:
-            categories.append(CatmapModel.word_boundary)
+            categories.append(WORD_BOUNDARY)
         return tuple(categories)
 
     @staticmethod

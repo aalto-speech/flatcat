@@ -32,9 +32,11 @@ def _load_baseline():
 
 
 def _load_catmap(baseline):
-        model = catmap.CatmapModel(ppl_treshold=10, ppl_slope=1,
-                                   length_treshold=3, length_slope=2,
-                                   use_word_tokens=False)
+        m_usage = catmap.MorphUsageProperties(ppl_treshold=10, ppl_slope=1,
+                                              length_treshold=3,
+                                              length_slope=2,
+                                              use_word_tokens=False)
+        model = catmap.CatmapModel(m_usage)
         model.load_baseline(baseline.get_segmentations())
         return model
 
@@ -118,9 +120,9 @@ class TestProbabilityEstimation(unittest.TestCase):
     def test_perplexities(self):
         for morph in self.perplexities:
             reference = self.perplexities[morph]
-            if morph not in self.model._contexts:
+            if morph not in self.model._morph_usage.seen_morphs():
                 raise KeyError('%s not in observed morphs' % (morph,))
-            observed = self.model._contexts[morph]
+            observed = self.model._morph_usage._contexts[morph]
             msg = '%s perplexity of %s, %s not almost equal to %s'
             tmp = observed.right_perplexity
             self.assertAlmostEqual(tmp, reference[0], places=3,
@@ -193,7 +195,7 @@ class TestProbabilityReEstimation(TestProbabilityEstimation):
 
         detagged = catmap.CatmapModel._detag_segmentations(self.retagged)
         self.model._estimate_probabilities(detagged)
-        self.model._estimate_transition_probs(self.retagged)
+        self.model._calculate_transition_counts(self.retagged)
 
 
 class TestBaselineSegmentation(unittest.TestCase):

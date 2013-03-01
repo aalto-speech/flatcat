@@ -3,12 +3,14 @@
 Tests for Morfessor 2.0 Categories-MAP variant.
 """
 
-import numpy as np
+import logging
+import math
 import re
 import unittest
 
 import morfessor
 import catmap
+
 
 # Directory for reference input and output files
 REFERENCE_DIR = 'reference_data/'
@@ -20,6 +22,8 @@ REFERENCE_BASELINE_PROBS = REFERENCE_DIR + 'baseline.probs.gz'
 REFERENCE_BASELINE_TAGGED = REFERENCE_DIR + 'baseline.i.tagged.gz'
 # Probabilities re-estimated based on above viterbi tagging
 REFERENCE_REESTIMATE_PROBS = REFERENCE_DIR + 'baseline.i.probs.gz'
+
+logging.basicConfig()
 
 
 def _load_baseline():
@@ -167,8 +171,7 @@ class TestProbabilityEstimation(unittest.TestCase):
                     msg=msg % (morph, category, observed[i], reference[i]))
 
     def test_transitions(self):
-        categories = list(catmap.ByCategory.__slots__)
-        categories.append(catmap.CatmapModel.word_boundary)
+        categories = self.model.get_categories(True)
         msg = 'P(%s -> %s), %s not almost equal to %s'
         reference = self.transitions
         for cat1 in categories:
@@ -239,7 +242,7 @@ class TestBaselineSegmentation(unittest.TestCase):
 def _zexp(x):
     if x == catmap.LOGPROB_ZERO:
         return 0.0
-    return np.exp(-x)
+    return math.exp(-x)
 
 
 def _exp_catprobs(probs):

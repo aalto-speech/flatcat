@@ -7,7 +7,7 @@ __all__ = ['CatmapIO', 'CatmapModel']
 
 import collections
 import logging
-import numpy as np
+import math
 
 import morfessor
 
@@ -71,6 +71,34 @@ class ByCategory:
     def copy(self):
         tmp = tuple(iter(self))
         return ByCategory(*tmp)
+
+
+class MorphContext:
+    """Represents the different contexts in which a morph has been
+    encountered.
+    """
+
+    def __init__(self):
+        self.rcount = 0
+        self.left = collections.Counter()
+        self.right = collections.Counter()
+
+    @property
+    def left_perplexity(self):
+        return MorphContext._perplexity(self.left)
+
+    @property
+    def right_perplexity(self):
+        return MorphContext._perplexity(self.right)
+
+    @staticmethod
+    def _perplexity(contexts):
+        entropy = 0
+        total_tokens = float(sum(contexts.values()))
+        for c in contexts:
+            p = float(contexts[c]) / total_tokens
+            entropy -= p * math.log(p)
+        return math.exp(entropy)
 
 
 class MorphUsageProperties:
@@ -244,7 +272,8 @@ class CatmapModel:
                              Format: (count, (morph1, morph2, ...))
         """
         self.load_baseline(segmentations)
-        until_convergence(self._calculate_transition_counts, segmentations)
+        self.until_convergence(self._calculate_transition_counts,
+                               segmentations)
 
     def load_baseline(self, segmentations):
         """Initialize the model using the segmentation produced by a morfessor
@@ -256,7 +285,6 @@ class CatmapModel:
         """
 
         self._estimate_probabilities(segmentations)
-
         self._unigram_transition_probs(self._category_totals,
                                        self._num_word_tokens)
 
@@ -315,11 +343,11 @@ class CatmapModel:
 
         # Calculate letter log probabilities
         self._total_letter_tokens = sum(num_letter_tokens.values())
-        log_tlt = np.log(self._total_letter_tokens)
+        log_tlt = math.log(self._total_letter_tokens)
         self._log_letterprobs = dict()
         for letter in num_letter_tokens:
             self._log_letterprobs[letter] = (log_tlt -
-                                            np.log(num_letter_tokens[letter]))
+                math.log(num_letter_tokens[letter]))
 
     def _unigram_transition_probs(self, category_token_count,
                                   num_word_tokens):
@@ -401,56 +429,58 @@ class CatmapModel:
         # instead of names and the word boundary object,
         # to remove the need to look them up constantly.
         categories = CatmapModel.get_categories(wb=True)
-        # Index of word boundary.
         wb = categories.index(WORD_BOUNDARY)
 
-        # The lowest accumulated cost ending in each possible state.
+        # Grid consisting of
+        # the lowest accumulated cost ending in each possible state.
+        # and back pointers that indicate the best path.
         # Initialized to pseudo-zero for all states
-        delta = LOGPROB_ZERO * np.ones(len(categories))
-        # Back pointers that indicate the best path
-        psi = -1 * np.ones((len(segments) + 1,
-                            len(categories)), dtype='int')
-        # First row of back pointers point to word boundary
-        #psi[0] = wb * np.ones(len(categories))
+        ViterbiNode = collections.namedtuple('ViterbiNode',
+                                             ['cost', 'backpointer'])
+        grid = [[ViterbiNode(LOGPROB_ZERO, None)] * len(categories)]
+        # Except probability one that first state is a word boundary
+        grid[0][wb] = ViterbiNode(0, None)
 
-        # Probability one that first state is a word boundary
-        delta[wb] = 0
-
-        # Cumulative costs for each category at current time step
-        cost = LOGPROB_ZERO * np.ones(len(categories))
         # Temporaries
-        best_cat = -1 * np.ones(len(categories), dtype='int')
-        best_cost = LOGPROB_ZERO * np.ones(len(categories))
+        # Cumulative costs for each category at current time step
+        cost = []
+        best = []
 
         for (i, morph) in enumerate(segments):
-            for next_cat in range(len(categories) - 1):
+            for next_cat in range(len(categories)):
+                if next_cat == wb:
+                    # Impossible to visit boundary in the middle of the
+                    # sequence
+                    best.append(ViterbiNode(LOGPROB_ZERO, None))
+                    continue
                 for prev_cat in range(len(categories)):
                     pair = (categories[prev_cat], categories[next_cat])
                     # Cost of selecting prev_cat as previous state
                     # if now at next_cat
-                    cost[prev_cat] = (delta[prev_cat] +
-                        self._catmap_coding.transit_emit_cost(
-                            pair[0], pair[1], morph))
-                best_cat[next_cat] = np.argmin(cost)
-                best_cost[next_cat] = cost[best_cat[next_cat]]
-            # Update delta and psi to prepare for next iteration
-            delta = best_cost
-            psi[i] = best_cat
-            best_cost = LOGPROB_ZERO * np.ones(len(categories))
+                    cost.append(grid[i][prev_cat].cost +
+                                self._catmap_coding.transit_emit_cost(
+                                pair[0], pair[1], morph))
+                best.append(ViterbiNode(*_minargmin(cost)))
+                cost = []
+            # Update grid to prepare for next iteration
+            grid.append(best)
+            best = []
 
         # Last transition must be to word boundary
         for prev_cat in range(len(categories)):
             pair = (categories[prev_cat], WORD_BOUNDARY)
-            cost[prev_cat] = (delta[prev_cat] +
-                              self._catmap_coding.log_transitionprob(*pair))
-            backtrace = np.argmin(cost)
+            cost = (grid[-1][prev_cat].cost +
+                    self._catmap_coding.log_transitionprob(*pair))
+            best.append(cost)
+        backtrace = ViterbiNode(*_minargmin(best))
 
         # Backtrace for the best category sequence
-        result = [CategorizedMorph(segments[-1], categories[backtrace])]
+        result = [CategorizedMorph(segments[-1],
+                  categories[backtrace.backpointer])]
         for i in range(len(segments) - 1, 0, -1):
-            backtrace = psi[i, backtrace]
+            backtrace = grid[i + 1][backtrace.backpointer]
             result.insert(0, CategorizedMorph(segments[i - 1],
-                                                categories[backtrace]))
+                categories[backtrace.backpointer]))
         return result
 
     def viterbi_tag_segmentations(self, segmentations):
@@ -545,39 +575,11 @@ class CategorizedMorph:
     def __repr__(self):
         if self.category == CategorizedMorph.no_category:
             return unicode(self.morph)
-        return '%{}/%{}'.format(self.morph, self.category)
+        return '{}/{}'.format(self.morph, self.category)
 
     def __eq__(self, other):
         return (self.morph == other.morph and
                 self.category == other.category)
-
-
-class MorphContext:
-    """Represents the different contexts in which a morph has been
-    encountered.
-    """
-
-    def __init__(self):
-        self.rcount = 0
-        self.left = collections.Counter()
-        self.right = collections.Counter()
-
-    @property
-    def left_perplexity(self):
-        return MorphContext._perplexity(self.left)
-
-    @property
-    def right_perplexity(self):
-        return MorphContext._perplexity(self.right)
-
-    @staticmethod
-    def _perplexity(contexts):
-        entropy = 0
-        total_tokens = float(sum(contexts.values()))
-        for c in contexts:
-            p = float(contexts[c]) / total_tokens
-            entropy -= p * np.log(p)
-        return np.exp(entropy)
 
 
 class Marginalizer(ByCategory):
@@ -686,7 +688,7 @@ class CatmapEncoding(morfessor.Encoding):
 
 
 def sigmoid(value, treshold, slope):
-    return 1.0 / (1.0 + np.exp(-slope * (value - treshold)))
+    return 1.0 / (1.0 + math.exp(-slope * (value - treshold)))
 
 
 def ngrams(sequence, n=2):
@@ -700,13 +702,19 @@ def ngrams(sequence, n=2):
             yield(tuple(window))
 
 
+def _minargmin(sequence):
+    best = (None, None)
+    for (i, value) in enumerate(sequence):
+        if best[0] is None or value < best[0]:
+            best = (value, i)
+    return best
+
+
 def _zlog(x):
     """Logarithm which uses constant value for log(0) instead of -inf"""
-    # FIXME not sure if this is needed anymore when using numpy
-
     if x == 0:
         return LOGPROB_ZERO
-    return -np.log(x)
+    return -math.log(x)
 
 
 def _log_catprobs(probs):

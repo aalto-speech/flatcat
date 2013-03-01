@@ -45,7 +45,7 @@ class ByCategory:
         if len(args) == 0:
             args = [0.0] * len(self.__slots__)
         tmp = tuple(args)
-        msg = 'ByCategory initialized with %d values (expecting %d)' % (
+        msg = 'ByCategory initialized with {} values (expecting {})'.format(
             len(tmp), len(self.__slots__))
         assert len(tmp) == len(self.__slots__), msg
         for (key, val) in zip(self.__slots__, args):
@@ -410,7 +410,7 @@ class CatmapModel:
                 pair = (prev_cat, next_cat)
                 if pair in MorphUsageProperties.zero_transitions:
                         _logger.warning('Impossible transition ' +
-                                        '%s -> %s' % pair)
+                                        '{!r} -> {!r}'.format(*pair))
                 self._catmap_coding.add_transitions(prev_cat, next_cat,
                                                     rcount)
 
@@ -512,8 +512,8 @@ class CatmapModel:
         detagged = CatmapModel._detag_segmentations(segmentations)
         previous_segmentation = self.viterbi_tag_segmentations(detagged)
         for iteration in range(max_iterations):
-            _logger.info('Iteration number %d/%d.' % (iteration,
-                                                      max_iterations))
+            _logger.info('Iteration number {}/{}.'.format(iteration,
+                                                          max_iterations))
             # perform the optimization
             func(previous_segmentation)
 
@@ -524,9 +524,9 @@ class CatmapModel:
                     differences += 1
             if differences <= max_differences:
                 _logger.info('Converged, with ' +
-                    '%d differences in final iteration.' % (differences,))
+                    '{} differences in final iteration.'.format(differences))
                 break
-            _logger.info('%d differences.' % (differences,))
+            _logger.info('{} differences.'.format(differences))
             previous_segmentation = current_segmentation
 
     def log_emissionprobs(self, morph):

@@ -209,6 +209,9 @@ class MorphUsageProperties:
         """All morphs that have defined contexts."""
         return self._contexts.keys()
 
+    def __contains__(self, morph):
+        return morph in self._contexts
+
     def rcount(self, morph):
         """The real counts in the corpus of morphs with contexts."""
         return self._contexts[morph].rcount
@@ -262,8 +265,6 @@ class CatmapModel:
         # Single ByCategory object. Log-probabilities.
         self._log_catpriors = None
 
-        self._num_word_tokens = 0
-
     def train(self, segmentations):
         """Perform Cat-MAP training on the model.
 
@@ -271,6 +272,8 @@ class CatmapModel:
             segmentations -- Segmentation of corpus using the baseline method.
                              Format: (count, (morph1, morph2, ...))
         """
+        # FIXME this is not good for big files
+        segmentations = tuple(segmentations)
         self.load_baseline(segmentations)
         self.until_convergence(self._calculate_transition_counts,
                                segmentations)
@@ -286,17 +289,17 @@ class CatmapModel:
 
         self._estimate_probabilities(segmentations)
         self._unigram_transition_probs(self._category_totals,
-                                       self._num_word_tokens)
+                                       self.word_tokens)
 
     def _estimate_probabilities(self, segmentations):
         """Estimates P(Category|Morph), P(Category) and P(Morph|Category).
         """
 
         num_letter_tokens = collections.Counter()
-        self._num_word_tokens = 0
+        self._catmap_coding.boundaries = 0
 
         for rcount, segments in segmentations:
-            self._num_word_tokens += rcount
+            self._catmap_coding.boundaries += rcount
             # Category tags are not needed for these calculations
             segments = [CatmapModel._detag_morph(x) for x in segments]
 
@@ -309,7 +312,7 @@ class CatmapModel:
 
             for (i, morph) in enumerate(segments):
                 # Add previously unseen morph to lexicon cost
-                if morph not in self._morph_usage.seen_morphs():
+                if morph not in self._morph_usage:
                     self._lexicon_coding.add(morph)
 
                 # Collect information about the contexts in which
@@ -411,8 +414,8 @@ class CatmapModel:
                 if pair in MorphUsageProperties.zero_transitions:
                         _logger.warning('Impossible transition ' +
                                         '{!r} -> {!r}'.format(*pair))
-                self._catmap_coding.add_transitions(prev_cat, next_cat,
-                                                    rcount)
+                self._catmap_coding.update_transitions(prev_cat, next_cat,
+                                                       rcount)
 
     def viterbi_tag(self, segments):
         """Tag a pre-segmented word using the learned model.
@@ -486,13 +489,11 @@ class CatmapModel:
     def viterbi_tag_segmentations(self, segmentations):
         """Convenience wrapper around viterbi_tag for a list of segmentations
         with attached counts."""
-        tagged = []
         for (count, segmentation) in segmentations:
-            tagged.append((count, self.viterbi_tag(segmentation)))
-        return tagged
+            yield (count, self.viterbi_tag(segmentation))
 
     def until_convergence(self, func, segmentations, max_differences=0,
-                          max_iterations=15):
+                          max_cost_difference=-10000, max_iterations=15):
         """Iterates the specified training function until the segmentations
         produced by the model for the given input no longer change more than
         the specified treshold, or until maximum number of iterations is
@@ -504,21 +505,32 @@ class CatmapModel:
                     to be trained.
             segmentations -- list of (count, segmentation) pairs. Can be
                              either tagged or untagged.
-            max_differences -- Maximum number of changed category tags in
-                               the final iteration. Default 0.
+            max_differences -- Maximum number of words with changed
+                               segmentation or category tags in the final
+                               iteration. Default 0.
+            max_cost_difference -- Stop iterating if cost reduction between
+                                   iterations is below this limit.
             max_iterations -- Maximum number of iterations. Default 15.
         """
 
-        detagged = CatmapModel._detag_segmentations(segmentations)
-        previous_segmentation = self.viterbi_tag_segmentations(detagged)
+        detagged = tuple(CatmapModel._detag_segmentations(segmentations))
+        previous_segmentation = tuple(
+            self.viterbi_tag_segmentations(detagged))
+        previous_cost = self.get_cost()
         for iteration in range(max_iterations):
             _logger.info('Iteration number {}/{}.'.format(iteration,
                                                           max_iterations))
             # perform the optimization
             func(previous_segmentation)
 
-            current_segmentation = self.viterbi_tag_segmentations(detagged)
-            differences = 0
+            cost = self.get_cost()
+            cost_diff = cost - previous_cost
+            if -cost_diff <= max_cost_difference:
+                _logger.info('Converged, with cost difference ' +
+                    '{} in final iteration.'.format(cost_diff))
+                break
+            current_segmentation = tuple(
+                self.viterbi_tag_segmentations(detagged))
             for (r, o) in zip(previous_segmentation, current_segmentation):
                 if r != o:
                     differences += 1
@@ -526,11 +538,18 @@ class CatmapModel:
                 _logger.info('Converged, with ' +
                     '{} differences in final iteration.'.format(differences))
                 break
-            _logger.info('{} differences.'.format(differences))
+            _logger.info('{} differences. Cost difference: {}'.format(
+                differences, cost_diff))
             previous_segmentation = current_segmentation
+            previous_cost = cost
 
     def log_emissionprobs(self, morph):
         return self._catmap_coding.log_emissionprobs(morph)
+
+    def get_cost(self):
+        """Return current model encoding cost."""
+        # FIXME: annotation coding cost for supervised
+        return self._catmap_coding.get_cost() + self._lexicon_coding.get_cost()
 
     @staticmethod
     def get_categories(wb=False):
@@ -560,6 +579,10 @@ class CatmapModel:
         probability of the rarest known letter"""
         return 2 * max(self._log_letterprobs.values())
 
+    @property
+    def word_tokens(self):
+        return self._catmap_coding.boundaries
+
 
 class CategorizedMorph:
     """Represents a morph with attached category information."""
@@ -575,7 +598,7 @@ class CategorizedMorph:
     def __repr__(self):
         if self.category == CategorizedMorph.no_category:
             return unicode(self.morph)
-        return '{}/{}'.format(self.morph, self.category)
+        return u'{}/{}'.format(self.morph, self.category)
 
     def __eq__(self, other):
         return (self.morph == other.morph and
@@ -619,15 +642,14 @@ class Marginalizer(ByCategory):
         return ByCategory(*tmp)
 
 
-class CatmapEncoding(morfessor.Encoding):
+class CatmapEncoding(morfessor.CorpusEncoding):
     """Class for calculating the encoding costs of the grammar and the
     corpus. Also stores the HMM parameters.
     """
     # can inherit without change: frequency_distribution_cost,
 
     def __init__(self, lexicon_encoding, weight=1.0):
-        super(CatmapEncoding, self).__init__(weight)
-        self.lexicon_encoding = lexicon_encoding
+        super(CatmapEncoding, self).__init__(lexicon_encoding, weight)
 
         # Posterior emission probabilities P(Morph|Category).
         # A dict of ByCategory objects indexed by morph. Log-probabilities.
@@ -660,7 +682,7 @@ class CatmapEncoding(morfessor.Encoding):
         self._cat_tagcount.clear()
         self._log_transitionprob_cache.clear()
 
-    def add_transitions(self, prev_cat, next_cat, rcount):
+    def update_transitions(self, prev_cat, next_cat, rcount):
         rcount = float(rcount)
         self._transition_counts[(prev_cat, next_cat)] += rcount
         self._cat_tagcount[prev_cat] += rcount
@@ -684,7 +706,39 @@ class CatmapEncoding(morfessor.Encoding):
         return (self.log_transitionprob(prev_cat, next_cat) +
                 self._log_emissionprobs[morph][next_cat])
 
-# morfessor.LexiconEncoding can be used without modification
+    def update_emissions(self, category, morph, new_count):
+        """Updates the number of observed emissions, and the cumulative
+        cost of the corpus.
+        """
+
+        old_count = self._emission_counts[morph][category]
+        diff_count = new_count - old_count
+        self.tokens += diff_count
+        self.logtokensum += (diff_count *
+                             self._log_emissionprobs[morph][category])
+
+    def update_count(self, construction, old_count, new_count):
+        raise Exception('Inherited method not appropriate for CatmapEncoding')
+
+    def get_cost(self):
+        """Override for the Encoding get_cost function."""
+        if self.boundaries == 0:
+            return 0.0
+
+        logtransitionsum = 0
+        categories = CatmapModel.get_categories(wb=True)
+        for next_cat in categories:
+            for prev_cat in categories:
+                pair = (prev_cat, next_cat)
+                logtransitionsum += (self._transition_counts[pair] *
+                                     self.log_transitionprob(*pair))
+
+        n = self.tokens + self.boundaries
+        return  ((n * math.log(n)
+                  - self.boundaries * math.log(self.boundaries)
+                  - self.logtokensum + logtransitionsum
+                 ) * self.weight
+                 + self.frequency_distribution_cost())
 
 
 def sigmoid(value, treshold, slope):

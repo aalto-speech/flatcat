@@ -194,7 +194,8 @@ class TestProbabilityReEstimation(TestProbabilityEstimation):
         io = morfessor.MorfessorIO(encoding='latin-1')
         segmentations = io.read_segmentation_file(
             REFERENCE_BASELINE_SEGMENTATION)
-        self.retagged = self.model.viterbi_tag_segmentations(segmentations)
+        self.retagged = tuple(self.model.viterbi_tag_segmentations(
+            segmentations))
 
         detagged = catmap.CatmapModel._detag_segmentations(self.retagged)
         self.model._estimate_probabilities(detagged)

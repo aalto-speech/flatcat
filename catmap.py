@@ -77,6 +77,7 @@ class MorphContext:
     """Represents the different contexts in which a morph has been
     encountered.
     """
+    # FIXME these counters take up a lot of memory: should be only temporary
 
     def __init__(self):
         self.rcount = 0
@@ -212,8 +213,13 @@ class MorphUsageProperties:
     def __contains__(self, morph):
         return morph in self._contexts
 
+    def get(self, morph):
+        return self._contexts[morph].copy()
+
     def rcount(self, morph):
         """The real counts in the corpus of morphs with contexts."""
+        if morph not in self._contexts:
+            return 0
         return self._contexts[morph].rcount
 
 ### End of categorization-dependent code
@@ -272,7 +278,8 @@ class CatmapModel:
             segmentations -- Segmentation of corpus using the baseline method.
                              Format: (count, (morph1, morph2, ...))
         """
-        # FIXME this is not good for big files
+        # FIXME this is not good for big files. OTOH loading the baseline
+        # will be done differently.
         segmentations = tuple(segmentations)
         self.load_baseline(segmentations)
         self.until_convergence(self._calculate_transition_counts,
@@ -417,6 +424,54 @@ class CatmapModel:
                 self._catmap_coding.update_transitions(prev_cat, next_cat,
                                                        rcount)
 
+    def _split_epoch(self, func):
+        # FIXME random shuffle or sort by length?
+        for morph in self._morph_usage.seen_morphs():           # FIXME
+            func(morph)
+
+    def _recursive_split(self, morph):
+        if len(morph) == 1:
+            return
+        context = self._morph_usage.get(morph)                  # FIXME
+        if context.rcount == 0:
+            return
+
+        # Cost of leaving the morph un-split
+        best = [(self.get_cost(), 0)]
+
+        # Remove all instances of the morph
+        self._remove(morph, context)
+        # Cost of each possible split into two parts
+        for splitloc in range(1, len(morph)):
+            prefix = morph[:splitloc]
+            suffix = morph[splitloc:]
+
+        if best[1] == 0:
+            self._readd(morph, context)
+        else:
+            pass
+
+    def _modify_morph_count(self, morph, dcount):
+        """Modifies the count of a morph in the lexicon.
+        Does not affect transitions or emissions."""
+        old_count = self._morph_usage.rcount(morph)             # FIXME
+        new_count = old_count + dcount
+        if old_count == 0 and new_count > 0:
+            self._lexicon_coding.add(morph)
+            #self._morph_usage.estimate_new(morph, new_count)   # FIXME
+        elif old_count > 0 and new_count == 0:
+            self._lexicon_coding.remove(morph)
+
+    def _remove(self, morph, context):
+        """Removes a morph completely from the lexicon.
+        Transitions and emissions are also updated."""
+        pass
+
+    def _readd(self, morph, context):
+        """Readds a morph previously removed from the lexicon.
+        Transitions and emissions are also restored."""
+        pass
+
     def viterbi_tag(self, segments):
         """Tag a pre-segmented word using the learned model.
 
@@ -518,7 +573,7 @@ class CatmapModel:
             self.viterbi_tag_segmentations(detagged))
         previous_cost = self.get_cost()
         for iteration in range(max_iterations):
-            _logger.info('Iteration number {}/{}.'.format(iteration,
+            _logger.info('Iteration number {}/{}.'.format(iteration + 1,
                                                           max_iterations))
             # perform the optimization
             func(previous_segmentation)
@@ -710,8 +765,11 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         """Updates the number of observed emissions, and the cumulative
         cost of the corpus.
         """
+        # FIXME: needs the same kind of temporary entry removal as the
+        # estimated contexts. Maybe this should be kept there instead?
 
         old_count = self._emission_counts[morph][category]
+        self._emission_counts[morph][category] += new_count
         diff_count = new_count - old_count
         self.tokens += diff_count
         self.logtokensum += (diff_count *
@@ -725,6 +783,7 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         if self.boundaries == 0:
             return 0.0
 
+        # FIXME: could be accumulated instead of recalculated
         logtransitionsum = 0
         categories = CatmapModel.get_categories(wb=True)
         for next_cat in categories:

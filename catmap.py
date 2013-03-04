@@ -779,17 +779,24 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         return (self.log_transitionprob(prev_cat, next_cat) +
                 self._log_emissionprobs[morph][next_i])
 
-    def update_emissions(self, category, morph, new_count):
-        """Updates the number of observed emissions, and the cumulative
-        cost of the corpus.
+    def update_emission(self, category, morph, new_count):
+        """Updates the number of observed emissions of a single morph from a
+        single category, and the cumulative cost of the corpus.
         """
-        # FIXME: needs the same kind of temporary entry removal as the
-        # estimated contexts. Maybe this should be kept there instead?
-
         old_count = self._emission_counts[morph][category]
+        diff_count = new_count - old_count
+        self._update_emission_cost(category, morph, diff_count)
         self._emission_counts[morph] = _set_nt_at_index(
             self._emission_counts[morph], category, new_count)
-        diff_count = new_count - old_count
+
+    def remove_emissions(self, morph):
+        """Removes all emissions of a morph from all categories"""
+        for category in range(len(CatmapModel.get_categories())):
+            diff_count = -self._emission_counts[morph][category]
+            self._update_emission_cost(category, morph, diff_count)
+        del self._emission_counts[morph]
+
+    def _update_emission_cost(self, category, morph, diff_count):
         self.tokens += diff_count
         self.logtokensum += (diff_count *
                              self._log_emissionprobs[morph][category])

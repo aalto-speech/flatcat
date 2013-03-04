@@ -119,7 +119,7 @@ class TestProbabilityEstimation(unittest.TestCase):
                 self.transitions[cats] = (float(m.group(3)), int(m.group(4)))
 
         self.catpriors = catmap.ByCategory(*(catpriors_tmp[x] for x in
-                                           catmap.ByCategory.__slots__))
+                                           self.model.get_categories()))
 
     def test_perplexities(self):
         for morph in self.perplexities:
@@ -140,17 +140,17 @@ class TestProbabilityEstimation(unittest.TestCase):
     def test_condprobs(self):
         for morph in self.condprobs:
             reference = self.condprobs[morph]
-            if morph not in self.model._condprobs:
+            if morph not in self.model._morph_usage.seen_morphs():
                 raise KeyError('%s not in observed morphs' % (morph,))
-            observed = self.model._condprobs[morph]
+            observed = self.model._morph_usage.condprob(morph)
             msg = 'P(%s | "%s"), %s not almost equal to %s'
 
-            for (i, category) in enumerate(catmap.ByCategory.__slots__):
+            for (i, category) in enumerate(self.model.get_categories()):
                 self.assertAlmostEqual(observed[i], reference[i], places=9,
                     msg=msg % (category, morph, observed[i], reference[i]))
 
     def test_catpriors(self):
-        for (i, category) in enumerate(catmap.ByCategory.__slots__):
+        for (i, category) in enumerate(self.model.get_categories()):
             reference = self.catpriors
             observed = _exp_catprobs(self.model._log_catpriors)
             msg = 'P(%s), %s not almost equal to %s'
@@ -166,7 +166,7 @@ class TestProbabilityEstimation(unittest.TestCase):
                 raise KeyError('%s not in observed morphs' % (morph,))
             msg = 'P(%s | "%s"), %s not almost equal to %s'
 
-            for (i, category) in enumerate(catmap.ByCategory.__slots__):
+            for (i, category) in enumerate(self.model.get_categories()):
                 self.assertAlmostEqual(observed[i], reference[i], places=9,
                     msg=msg % (morph, category, observed[i], reference[i]))
 

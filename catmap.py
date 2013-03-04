@@ -186,7 +186,14 @@ class MorphUsageProperties:
         return ByCategory(p_pre, p_stm, p_suf, p_nonmorpheme)
 
     def feature_cost(self, morph):
-        return 0.0      # FIXME unimplemented
+        """The cost of encoding the necessary features along with a morph.
+        
+        The length in characters of the morph is also a feature, but it does
+        not need to be encoded as it is available from the surface form.
+        """
+        context = self._contexts[morph]
+        return (universalprior(context.right_perplexity) +
+                universalprior(context.left_perplexity))
 
     def seen_morphs(self):
         """All morphs that have defined contexts."""
@@ -196,7 +203,7 @@ class MorphUsageProperties:
         return morph in self._contexts
 
     def get(self, morph):
-        return self._contexts[morph].copy()
+        return self._contexts[morph]
 
     def count(self, morph):
         """The counts in the corpus of morphs with contexts."""
@@ -436,18 +443,19 @@ class CatmapModel:
     def _modify_morph_count(self, morph, dcount):
         """Modifies the count of a morph in the lexicon.
         Does not affect transitions or emissions."""
-        old_count = self._morph_usage.rcount(morph)             # FIXME
+        old_count = self._morph_usage.count(morph)
         new_count = old_count + dcount
         if old_count == 0 and new_count > 0:
             self._lexicon_coding.add(morph)
-            #self._morph_usage.estimate_new(morph, new_count)   # FIXME
         elif old_count > 0 and new_count == 0:
             self._lexicon_coding.remove(morph)
 
     def _remove(self, morph, context):
         """Removes a morph completely from the lexicon.
         Transitions and emissions are also updated."""
-        pass
+        self._modify_morph_count(morph, -self._morph_usage.count(morph))
+        # FIXME
+        #self._catmap_coding.update_emissions(category, morph, new_count)
 
     def _readd(self, morph, context):
         """Readds a morph previously removed from the lexicon.
@@ -858,6 +866,14 @@ class Sparse(dict):
 def sigmoid(value, treshold, slope):
     return 1.0 / (1.0 + math.exp(-slope * (value - treshold)))
 
+
+_LOG_C = math.log(2.865)
+def universalprior(positive_number):
+    """Compute the number of nats that are necessary for coding
+    a positive integer according to Rissanen's universal prior.
+    """
+
+    return _LOG_C + math.log(positive_number)
 
 def ngrams(sequence, n=2):
     window = []

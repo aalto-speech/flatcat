@@ -201,7 +201,6 @@ class MorphUsageProperties:
 
     def estimate_contexts(self, old_morphs, new_morphs):
         temporaries = []
-        count = self.count(old_morphs[0])
         for (i, morph) in enumerate(new_morphs):
             if morph in self:
                 # The morph already has real context: no need to estimate
@@ -217,6 +216,7 @@ class MorphUsageProperties:
                 r_ppl = self._contexts[old_morphs[-1]].right_perplexity
             else:
                 r_ppl = 1.0
+            count = 0   # estimating does not add instances of the morph
             self._contexts[morph] = MorphContext(count, l_ppl, r_ppl)
             temporaries.append(morph)
         return temporaries
@@ -225,6 +225,7 @@ class MorphUsageProperties:
         for morph in temporaries:
             if morph not in self:
                 continue
+            assert self._contexts[morph].count == 0, u'{}: {}'.format(morph, self._contexts[morph].count)
             del self._contexts[morph]
 
     # The methods in this class below this line are helpers that will
@@ -245,6 +246,10 @@ class MorphUsageProperties:
         if morph not in self._contexts:
             return 0
         return self._contexts[morph].count
+
+    def set_count(self, morph, new_count):
+        self._contexts[morph] = _set_nt_at_index(self._contexts[morph],
+            MorphContext._fields.index('count'), new_count)
 
     @staticmethod
     def valid_split_transitions():
@@ -296,7 +301,7 @@ class CatmapModel:
         self._transition_cutoff = float(transition_cutoff)
 
         # Cost variables
-        self._lexicon_coding = LexiconEncoding(morph_usage)
+        self._lexicon_coding = CatmapLexiconEncoding(morph_usage)
         # Catmap encoding also stores the HMM parameters
         self._catmap_coding = CatmapEncoding(self._lexicon_coding)
 
@@ -318,12 +323,12 @@ class CatmapModel:
         segmentations = self.until_convergence(
             self._calculate_transition_counts,
             self.viterbi_tag_segmentations,
-            segmentations, max_iterations=1)    # FIXME max
+            segmentations, max_iterations=1)    # FIXME debug max
         self._calculate_emission_counts(segmentations)
         segmentations = self.until_convergence(
             lambda x: self._split_epoch(self._recursive_split, x),
             self.viterbi_tag_segmentations,
-            segmentations)
+            segmentations, max_iterations=2)    # FIXME debug max
 
     def load_baseline(self, segmentations):
         """Initialize the model using the segmentation produced by a morfessor
@@ -335,8 +340,7 @@ class CatmapModel:
         """
 
         self._estimate_probabilities(segmentations)
-        self._unigram_transition_probs(self._category_totals,
-                                       self.word_tokens)
+        self._unigram_transition_probs()
 
     def _estimate_probabilities(self, segmentations):
         """Estimates P(Category|Morph), P(Category) and P(Morph|Category).
@@ -403,42 +407,42 @@ class CatmapModel:
             self._log_letterprobs[letter] = (log_tlt -
                 math.log(num_letter_tokens[letter]))
 
-    def _unigram_transition_probs(self, category_token_count,
-                                  num_word_tokens):
+    def _unigram_transition_probs(self):
         """Initial transition probabilities based on unigram distribution.
 
         Each tag is presumed to be succeeded by the expectation over all data
         of the number of prefixes, suffixes, stems, non-morphemes and word
         boundaries.
-
-        Arguments:
-            category_token_count -- A ByCategory with unnormalized
-                                    morph token counts.
-            num_word_tokens -- Total number of word tokens, for word boundary
-                               probability.
         """
 
         transitions = collections.Counter()
-        nclass = {WORD_BOUNDARY: num_word_tokens}
+        nclass = {WORD_BOUNDARY: self.word_tokens}
         for (i, category) in enumerate(CatmapModel.get_categories()):
-            nclass[category] = float(category_token_count[i])
+            nclass[category] = float(self._category_totals[i])
 
         num_tokens_tagged = collections.Counter()
+        valid_transitions = []
         for cat1 in nclass:
             for cat2 in nclass:
                 if (cat1, cat2) in MorphUsageProperties.zero_transitions:
                     continue
-                # count all possible valid transitions
-                num_tokens_tagged[cat1] += nclass[cat2]
+                valid_transitions.append((cat1, cat2))
 
-        for cat1 in nclass:
-            for cat2 in nclass:
-                if (cat1, cat2) in MorphUsageProperties.zero_transitions:
-                    continue
+        for (cat1, cat2) in valid_transitions:
+                # count all possible valid transitions
+                transition_share = nclass[cat2]
+                num_tokens_tagged[cat1] += nclass[cat2]
                 transitions[(cat1, cat2)] = nclass[cat2]
 
         for pair in MorphUsageProperties.zero_transitions:
             transitions[pair] = 0
+
+        normalization = (sum(nclass.values()) /
+                         sum(num_tokens_tagged.values()))
+        for key in transitions:
+            transitions[key] *= normalization
+        for key in num_tokens_tagged:
+            num_tokens_tagged[key] *= normalization
 
         self._catmap_coding.set_transition_counts(transitions,
                                                   num_tokens_tagged)
@@ -470,9 +474,11 @@ class CatmapModel:
 
     def _split_epoch(self, func, segmentations):
         # FIXME random shuffle or sort by length?
-        for morph in self._morph_usage.seen_morphs():
+        epoch_morphs = tuple(self._morph_usage.seen_morphs())
+        for morph in epoch_morphs:
             func(morph)
         # FIXME should these be recalculated each iteration or not?
+        self._estimate_probabilities(segmentations)
         self._calculate_transition_counts(segmentations)
         self._calculate_emission_counts(segmentations)
 
@@ -493,7 +499,7 @@ class CatmapModel:
         assert total_count == sum(old_emissions), msg
 
         # Temporary estimated contexts
-        temporaries = []
+        temporaries = set()
 
         # Cost of each possible split into two parts
         for splitloc in range(1, len(morph)):
@@ -501,54 +507,75 @@ class CatmapModel:
             suffix = morph[splitloc:]
             # Make sure that there are context features available
             # (real or estimated) for the submorphs
-            temporaries.extend(self._morph_usage.estimate_contexts(
-                morph, (prefix, suffix)))
+            tmp = (self._morph_usage.estimate_contexts(morph,
+                                                       (prefix, suffix)))
+            temporaries.update(tmp)
             # Consider tagging the newly formed morphs in all valid ways
             # Simplifying assumption: all instances are tagged the same way
             tmp_valid = MorphUsageProperties.valid_split_transitions()
             for (prefix_cat, suffix_cat) in tmp_valid:
-                self._catmap_coding.update_emission(prefix_cat, prefix,
-                                                   total_count)
-                self._modify_morph_count(prefix, total_count)
-                self._catmap_coding.update_emission(suffix_cat, suffix,
-                                                   total_count)
-                self._modify_morph_count(suffix, total_count)
-                self._catmap_coding.update_transitions(prefix_cat,
-                                                       suffix_cat,
-                                                       total_count)
+                self._modify_coding_costs((prefix, suffix),
+                                          (prefix_cat, suffix_cat),
+                                          total_count)
 
                 cost = self.get_cost()
                 if cost < best[0]:
                     best = (cost, splitloc, (prefix_cat, suffix_cat))
 
                 # Undo the changes
-                self._catmap_coding.update_emission(prefix_cat, prefix,
-                                                   -total_count)
-                self._modify_morph_count(prefix, -total_count)
-                self._catmap_coding.update_emission(suffix_cat, suffix,
-                                                   -total_count)
-                self._modify_morph_count(suffix, -total_count)
-                self._catmap_coding.update_transitions(prefix_cat,
-                                                       suffix_cat,
-                                                       -total_count)
+                self._modify_coding_costs((prefix, suffix),
+                                          (prefix_cat, suffix_cat),
+                                          -total_count)
 
         if best[1] == 0:
+            # Best option was to do nothing: revert changes
             self._readd(morph, old_emissions)
+            self._morph_usage.remove_temporaries(temporaries)
         else:
             splitloc = best[1]
             prefix_cat, suffix_cat = best[2]
             prefix = morph[:splitloc]
             suffix = morph[splitloc:]
-            print(u'FIXME, found a good split {}/{} + {}/{}'.format(
+            _logger.debug(u'Found a good split {}/{} + {}/{}'.format(
                 prefix, prefix_cat, suffix, suffix_cat))
-            # FIXME actually perform the split, and then recurse
-        self._morph_usage.remove_temporaries(temporaries)
+            # Re-apply the best split
+            self._modify_coding_costs((prefix, suffix),
+                                        (prefix_cat, suffix_cat),
+                                        total_count)
+            # New morphs used in split should no longer be removed
+            if prefix in temporaries:
+                temporaries.remove(prefix)
+            if suffix in temporaries:
+                temporaries.remove(suffix)
+            self._morph_usage.remove_temporaries(temporaries)
 
+            self._recursive_split(prefix)
+            if prefix != suffix:
+                self._recursive_split(suffix)
+
+        # FIXME debug
+        post_count = self._morph_usage.count(morph)
+        post_emissions = self._catmap_coding._emission_counts[morph]
+        msg = (u'POSTCHECK {} for "{}" did not match sum of emissions {}'.format(
+            post_count, morph, sum(post_emissions)))
+        assert post_count == sum(post_emissions), msg
+
+    def _modify_coding_costs(self, morphs, categories, diff_count):
+        for (morph, category) in zip(morphs, categories):
+            self._catmap_coding.update_emission(category, morph,
+                                                diff_count)
+            self._modify_morph_count(morph, diff_count)
+        for (prev_cat, next_cat) in ngrams(categories, 2):
+            self._catmap_coding.update_transitions(prev_cat,
+                                                    next_cat,
+                                                    diff_count)
+            
     def _modify_morph_count(self, morph, dcount):
         """Modifies the count of a morph in the lexicon.
         Does not affect transitions or emissions."""
         old_count = self._morph_usage.count(morph)
         new_count = old_count + dcount
+        self._morph_usage.set_count(morph, new_count)
         if old_count == 0 and new_count > 0:
             self._lexicon_coding.add(morph)
         elif old_count > 0 and new_count == 0:
@@ -808,26 +835,41 @@ class Marginalizer():
         return ByCategory(*self._counts)
 
 
-class LexiconEncoding(morfessor.LexiconEncoding):
+class CatmapLexiconEncoding(morfessor.LexiconEncoding):
     def __init__(self, morph_usage):
-        super(LexiconEncoding, self).__init__()
+        super(CatmapLexiconEncoding, self).__init__()
         self._morph_usage = morph_usage
+        self.logfeaturesum = 0.0
 
     def clear(self):
         self.logtokensum = 0.0
+        self.logfeaturesum = 0.0
         self.tokens = 0
         self.boundaries = 0
 
     def add(self, morph):
-        super(LexiconEncoding, self).add(morph)
-        self.logtokensum += self._morph_usage.feature_cost(morph)
+        super(CatmapLexiconEncoding, self).add(morph)
+        self.logfeaturesum += self._morph_usage.feature_cost(morph)
 
     def remove(self, morph):
-        super(LexiconEncoding, self).remove(morph)
-        self.logtokensum -= self._morph_usage.feature_cost(morph)
+        super(CatmapLexiconEncoding, self).remove(morph)
+        self.logfeaturesum -= self._morph_usage.feature_cost(morph)
+
+    def get_cost(self):
+        assert self.boundaries >= 0
+        if self.boundaries == 0:
+            return 0.0
+
+        n = self.tokens + self.boundaries
+        return  ((n * math.log(n)
+                  - self.boundaries * math.log(self.boundaries)
+                  - self.logtokensum
+                  + self.permutations_cost()) * self.weight
+                 + self.logfeaturesum   # FIXME should it be weighted?
+                 + self.frequency_distribution_cost())
 
     def get_codelength(self, construction):
-        cost = super(LexiconEncoding, self).get_codelength(construction)
+        cost = super(CatmapLexiconEncoding, self).get_codelength(construction)
         cost += self._morph_usage.feature_cost(morph)
         return cost
 
@@ -838,6 +880,7 @@ class CatmapEncoding(morfessor.CorpusEncoding):
 
     tokens: the number of emissions observed.
     boundaries: the number of word tokens observed.
+    logtokensum: the sum of logs of emission costs.
     """
     # can inherit without change: frequency_distribution_cost,
 
@@ -885,6 +928,9 @@ class CatmapEncoding(morfessor.CorpusEncoding):
 
     def update_transitions(self, prev_cat, next_cat, rcount):
         rcount = float(rcount)
+        msg = 'update_transitions needs category names, not indices'
+        assert not isinstance(prev_cat, int), msg
+        assert not isinstance(next_cat, int), msg
         self._transition_counts[(prev_cat, next_cat)] += rcount
         self._cat_tagcount[prev_cat] += rcount
         # invalidate cache

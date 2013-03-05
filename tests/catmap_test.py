@@ -35,13 +35,13 @@ def _load_baseline():
         return baseline
 
 
-def _load_catmap(baseline):
+def _load_catmap(baseline_seg):
         m_usage = catmap.MorphUsageProperties(ppl_treshold=10, ppl_slope=1,
                                               length_treshold=3,
                                               length_slope=2,
                                               use_word_tokens=False)
         model = catmap.CatmapModel(m_usage)
-        model.load_baseline(baseline.get_segmentations())
+        model.load_baseline(baseline_seg)
         return model
 
 
@@ -50,7 +50,7 @@ class TestProbabilityEstimation(unittest.TestCase):
         """Overridden later to test re-estimation"""
         self.reference_file = REFERENCE_BASELINE_PROBS
         self.baseline = _load_baseline()
-        self.model = _load_catmap(self.baseline)
+        self.model = _load_catmap(self.baseline.get_segmentations())
 
     def setUp(self):
         self.perplexities = dict()
@@ -188,7 +188,7 @@ class TestProbabilityReEstimation(TestProbabilityEstimation):
     def _config(self):
         self.reference_file = REFERENCE_REESTIMATE_PROBS
         self.baseline = _load_baseline()
-        self.model = _load_catmap(self.baseline)
+        self.model = _load_catmap(self.baseline.get_segmentations())
         self.retagged = []
 
         io = morfessor.MorfessorIO(encoding='latin-1')
@@ -205,7 +205,7 @@ class TestProbabilityReEstimation(TestProbabilityEstimation):
 class TestBaselineSegmentation(unittest.TestCase):
     def setUp(self):
         self.baseline = _load_baseline()
-        self.model = _load_catmap(self.baseline)
+        self.model = _load_catmap(self.baseline.get_segmentations())
 
         io = morfessor.MorfessorIO(encoding='latin-1')
         line_re = re.compile(r'^[0-9]* (.*)')
@@ -239,6 +239,150 @@ class TestBaselineSegmentation(unittest.TestCase):
             for (r, o) in zip(reference, observed):
                 self.assertEqual(r, o, msg=msg)
 
+
+class TestModelConsistency(unittest.TestCase):
+    dummy_segmentation = (
+        (1, ('AA', 'BBBBB')),)
+
+    simple_segmentation = (
+        (1, ('AA', 'BBBBB')),
+        (1, ('AA', 'CCCC')),
+        (1, ('BBBBB', 'EE')),
+        (2, ('DDDDD',)),
+        (1, ('AADDDDDEE',)),
+        (1, ('ZZBBBBB',)),
+        (1, ('BBBBBZZ',)))
+
+    def setUp(self):
+        self.model = _load_catmap(TestModelConsistency.dummy_segmentation)
+
+    def test_initial_state(self):
+        """Tests that the initial state produced by loading a baseline
+        segmentation is consistent."""
+        self.initial_state_asserts()
+
+    def test_presplit_state(self):
+        """Tests that the initial parameter estimation from the baseline
+        segmentation is consistent."""
+        self.presplit()
+        self.initial_state_asserts()
+
+    def test_remove_readd(self):
+        self.presplit()
+
+        morph = 'AA'
+
+        old_cost = self.model.get_cost()
+        old_emissions = self.model._remove(morph)
+
+        mid_cost = self.model.get_cost()
+
+        self.model._readd(morph, old_emissions)
+        new_cost = self.model.get_cost()
+
+        msg = (u'_remove followed by _readd did not return to same cost ' +
+               u'old: {}, new: {}'.format(old_cost, new_cost))
+        self.assertAlmostEqual(old_cost, new_cost, places=4, msg=msg)
+
+        # The model should have returned to initial state
+        self.initial_state_asserts()
+
+        # sanity check: costs should never be negative
+        self.assertTrue(old_cost >= 0)
+        self.assertTrue(mid_cost >= 0)
+        self.assertTrue(new_cost >= 0)
+        # sanity check: removing a morph but not replacing it with anything
+        # else should always lower the cost.
+        self.assertTrue(mid_cost < old_cost)
+
+    def test_modify_coding_costs(self):
+        self._modify_coding_costs('AA', 'BBBBB', 'PRE', 'STM', 2)
+        self._modify_coding_costs('A', 'B', 'PRE', 'STM', 2)
+        self._modify_coding_costs('A', 'A', 'PRE', 'STM', 2)
+
+    def _modify_coding_costs(self, prefix, suffix,
+                             prefix_cat, suffix_cat, count):
+        self.presplit()
+
+        old_cost = self.model.get_cost()
+        self.model._modify_coding_costs((prefix, suffix),
+                                        (prefix_cat, suffix_cat),
+                                        count)
+
+        mid_cost = self.model.get_cost()
+
+        self.model._modify_coding_costs((prefix, suffix),
+                                        (prefix_cat, suffix_cat),
+                                        -count)
+        new_cost = self.model.get_cost()
+
+        msg = (u'_modify_coding_costs with opposite sign ' +
+               u'did not return to same cost ' +
+               u'old: {}, new: {} '.format(old_cost, new_cost))
+        self.assertAlmostEqual(old_cost, new_cost, places=4, msg=msg)
+
+        # The model should have returned to initial state
+        self.initial_state_asserts()
+
+        # sanity check: costs should never be negative
+        self.assertTrue(old_cost >= 0)
+        self.assertTrue(mid_cost >= 0)
+        self.assertTrue(new_cost >= 0)
+        # sanity check: adding submorphs without removing the parent
+        # first should always increase the cost
+        self.assertTrue(mid_cost > old_cost)
+
+    def test_estimate_remove_temporaries(self):
+        self.presplit()
+
+        prefix = 'BB'
+        suffix = 'BBB'
+
+        tmp = (self.model._morph_usage.estimate_contexts(prefix + suffix,
+                                                         (prefix, suffix)))
+        self.model._morph_usage.remove_temporaries(tmp)
+        
+        self.initial_state_asserts()
+
+    def presplit(self):
+        segmentations = tuple(self.model.viterbi_tag_segmentations(
+            TestModelConsistency.dummy_segmentation))
+        self.model._calculate_transition_counts(segmentations)
+        self.model._calculate_emission_counts(segmentations)
+
+    def initial_state_asserts(self):
+        self.assertAlmostEqual(sum(self.model._category_totals), 2.0, places=9)
+
+        # morph usage
+        self.assertEqual(self.model._morph_usage.seen_morphs(),
+                         ['AA', 'BBBBB'])
+        self.assertEqual(self.model._morph_usage._contexts,
+                         {'AA': catmap.MorphContext(1, 1.0, 1.0),
+                          'BBBBB': catmap.MorphContext(1, 1.0, 1.0)})
+
+        # lexicon coding
+        self.assertEqual(self.model._lexicon_coding.tokens,
+                         len('AA') + len('BBBBB'))
+        self.assertEqual(self.model._lexicon_coding.boundaries, 2)
+        self.assertAlmostEqual(self.model._lexicon_coding.logfeaturesum,
+            4.0 * catmap.universalprior(1.0), places=9)
+        self.assertAlmostEqual(self.model._lexicon_coding.logtokensum,
+            (2.0 * math.log(2.0)) + (5.0 * math.log(5.0)), places=9)
+
+        # catmap coding
+        self.general_consistency_asserts()
+
+    def general_consistency_asserts(self):
+        """ These values should be internally consistent at all times."""
+        self.assertAlmostEqual(
+            sum(self.model._catmap_coding._transition_counts.values()),
+            sum(self.model._catmap_coding._cat_tagcount.values()),
+            places=4)
+        self.assertAlmostEqual(
+            sum(self.model._catmap_coding._cat_tagcount.values()),
+            sum(self.model._category_totals) +
+                    self.model._catmap_coding.boundaries,
+            places=4)
 
 def _zexp(x):
     if x == catmap.LOGPROB_ZERO:

@@ -225,7 +225,8 @@ class MorphUsageProperties:
         for morph in temporaries:
             if morph not in self:
                 continue
-            assert self._contexts[morph].count == 0, u'{}: {}'.format(morph, self._contexts[morph].count)
+            msg = u'{}: {}'.format(morph, self._contexts[morph].count)
+            assert self._contexts[morph].count == 0, msg
             del self._contexts[morph]
 
     # The methods in this class below this line are helpers that will
@@ -308,9 +309,6 @@ class CatmapModel:
         # Priors for categories P(Category)
         # Single ByCategory object. Log-probabilities.
         self._log_catpriors = None
-
-        self._split_count = 0   # FIXME debug
-        self._leave_count = 0   # FIXME debug
 
     def train(self, segmentations):
         """Perform Cat-MAP training on the model.
@@ -499,7 +497,6 @@ class CatmapModel:
 
         # Cost of leaving the morph un-split
         best = (self.get_cost(), 0, None)
-        print('unsplit cost {}'.format(best))
 
         # Remove all instances of the morph
         old_emissions = self._remove(morph)
@@ -528,8 +525,7 @@ class CatmapModel:
                                           total_count)
 
                 cost = self.get_cost()
-                print('cost for {}/{} {}/{} is {}, better: {}'.format(prefix, prefix_cat, suffix, suffix_cat,
-                                                                        cost, (cost < best[0])))
+
                 if cost < best[0]:
                     best = (cost, splitloc, (prefix_cat, suffix_cat))
 
@@ -542,15 +538,13 @@ class CatmapModel:
             # Best option was to do nothing: revert changes
             self._readd(morph, old_emissions)
             self._morph_usage.remove_temporaries(temporaries)
-            self._leave_count += 1  # FIXME debug
         else:
             splitloc = best[1]
             prefix_cat, suffix_cat = best[2]
             prefix = morph[:splitloc]
             suffix = morph[splitloc:]
-            #_logger.debug(u'Found a good split {}/{} + {}/{}'.format(
-            #    prefix, prefix_cat, suffix, suffix_cat))
-            self._split_count += 1  # FIXME debug
+            _logger.debug(u'Found a good split {}/{} + {}/{}'.format(
+                prefix, prefix_cat, suffix, suffix_cat))
             # Re-apply the best split
             self._modify_coding_costs((prefix, suffix),
                                         (prefix_cat, suffix_cat),
@@ -567,13 +561,6 @@ class CatmapModel:
             #if prefix != suffix:
             #    self._recursive_split(suffix)
 
-        # FIXME debug
-        post_count = self._morph_usage.count(morph)
-        post_emissions = self._catmap_coding._emission_counts[morph]
-        msg = (u'POSTCHECK {} for "{}" did not match sum of emissions {}'.format(
-            post_count, morph, sum(post_emissions)))
-        assert post_count == sum(post_emissions), msg
-
     def _modify_coding_costs(self, morphs, categories, diff_count):
         for (morph, category) in zip(morphs, categories):
             self._catmap_coding.update_emission(category, morph,
@@ -583,7 +570,7 @@ class CatmapModel:
             self._catmap_coding.update_transitions(prev_cat,
                                                     next_cat,
                                                     diff_count)
-            
+
     def _modify_morph_count(self, morph, diff_count):
         """Modifies the count of a morph in the lexicon.
         Does not affect transitions or emissions."""
@@ -690,8 +677,8 @@ class CatmapModel:
         pass
 
     def viterbi_resegment_segmentations(self, segmentations):
-        """Convenience wrapper around viterbi_segment for a list of segmentations
-        with attached counts."""
+        """Convenience wrapper around viterbi_segment for a
+         list of segmentations with attached counts."""
         # FIXME this naming scheme is not good
         for (count, segmentation) in segmentations:
             yield (count, self.viterbi_segment(segmentation))
@@ -770,11 +757,7 @@ class CatmapModel:
     def get_cost(self):
         """Return current model encoding cost."""
         # FIXME: annotation coding cost for supervised
-        #return self._catmap_coding.get_cost() + self._lexicon_coding.get_cost()
-        catmap_cost = self._catmap_coding.get_cost()
-        lexicon_cost = self._lexicon_coding.get_cost()
-        assert catmap_cost > 0 and lexicon_cost > 0, 'costs: {} and {}'.format(catmap_cost, lexicon_cost)
-        return catmap_cost + lexicon_cost
+        return self._catmap_coding.get_cost() + self._lexicon_coding.get_cost()
 
     @staticmethod
     def get_categories(wb=False):
@@ -895,8 +878,9 @@ class CatmapLexiconEncoding(morfessor.LexiconEncoding):
         return  ((n * math.log(n)
                   - self.boundaries * math.log(self.boundaries)
                   - self.logtokensum
-                  + self.permutations_cost()) * self.weight
-                 + self.logfeaturesum   # FIXME should it be weighted?
+                  + self.permutations_cost()
+                  + self.logfeaturesum   # FIXME should it be weighted?
+                 ) * self.weight
                  + self.frequency_distribution_cost())
 
     def get_codelength(self, construction):

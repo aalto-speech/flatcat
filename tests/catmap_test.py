@@ -244,7 +244,6 @@ class TestModelConsistency(unittest.TestCase):
     dummy_segmentation = (
         (1, ('AA', 'BBBBB')),)
 
-<<<<<<< HEAD
     simple_segmentation = (
         (1, ('AA', 'BBBBB')),
         (1, ('AA', 'CCCC')),
@@ -254,13 +253,10 @@ class TestModelConsistency(unittest.TestCase):
         (1, ('ZZBBBBB',)),
         (1, ('BBBBBZZ',)))
 
-=======
->>>>>>> 5448395471fb5968a80725b2a75e3cc18d29425a
     def setUp(self):
         self.model = _load_catmap(TestModelConsistency.dummy_segmentation)
 
     def test_initial_state(self):
-<<<<<<< HEAD
         """Tests that the initial state produced by loading a baseline
         segmentation is consistent."""
         self.initial_state_asserts()
@@ -345,7 +341,7 @@ class TestModelConsistency(unittest.TestCase):
         tmp = (self.model._morph_usage.estimate_contexts(prefix + suffix,
                                                          (prefix, suffix)))
         self.model._morph_usage.remove_temporaries(tmp)
-        
+
         self.initial_state_asserts()
 
     def presplit(self):
@@ -354,10 +350,6 @@ class TestModelConsistency(unittest.TestCase):
         self.model._calculate_transition_counts(segmentations)
         self.model._calculate_emission_counts(segmentations)
 
-=======
-        self.initial_state_asserts()
-
->>>>>>> 5448395471fb5968a80725b2a75e3cc18d29425a
     def initial_state_asserts(self):
         self.assertAlmostEqual(sum(self.model._category_totals), 2.0, places=9)
 
@@ -391,6 +383,7 @@ class TestModelConsistency(unittest.TestCase):
             sum(self.model._category_totals) +
                     self.model._catmap_coding.boundaries,
             places=4)
+
 
 def _zexp(x):
     if x == catmap.LOGPROB_ZERO:

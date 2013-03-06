@@ -926,8 +926,9 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         # Cache for transition logprobs, to avoid wasting effort recalculating.
         self._log_transitionprob_cache = dict()
 
-        #the sum of logs of emission costs.
+        # The sum of logs of emission and transition costs.
         self.logemissionsum = 0.0
+        self.logtransitionsum = 0.0
 
     def set_log_emissionprobs(self, morph, lep):
         self._log_emissionprobs[morph] = lep
@@ -943,16 +944,26 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         self._transition_counts.clear()
         self._cat_tagcount.clear()
         self._log_transitionprob_cache.clear()
+        self.logtransitionsum = 0.0
 
     def update_transitions(self, prev_cat, next_cat, rcount):
         rcount = float(rcount)
         msg = 'update_transitions needs category names, not indices'
         assert not isinstance(prev_cat, int), msg
         assert not isinstance(next_cat, int), msg
-        self._transition_counts[(prev_cat, next_cat)] += rcount
+        pair = (prev_cat, next_cat)
+
+        self.logtransitionsum -= (self._transition_counts[pair] *
+                                  self.log_transitionprob(*pair))
+
+        self._transition_counts[pair] += rcount
         self._cat_tagcount[prev_cat] += rcount
+
         # invalidate cache
         self._log_transitionprob_cache.clear()
+
+        self.logtransitionsum += (self._transition_counts[pair] *
+                                  self.log_transitionprob(*pair))
 
     def log_transitionprob(self, prev_cat, next_cat):
         pair = (prev_cat, next_cat)
@@ -1024,19 +1035,10 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         if self.boundaries == 0:
             return 0.0
 
-        # FIXME: could be accumulated instead of recalculated
-        logtransitionsum = 0
-        categories = CatmapModel.get_categories(wb=True)
-        for next_cat in categories:
-            for prev_cat in categories:
-                pair = (prev_cat, next_cat)
-                logtransitionsum += (self._transition_counts[pair] *
-                                     self.log_transitionprob(*pair))
-
         n = self.tokens + self.boundaries
         return  ((n * math.log(n)
                   - self.boundaries * math.log(self.boundaries)
-                  - self.logtokensum + logtransitionsum
+                  - self.logtokensum + self.logtransitionsum
                   + self.logemissionsum
                  ) * self.weight
                  + self.frequency_distribution_cost())

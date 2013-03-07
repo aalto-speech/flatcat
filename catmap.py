@@ -17,7 +17,7 @@ _logger.level = logging.DEBUG   # FIXME development convenience
 LOGPROB_ZERO = 1000000
 
 
-class WordBoundary:
+class WordBoundary(object):
     def __repr__(self):
         return '#'
 
@@ -41,7 +41,7 @@ MorphContext = collections.namedtuple('MorphContext',
                                        'right_perplexity'])
 
 
-class MorphContextBuilder:
+class MorphContextBuilder(object):
     """Temporary structure used when calculating the MorphContexts."""
     def __init__(self):
         self.count = 0
@@ -66,7 +66,7 @@ class MorphContextBuilder:
         return math.exp(entropy)
 
 
-class MorphUsageProperties:
+class MorphUsageProperties(object):
     """This class describes how the prior probabilities are calculated
     from the usage of morphs.
     """
@@ -284,7 +284,7 @@ class CatmapIO(morfessor.MorfessorIO):
         self.category_separator = category_separator
 
 
-class CatmapModel:
+class CatmapModel(object):
     """Morfessor Categories-MAP model class."""
 
     word_boundary = WORD_BOUNDARY
@@ -309,6 +309,14 @@ class CatmapModel:
         # Priors for categories P(Category)
         # Single ByCategory object. Log-probabilities.
         self._log_catpriors = None
+
+        # Count of total number of tokens tagged in each category
+        # Single ByCategory object. Counts.
+        self._category_totals = None
+
+        # Log probabilities of single letters, for alphabetization cost
+        # FIXME: no longer needed? assume identical distribution?
+        self._log_letterprobs = dict()
 
     def train(self, segmentations):
         """Perform Cat-MAP training on the model.
@@ -404,8 +412,8 @@ class CatmapModel:
             self._catmap_coding.set_log_emissionprobs(morph, lep)
 
         # Calculate letter log probabilities
-        self._total_letter_tokens = sum(num_letter_tokens.values())
-        log_tlt = math.log(self._total_letter_tokens)
+        total_letter_tokens = sum(num_letter_tokens.values())
+        log_tlt = math.log(total_letter_tokens)
         self._log_letterprobs = dict()
         for letter in num_letter_tokens:
             self._log_letterprobs[letter] = (log_tlt -
@@ -433,10 +441,9 @@ class CatmapModel:
                 valid_transitions.append((cat1, cat2))
 
         for (cat1, cat2) in valid_transitions:
-                # count all possible valid transitions
-                transition_share = nclass[cat2]
-                num_tokens_tagged[cat1] += nclass[cat2]
-                transitions[(cat1, cat2)] = nclass[cat2]
+            # count all possible valid transitions
+            num_tokens_tagged[cat1] += nclass[cat2]
+            transitions[(cat1, cat2)] = nclass[cat2]
 
         for pair in MorphUsageProperties.zero_transitions:
             transitions[pair] = 0
@@ -471,8 +478,8 @@ class CatmapModel:
             for (prev_cat, next_cat) in ngrams(categories, 2):
                 pair = (prev_cat, next_cat)
                 if pair in MorphUsageProperties.zero_transitions:
-                        _logger.warning(u'Impossible transition ' +
-                                        u'{!r} -> {!r}'.format(*pair))
+                    _logger.warning(u'Impossible transition ' +
+                                    u'{!r} -> {!r}'.format(*pair))
                 self._catmap_coding.update_transitions(prev_cat, next_cat,
                                                        rcount)
 
@@ -792,9 +799,11 @@ class CatmapModel:
         return self._catmap_coding.boundaries
 
 
-class CategorizedMorph:
+class CategorizedMorph(object):
     """Represents a morph with attached category information."""
     no_category = object()
+
+    __slots__ = ['morph', 'category']
 
     def __init__(self, morph, category=None):
         self.morph = morph
@@ -813,7 +822,7 @@ class CategorizedMorph:
                 self.category == other.category)
 
 
-class Marginalizer():
+class Marginalizer(object):
     """An accumulator for marginalizing the class probabilities
     P(Category) from all the individual conditional probabilities
     P(Category|Morph) and observed morph probabilities P(Morph).
@@ -883,8 +892,8 @@ class CatmapLexiconEncoding(morfessor.LexiconEncoding):
                  ) * self.weight
                  + self.frequency_distribution_cost())
 
-    def get_codelength(self, construction):
-        cost = super(CatmapLexiconEncoding, self).get_codelength(construction)
+    def get_codelength(self, morph):
+        cost = super(CatmapLexiconEncoding, self).get_codelength(morph)
         cost += self._morph_usage.feature_cost(morph)
         return cost
 
@@ -1075,9 +1084,14 @@ class Sparse(dict):
             dict.__setitem__(self, key, value)
 
     def set_at_index(self, key, index, value):
+        """Convenience function to simulate mutability of the contained
+        namedtuples. Calls _set_nt_at_index with the current value
+        and stores the result in its place.
+        """
+
         if key not in self:
             nt = self._default
-            self[key] = record
+            self[key] = nt
         else:
             nt = self[key]
         nt = _set_nt_at_index(nt, index, value)
@@ -1102,6 +1116,11 @@ def universalprior(positive_number):
 
 
 def ngrams(sequence, n=2):
+    """Returns all ngram tokens in an input sequence, for a specified n.
+    E.g. ngrams(['A', 'B', 'A', 'B', 'D'], n=2) yields
+    ('A', 'B'), ('B', 'A'), ('A', 'B'), ('B', 'D')
+    """
+
     window = []
     for item in sequence:
         window.append(item)
@@ -1134,6 +1153,8 @@ def _set_nt_at_index(previous_namedtuple, index, new_value):
 
 
 def _minargmin(sequence):
+    """Returns the minimum value and the first index at which it can be
+    found in the input sequence."""
     best = (None, None)
     for (i, value) in enumerate(sequence):
         if best[0] is None or value < best[0]:

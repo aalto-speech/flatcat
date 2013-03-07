@@ -329,15 +329,14 @@ class CatmapModel(object):
         # will be done differently.
         segmentations = tuple(segmentations)
         self.load_baseline(segmentations)
-        segmentations = self.until_convergence(
+        segmentations = self.convergence_of_analysis(
             self._calculate_transition_counts,
             self.viterbi_tag_corpus,
             segmentations, max_iterations=1)    # FIXME debug max
         self._calculate_emission_counts(segmentations)
-        segmentations = self.until_convergence(
-            lambda x: self._split_epoch(self._recursive_split, x),
-            self.viterbi_tag_corpus,
-            segmentations, max_iterations=2)    # FIXME debug max
+        segmentations = self.convergence_of_cost(
+            self._split_epoch,
+            max_iterations=2)    # FIXME debug max
 
     def load_baseline(self, segmentations, no_emissions=False):
         """Initialize the model using the segmentation produced by a morfessor
@@ -356,7 +355,7 @@ class CatmapModel(object):
         """
 
         segmentations = tuple(segmentations)
-        self._estimate_probabilities(segmentations)
+        self._estimate_emission_posteriors(segmentations)
         self._unigram_transition_probs()
         if no_emissions:
             return
@@ -364,7 +363,16 @@ class CatmapModel(object):
         self._calculate_transition_counts(retagged)
         self._calculate_emission_counts(retagged)
 
-    def _estimate_probabilities(self, segmentations):
+    def _reestimate_probabilities(self, segmentations):
+        """Re-estimates model parameters from a segmented, tagged corpus.
+
+        theta(t) = arg min { L( theta, Y(t), D ) }
+        """
+        self._estimate_emission_posteriors(segmentations)
+        self._calculate_transition_counts(segmentations)
+        self._calculate_emission_counts(segmentations)
+
+    def _estimate_emission_posteriors(self, segmentations):
         """Estimates P(Category|Morph), P(Category) and P(Morph|Category).
         Arguments:
             segmentations -- Segmentation of corpus, with or without
@@ -496,19 +504,13 @@ class CatmapModel(object):
                 self._catmap_coding.update_transitions(prev_cat, next_cat,
                                                        rcount)
 
-    def _split_epoch(self, func, segmentations):
+    def _split_epoch(self):
         # FIXME random shuffle or sort by length?
         epoch_morphs = tuple(self._morph_usage.seen_morphs())
         for morph in epoch_morphs:
-            func(morph)
-        # FIXME should these be recalculated each iteration or not?
-        # FIXME need to actually resegment before calculating, otherwise
-        # found splits are forgotten
-        #self._estimate_probabilities(segmentations)
-        #self._calculate_transition_counts(segmentations)
-        #self._calculate_emission_counts(segmentations)
+            self._split_morph(morph)
 
-    def _recursive_split(self, morph):
+    def _split_morph(self, morph):
         if len(morph) == 1:
             return
         total_count = self._morph_usage.count(morph)
@@ -647,10 +649,9 @@ class CatmapModel(object):
         cost = []
         best = []
 
+        # Throw away old category information, if any
+        segments = [self._detag_morph(morph) for morph in segments]
         for (i, morph) in enumerate(segments):
-            if isinstance(morph, CategorizedMorph):
-                # Throw away old category information, if any
-                morph = morph.morph
             for next_cat in range(len(categories)):
                 if next_cat == wb:
                     # Impossible to visit boundary in the middle of the
@@ -715,13 +716,63 @@ class CatmapModel(object):
                                                     morph.morph,
                                                     count)
 
-    def until_convergence(self, train_func, resegment_func, segmentations,
-                          max_differences=0, max_cost_difference=-10000,
-                          max_iterations=15):
+    def convergence_of_cost(self, train_func, max_cost_difference=0,
+                            max_iterations=15):
+        """Iterates the specified training function until the model cost
+        no longer improves enough or until maximum number of iterations
+        is reached.
+
+        On each iteration train_func is called without arguments.
+        The data used to train the model must therefore be completely
+        contained in the model itself. This can e.g. mean iterating over
+        the morphs already stored in the lexicon.
+
+        Arguments:
+            train_func -- A method of CatmapModel that takes one argument:
+                          segmentations, and which causes some aspect
+                          of the model to be trained.
+            max_cost_difference -- Stop iterating if cost reduction between
+                                   iterations is below this limit.
+            max_iterations -- Maximum number of iterations. Default 15.
+        """
+
+        previous_cost = self.get_cost()
+        for iteration in range(max_iterations):
+            _logger.info(u'Iteration {!r} number {}/{}.'.format(
+                train_func.__name__, iteration + 1, max_iterations))
+
+            # perform the optimization
+            train_func()
+
+            cost = self.get_cost()
+            cost_diff = cost - previous_cost
+            if -cost_diff <= max_cost_difference:
+                _logger.info(u'Converged, with cost difference ' +
+                    u'{} in final iteration.'.format(cost_diff))
+                break
+            else:
+                _logger.info(u'Cost difference: {}'.format(cost_diff))
+            previous_cost = cost
+
+    def convergence_of_analysis(self, train_func, resegment_func, corpus,
+                                max_differences=0,
+                                max_cost_difference=-10000,
+                                max_iterations=15):
         """Iterates the specified training function until the segmentations
         produced by the model for the given input no longer change more than
-        the specified treshold, or until maximum number of iterations is
-        reached.
+        the specified treshold, until the model cost no longer improves
+        enough or until maximum number of iterations is reached.
+
+        On each iteration the current optimal analysis for the corpus is
+        produced by giving the corpus as input to resegment_func.
+        This corresponds to:
+
+        Y(t) = arg min { L( theta(t-1), Y, D ) }
+
+        Then the analysis of the previous iteration is given
+        as argument to the train_func function, which corresponds to:
+
+        theta(t) = arg min { L( theta, Y(t), D ) }
 
         Arguments:
             train_func -- A method of CatmapModel that takes one argument:
@@ -730,7 +781,7 @@ class CatmapModel(object):
             resegment_func -- A method of CatmapModed that resegments or
                               retags the segmentations, to produce the
                               results to compare.  Takes one argument:
-                              the (detagged) segmentations.
+                              the (tagged or untagged) segmentations.
             segmentations -- list of (count, segmentation) pairs. Can be
                              either tagged or untagged.
             max_differences -- Maximum number of words with changed
@@ -740,12 +791,10 @@ class CatmapModel(object):
                                    iterations is below this limit.
             max_iterations -- Maximum number of iterations. Default 15.
         Returns:
-            Tagged segmentation produced by last iteration
+            Tagged segmentation produced by last iteration.
         """
 
-        detagged = tuple(CatmapModel._detag_corpus(segmentations))
-        current_segmentation = tuple(
-            resegment_func(detagged))
+        current_segmentation = tuple(resegment_func(corpus))
         previous_cost = self.get_cost()
         for iteration in range(max_iterations):
             previous_segmentation = current_segmentation
@@ -760,7 +809,8 @@ class CatmapModel(object):
                 _logger.info(u'Converged, with cost difference ' +
                     u'{} in final iteration.'.format(cost_diff))
                 break
-            current_segmentation = tuple(resegment_func(detagged))
+            current_segmentation = tuple(
+                resegment_func(previous_segmentation))
             differences = 0
             for (r, o) in zip(previous_segmentation, current_segmentation):
                 if r != o:
@@ -881,6 +931,9 @@ class CatmapLexiconEncoding(morfessor.LexiconEncoding):
     """Extends LexiconEncoding to include the coding costs of the
     encoding cost of morph usage (context) features.
     """
+    # FIXME qq, should this be renamed CatmapParameterEncoding?
+    # i.e., is it P(lexicon) or P(theta) = P(lexicon) + P(grammar)?
+    # my understanding is that
 
     def __init__(self, morph_usage):
         super(CatmapLexiconEncoding, self).__init__()
@@ -1094,17 +1147,22 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         raise Exception('Inherited method not appropriate for CatmapEncoding')
 
     def get_cost(self):
-        """Override for the Encoding get_cost function."""
+        """Override for the Encoding get_cost function.
+
+        This is P( D_W | theta, Y ) + ???
+        """     # FIXME qq does catmap cost replace or add to baseline cost?
         if self.boundaries == 0:
             return 0.0
 
         n = self.tokens + self.boundaries
-        return  ((n * math.log(n)
-                  - self.boundaries * math.log(self.boundaries)
-                  - self.logtokensum + self.logtransitionsum
+        return  ((#n * math.log(n)
+                  #- self.boundaries * math.log(self.boundaries)
+                  #- self.logtokensum
+                   self.logtransitionsum
                   + self.logemissionsum
                  ) * self.weight
-                 + self.frequency_distribution_cost())
+                 #+ self.frequency_distribution_cost())
+                )
 
 
 class Sparse(dict):

@@ -331,31 +331,44 @@ class CatmapModel(object):
         self.load_baseline(segmentations)
         segmentations = self.until_convergence(
             self._calculate_transition_counts,
-            self.viterbi_tag_segmentations,
+            self.viterbi_tag_corpus,
             segmentations, max_iterations=1)    # FIXME debug max
         self._calculate_emission_counts(segmentations)
         segmentations = self.until_convergence(
             lambda x: self._split_epoch(self._recursive_split, x),
-            self.viterbi_tag_segmentations,
+            self.viterbi_tag_corpus,
             segmentations, max_iterations=2)    # FIXME debug max
 
-    def load_baseline(self, segmentations):
+    def load_baseline(self, segmentations, no_emissions=False):
         """Initialize the model using the segmentation produced by a morfessor
         baseline model.
 
         Arguments:
             segmentations -- Segmentation of corpus using the baseline method.
                              Format: (count, (morph1, morph2, ...))
+            no_emissions -- If True, no retagging/reestimation
+                            will be performed.
+                            Transition probabilities will remain as unigram
+                            estimates, and emission counts will be zero.
+                            This means that the model is not completely
+                            initialized: you will need to set the
+                            emission counts. (Default: False)
         """
 
+        segmentations = tuple(segmentations)
         self._estimate_probabilities(segmentations)
         self._unigram_transition_probs()
-        # FIXME this should one _calculate_transition_counts and
-        # _calculate_emission_counts, to leave model in usable state.
-        # need to change tests to accomodate the change
+        if no_emissions:
+            return
+        retagged = tuple(self.viterbi_tag_corpus(segmentations))
+        self._calculate_transition_counts(retagged)
+        self._calculate_emission_counts(retagged)
 
     def _estimate_probabilities(self, segmentations):
         """Estimates P(Category|Morph), P(Category) and P(Morph|Category).
+        Arguments:
+            segmentations -- Segmentation of corpus, with or without
+                             category tags.
         """
 
         num_letter_tokens = collections.Counter()
@@ -464,7 +477,7 @@ class CatmapModel(object):
         a category-tagged segmented corpus.
 
         Arguments:
-            segmentations -- Category-tagged segmented words.
+            segmentations -- Category-tagged segmented corpus.
                 List of format:
                 (count, (CategorizedMorph1, CategorizedMorph2, ...)), ...
         """
@@ -674,21 +687,24 @@ class CatmapModel(object):
                 categories[backtrace.backpointer]))
         return result
 
-    def viterbi_tag_segmentations(self, segmentations):
-        """Convenience wrapper around viterbi_tag for a list of segmentations
-        with attached counts."""
+    def viterbi_tag_corpus(self, segmentations):
+        """Convenience wrapper around viterbi_tag for a segmented corpus
+        with attached counts. Input can be with or without tags."""
         for (count, segmentation) in segmentations:
             yield (count, self.viterbi_tag(segmentation))
 
     def viterbi_segment(self, segments):
         pass
 
-    def viterbi_resegment_segmentations(self, segmentations):
+    def viterbi_resegment_corpus(self, corpus):
         """Convenience wrapper around viterbi_segment for a
-         list of segmentations with attached counts."""
-        # FIXME this naming scheme is not good
-        for (count, segmentation) in segmentations:
-            yield (count, self.viterbi_segment(segmentation))
+        list of word strings or segmentations with attached counts.
+        Segmented input can be with or without tags.
+        """
+        for (count, word) in corpus:
+            if isinstance(word, basestring):
+                word = (word,)
+            yield (count, self.viterbi_segment(word))
 
     def _calculate_emission_counts(self, segmentations):
         """Recalculates the emission counts from a retagged segmentation."""
@@ -727,7 +743,7 @@ class CatmapModel(object):
             Tagged segmentation produced by last iteration
         """
 
-        detagged = tuple(CatmapModel._detag_segmentations(segmentations))
+        detagged = tuple(CatmapModel._detag_corpus(segmentations))
         current_segmentation = tuple(
             resegment_func(detagged))
         previous_cost = self.get_cost()
@@ -759,6 +775,8 @@ class CatmapModel(object):
         return current_segmentation
 
     def log_emissionprobs(self, morph):
+        """Returns the log of the emission probabilities P(morph|Category)
+        for all categories, as a ByCategory object."""
         return self._catmap_coding.log_emissionprobs(morph)
 
     def get_cost(self):
@@ -784,7 +802,8 @@ class CatmapModel(object):
         return morph
 
     @staticmethod
-    def _detag_segmentations(segmentations):
+    def _detag_corpus(segmentations):
+        """Removes category tags from a segmented corpus."""
         for rcount, segments in segmentations:
             yield ((rcount, [CatmapModel._detag_morph(x) for x in segments]))
 
@@ -859,12 +878,18 @@ class Marginalizer(object):
 
 
 class CatmapLexiconEncoding(morfessor.LexiconEncoding):
+    """Extends LexiconEncoding to include the coding costs of the
+    encoding cost of morph usage (context) features.
+    """
+
     def __init__(self, morph_usage):
         super(CatmapLexiconEncoding, self).__init__()
         self._morph_usage = morph_usage
         self.logfeaturesum = 0.0
 
     def clear(self):
+        """Resets the cost variables.
+        Use before fully reprocessing a segmented corpus."""
         self.logtokensum = 0.0
         self.logfeaturesum = 0.0
         self.tokens = 0
@@ -940,9 +965,13 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         self.logtransitionsum = 0.0
 
     def set_log_emissionprobs(self, morph, lep):
+        """Initialize the emission log-probabilities
+        to precalculated values."""
         self._log_emissionprobs[morph] = lep
 
     def set_transition_counts(self, transitions, num_tokens_tagged):
+        """Initialize the transition counts and totals for each
+        category to precalculated values."""
         self._transition_counts = transitions
         self._cat_tagcount = num_tokens_tagged
 
@@ -950,13 +979,26 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         return self._transition_counts[(prev_cat, next_cat)]
 
     def clear_transitions(self):
+        """Resets transition counts, costs and cache.
+        Use before fully reprocessing a tagged segmented corpus."""
         self._transition_counts.clear()
         self._cat_tagcount.clear()
         self._log_transitionprob_cache.clear()
         self.logtransitionsum = 0.0
 
-    def update_transitions(self, prev_cat, next_cat, rcount):
-        rcount = float(rcount)
+    def update_transitions(self, prev_cat, next_cat, diff_count):
+        """Updates the number of observed transitions between
+        categories.
+
+        Arguments:
+            prev_cat -- The name (not index) of the category
+                        transitioned from.
+            next_cat -- The name (not index) of the category
+                        transitioned to.
+            diff_count -- The change in the number of transitions.
+        """
+
+        diff_count = float(diff_count)
         msg = 'update_transitions needs category names, not indices'
         assert not isinstance(prev_cat, int), msg
         assert not isinstance(next_cat, int), msg
@@ -965,8 +1007,8 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         self.logtransitionsum -= (self._transition_counts[pair] *
                                   self.log_transitionprob(*pair))
 
-        self._transition_counts[pair] += rcount
-        self._cat_tagcount[prev_cat] += rcount
+        self._transition_counts[pair] += diff_count
+        self._cat_tagcount[prev_cat] += diff_count
 
         # invalidate cache
         self._log_transitionprob_cache.clear()
@@ -993,6 +1035,8 @@ class CatmapEncoding(morfessor.CorpusEncoding):
                 self._log_emissionprobs[morph][next_i])
 
     def clear_emissions(self):
+        """Resets emission counts and costs.
+        Use before fully reprocessing a tagged segmented corpus."""
         self.tokens = 0
         self.logtokensum = 0.0
         self.logemissionsum = 0.0
@@ -1010,7 +1054,7 @@ class CatmapEncoding(morfessor.CorpusEncoding):
             self.logtokensum -= old_count * math.log(old_count)
         if new_count > 1:
             self.logtokensum += new_count * math.log(new_count)
-        self._update_emission_cost(category, morph, diff_count)
+        self._update_logemissionsum(category, morph, diff_count)
         self._emission_counts[morph] = _set_nt_at_index(
             self._emission_counts[morph], category, new_count)
 
@@ -1019,19 +1063,29 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         old_emissions = self._emission_counts[morph]
         for category in range(len(CatmapModel.get_categories())):
             diff_count = -self._emission_counts[morph][category]
-            self._update_emission_cost(category, morph, diff_count)
+            self._update_logemissionsum(category, morph, diff_count)
         del self._emission_counts[morph]
         return old_emissions
 
     def set_emissions(self, morph, new_emissions):
+        """Set the number of emissions of a morph from all categories
+        simultaneously.
+
+        Arguments:
+            morph -- string representation of the morph
+            new_emissions -- ByCategory object with new counts.
+        """
+
         if morph in self._emission_counts:
             self.remove_emissions(morph)
         for category in range(len(CatmapModel.get_categories())):
-            self._update_emission_cost(category, morph,
+            self._update_logemissionsum(category, morph,
                                        new_emissions[category])
         self._emission_counts[morph] = new_emissions
 
-    def _update_emission_cost(self, category, morph, diff_count):
+    def _update_logemissionsum(self, category, morph, diff_count):
+        """Helper function for updating the cumulative emission cost.
+        Should not be called directly."""
         self.tokens += diff_count
         self.logemissionsum += (diff_count *
                              self._log_emissionprobs[morph][category])

@@ -35,13 +35,13 @@ def _load_baseline():
         return baseline
 
 
-def _load_catmap(baseline_seg):
+def _load_catmap(baseline_seg, no_emissions=False):
         m_usage = catmap.MorphUsageProperties(ppl_treshold=10, ppl_slope=1,
                                               length_treshold=3,
                                               length_slope=2,
                                               use_word_tokens=False)
         model = catmap.CatmapModel(m_usage)
-        model.load_baseline(baseline_seg)
+        model.load_baseline(baseline_seg, no_emissions)
         return model
 
 
@@ -50,7 +50,8 @@ class TestProbabilityEstimation(unittest.TestCase):
         """Overridden later to test re-estimation"""
         self.reference_file = REFERENCE_BASELINE_PROBS
         self.baseline = _load_baseline()
-        self.model = _load_catmap(self.baseline.get_segmentations())
+        self.model = _load_catmap(self.baseline.get_segmentations(),
+                                  no_emissions=True)
 
     def setUp(self):
         self.perplexities = dict()
@@ -194,18 +195,13 @@ class TestProbabilityReEstimation(TestProbabilityEstimation):
         io = morfessor.MorfessorIO(encoding='latin-1')
         segmentations = io.read_segmentation_file(
             REFERENCE_BASELINE_SEGMENTATION)
-        self.retagged = tuple(self.model.viterbi_tag_segmentations(
-            segmentations))
-
-        detagged = catmap.CatmapModel._detag_segmentations(self.retagged)
-        self.model._estimate_probabilities(detagged)
-        self.model._calculate_transition_counts(self.retagged)
 
 
 class TestBaselineSegmentation(unittest.TestCase):
     def setUp(self):
         self.baseline = _load_baseline()
-        self.model = _load_catmap(self.baseline.get_segmentations())
+        self.model = _load_catmap(self.baseline.get_segmentations(),
+                                  no_emissions=True)
 
         io = morfessor.MorfessorIO(encoding='latin-1')
         line_re = re.compile(r'^[0-9]* (.*)')
@@ -345,7 +341,7 @@ class TestModelConsistency(unittest.TestCase):
         self.initial_state_asserts()
 
     def presplit(self):
-        segmentations = tuple(self.model.viterbi_tag_segmentations(
+        segmentations = tuple(self.model.viterbi_tag_corpus(
             TestModelConsistency.dummy_segmentation))
         self.model._calculate_transition_counts(segmentations)
         self.model._calculate_emission_counts(segmentations)

@@ -21,6 +21,9 @@ class WordBoundary(object):
     def __repr__(self):
         return '#'
 
+    def __len__(self):
+        return 0
+
 WORD_BOUNDARY = WordBoundary()
 
 ##################################
@@ -741,13 +744,14 @@ class CatmapModel(object):
         for pos in range(1, len(word) + 1):
             grid.append([])
             for next_len in range(1, pos + 1):
-                grid[pos].append(zeros)
+                grid[pos].append(list(zeros))
                 prev_pos = pos - next_len
                 morph = word[prev_pos:pos]
 
                 if morph not in self._morph_usage:
                     # The morph corresponding to this substring has not
                     # been encountered: zero probability for this solution
+                    # FIXME: alphabetize instead?
                     grid[pos][next_len - 1] = zeros
                     continue
 
@@ -758,21 +762,23 @@ class CatmapModel(object):
                         cost = self._catmap_coding.transit_emit_cost(
                             WORD_BOUNDARY, categories[next_cat], morph)
                         if cost <= best.cost:
-                            best = ViterbiNode(cost, CategorizedMorph(
-                                WORD_BOUNDARY, WORD_BOUNDARY))
+                            best = ViterbiNode(cost, ((0, wb),
+                                CategorizedMorph(morph, categories[next_cat])))
                     # implicit else: for-loop will be empty if prev_pos == 0
                     for prev_len in range(1, prev_pos + 1):
                         for prev_cat in categories_nowb:
-                            cost = (grid[prev_pos][prev_len - 1][prev_cat].cost +
-                                    self._catmap_coding.transit_emit_cost(
-                                        categories[prev_cat],
-                                        categories[next_cat],
-                                        morph))
+                            cost = (
+                                grid[prev_pos][prev_len - 1][prev_cat].cost +
+                                self._catmap_coding.transit_emit_cost(
+                                    categories[prev_cat],
+                                    categories[next_cat],
+                                    morph))
                             if cost <= best.cost:
                                 prev_start = prev_pos - prev_len
                                 prev_morph = word[prev_start:prev_pos]
-                                best = ViterbiNode(cost, CategorizedMorph(
-                                    prev_morph, categories[prev_cat]))
+                                best = ViterbiNode(cost, ((prev_len, prev_cat),
+                                    CategorizedMorph(morph,
+                                                     categories[next_cat])))
                     grid[pos][next_len - 1][next_cat] = best
 
         # Last transition must be to word boundary
@@ -786,22 +792,26 @@ class CatmapModel(object):
                 if cost <= best.cost:
                     prev_start = len(word) - prev_len
                     prev_morph = word[prev_start:]
-                    best = ViterbiNode(cost, CategorizedMorph(
-                        prev_morph, categories[prev_cat]))
+                    best = ViterbiNode(cost, ((prev_len, prev_cat),
+                        CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)))
+
+        if best.cost == LOGPROB_ZERO:
+            _logger.warning(
+                u'No possible segmentation for word {}'.format(word))
+            return word
 
         # Backtrace for the best morph-category sequence
-        result = [best.backpointer]
+        result = []
         backtrace = best
         pos = len(word)
+        bt_len = backtrace.backpointer[0][0]
+        bt_cat = backtrace.backpointer[0][1]
         while pos > 0:
-            bt_len = len(backtrace.backpointer)
-            bt_cat = categories.index(backtrace.backpointer.category)
-            print('level {}, len {}, assigning to {}'.format(0, len(grid), pos))
-            print('level {}, len {}, assigning to {}'.format(1, len(grid[pos]), bt_len - 1))
-            print('level {}, len {}, assigning to {}'.format(2, len(grid[pos][bt_len - 1]), bt_cat))
             backtrace = grid[pos][bt_len - 1][bt_cat]
-            result.insert(0, backtrace.backpointer)
-            pos -= bt_len
+            bt_len = backtrace.backpointer[0][0]
+            bt_cat = backtrace.backpointer[0][1]
+            result.insert(0, backtrace.backpointer[1])
+            pos -= len(backtrace.backpointer[1])
         return result
 
     def viterbi_resegment_corpus(self, corpus):

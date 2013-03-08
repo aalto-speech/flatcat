@@ -1053,7 +1053,6 @@ class CatmapLexiconEncoding(morfessor.LexiconEncoding):
     """
     # FIXME qq, should this be renamed CatmapParameterEncoding?
     # i.e., is it P(lexicon) or P(theta) = P(lexicon) + P(grammar)?
-    # my understanding is that
 
     def __init__(self, morph_usage):
         super(CatmapLexiconEncoding, self).__init__()

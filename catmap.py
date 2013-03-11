@@ -564,7 +564,7 @@ class CatmapModel(object):
                                                        rcount)
 
     def _split_epoch(self):
-        # FIXME random shuffle or sort by length?
+        # FIXME random shuffle or sort by length/frequency?
         epoch_morphs = tuple(self._morph_usage.seen_morphs())
         for morph in epoch_morphs:
             self._split_morph(morph)
@@ -642,11 +642,74 @@ class CatmapModel(object):
             #if prefix != suffix:
             #    self._recursive_split(suffix)
 
+    def _join_epoch(self, segmentations):
+        # FIXME random shuffle or sort by bigram frequency?
+        for (count, segments) in segmentations:
+            segments = [WORD_BOUNDARY] + segments + [WORD_BOUNDARY]
+            for quad in ngrams(segments, n=4):
+                prev_morph, prefix, suffix, next_morph = quad
+                self._join_bimorph(prev_morph, prefix, suffix, next_morph,
+                                   count)
+
+    def _join_bimorph(self, prev_morph, prefix, suffix, next_morph, count):
+        # Cost of leaving the morphs un-joined
+        best = (self.get_cost(), None)
+        old_cost = best[0]
+
+        old_categories = []
+        if prev_morph == WORD_BOUNDARY:
+            old_categories.append(WORD_BOUNDARY)
+        else:
+            old_categories.append(prev_morph.category)
+        old_categories.extend((prefix.category, suffix.category))
+        if next_morph == WORD_BOUNDARY:
+            old_categories.append(WORD_BOUNDARY)
+        else:
+            old_categories.append(next_morph.category)
+        morph = ''.join((prefix.morph, suffix.morph))
+        old_morphs = (None, prefix.morph, suffix.morph, None)
+        new_morphs = (None, morph, None)
+
+        # Remove *these* instances of the child morphs
+        # This is different from the old Cat-MAP
+        self._modify_coding_costs(old_morphs, old_categories, -count)
+
+        # Temporary estimated contexts
+        temporaries = set()
+
+        # Make sure that there are context features available
+        # (real or estimated) for the new morph
+        self._morph_usage.estimate_contexts((prefix, suffix), morph)
+
+        # Cost of each tagging of the joined morph
+        for new_cat in CatmapModel.get_categories():
+            new_categories = (old_categories[0], new_cat, old_categories[-1])
+            self._modify_coding_costs(new_morphs, new_categories, count)
+
+            cost = self.get_cost()
+
+            if cost < best[0]:
+                best = (cost, new_cat)
+
+            # Undo the changes
+            self._modify_coding_costs(new_morphs, new_categories, -count)
+
+        if best[1] is None:
+            # Best option was to do nothing: revert changes
+            self._modify_coding_costs(old_morphs, old_categories, count)
+        else:
+            # Re-apply with the best tag
+            new_categories = (old_categories[0], best[1], old_categories[-1])
+            self._modify_coding_costs(new_morphs, new_categories, count)
+            _logger.debug(u'Found a good join {} + {} -> {}/{}'.format(
+                prefix, suffix, morph, best[1]))
+
     def _modify_coding_costs(self, morphs, categories, diff_count):
         for (morph, category) in zip(morphs, categories):
-            self._catmap_coding.update_emission(category, morph,
-                                                diff_count)
-            self._modify_morph_count(morph, diff_count)
+            if morph is not None:
+                self._catmap_coding.update_emission(category, morph,
+                                                    diff_count)
+                self._modify_morph_count(morph, diff_count)
         for (prev_cat, next_cat) in ngrams(categories, 2):
             self._catmap_coding.update_transitions(prev_cat,
                                                     next_cat,
@@ -1056,6 +1119,8 @@ class CategorizedMorph(object):
         return u'{}/{}'.format(self.morph, self.category)
 
     def __eq__(self, other):
+        if not isinstance(other, CategorizedMorph):
+            return False
         return (self.morph == other.morph and
                 self.category == other.category)
 
@@ -1292,6 +1357,9 @@ class CatmapEncoding(morfessor.CorpusEncoding):
             self._update_logemissionsum(category, morph, diff_count)
         del self._emission_counts[morph]
         return old_emissions
+
+    def get_emissions(self, morph):
+        return ByCategory(*self._emission_counts[morph])
 
     def set_emissions(self, morph, new_emissions):
         """Set the number of emissions of a morph from all categories

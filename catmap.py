@@ -131,6 +131,8 @@ class MorphUsageProperties(object):
         self._context_builders = collections.defaultdict(MorphContextBuilder)
 
     def clear(self):
+        """Resets the context variables.
+        Use before fully reprocessing a segmented corpus."""
         self._contexts.clear()
         self._context_builders.clear()
 
@@ -215,8 +217,23 @@ class MorphUsageProperties(object):
                 universalprior(context.left_perplexity))
 
     def estimate_contexts(self, old_morphs, new_morphs):
+        """Estimates context features for new unseen morphs.
+
+        Arguments:
+            old_morphs -- A sequence of morphs being replaced. The existing
+                          context of these morphs can be used in the
+                          estimation.
+            new_morphs -- A sequence of morphs that replaces the old ones.
+                          Any previously unseen morphs in this sequence
+                          will get context features estimated from their
+                          surface form and/or from the contexts of the
+                          old morphs they replace.
+        Returns:
+            A list of temporary morph contexts that have been estimated.
+            These should be removed by the caller if no longer necessary.
+            The removal is done using MorphContext.remove_temporaries.
+        """
         temporaries = []
-        new_morphs = set(new_morphs)
         for (i, morph) in enumerate(new_morphs):
             if morph in self:
                 # The morph already has real context: no need to estimate
@@ -238,6 +255,7 @@ class MorphUsageProperties(object):
         return temporaries
 
     def remove_temporaries(self, temporaries):
+        """Remove estimated temporary morph contexts when no longer needed."""
         for morph in temporaries:
             if morph not in self:
                 continue
@@ -256,6 +274,7 @@ class MorphUsageProperties(object):
         return morph in self._contexts
 
     def get(self, morph):
+        """Returns the context features of a seen morph."""
         return self._contexts[morph]
 
     def count(self, morph):
@@ -265,12 +284,13 @@ class MorphUsageProperties(object):
         return self._contexts[morph].count
 
     def set_count(self, morph, new_count):
+        """Set the number of observed occurences of a morph."""
         self._contexts[morph] = _set_nt_at_index(self._contexts[morph],
             MorphContext._fields.index('count'), new_count)
 
     @classmethod
     def valid_split_transitions(cls):
-        """Yields all category pairs that are considered valid ways
+        """Returns all category pairs that are considered valid ways
         to split a morph."""
         if cls._valid_split_transitions is None:
             cls._valid_split_transitions = []

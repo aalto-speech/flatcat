@@ -5,7 +5,12 @@ Morfessor 2.0 Categories-MAP variant.
 
 __all__ = ['CatmapIO', 'CatmapModel']
 
+__version__ = '2.0.0prealpha1'
+__author__ = 'Stig-Arne Gronroos'
+__author_email__ = "morfessor@cis.hut.fi"
+
 import collections
+import datetime
 import logging
 import math
 
@@ -87,6 +92,9 @@ class MorphUsageProperties(object):
     invalid_split_transitions = (('SUF', 'PRE'),
                                  ('SUF', 'STM'),
                                  ('STM', 'PRE'))
+
+    # Cache for memoized valid transitions
+    _valid_split_transitions = None
 
     def __init__(self, ppl_treshold=100, ppl_slope=None, length_treshold=3,
                  length_slope=2, use_word_tokens=True,
@@ -208,6 +216,7 @@ class MorphUsageProperties(object):
 
     def estimate_contexts(self, old_morphs, new_morphs):
         temporaries = []
+        new_morphs = set(new_morphs)
         for (i, morph) in enumerate(new_morphs):
             if morph in self:
                 # The morph already has real context: no need to estimate
@@ -259,18 +268,21 @@ class MorphUsageProperties(object):
         self._contexts[morph] = _set_nt_at_index(self._contexts[morph],
             MorphContext._fields.index('count'), new_count)
 
-    @staticmethod
-    def valid_split_transitions():
+    @classmethod
+    def valid_split_transitions(cls):
         """Yields all category pairs that are considered valid ways
         to split a morph."""
-        categories = list(ByCategory._fields)
-        skiplist = list(MorphUsageProperties.zero_transitions)
-        skiplist.extend(MorphUsageProperties.invalid_split_transitions)
-        for prev_cat in categories:
-            for next_cat in categories:
-                if (prev_cat, next_cat) in skiplist:
-                    continue
-                yield (prev_cat, next_cat)
+        if cls._valid_split_transitions is None:
+            cls._valid_split_transitions = []
+            categories = list(ByCategory._fields)
+            skiplist = list(MorphUsageProperties.zero_transitions)
+            skiplist.extend(MorphUsageProperties.invalid_split_transitions)
+            for prev_cat in categories:
+                for next_cat in categories:
+                    if (prev_cat, next_cat) in skiplist:
+                        continue
+                    cls._valid_split_transitions.append((prev_cat, next_cat))
+        return cls._valid_split_transitions
 
 ### End of categorization-dependent code
 ########################################
@@ -278,17 +290,37 @@ class MorphUsageProperties(object):
 
 class CatmapIO(morfessor.MorfessorIO):
     """Extends data file formats to include category tags."""
-    # FIXME unimplemented
 
     def __init__(self, encoding=None, construction_separator=' + ',
                  comment_start='#', compound_separator='\s+',
-                 atom_separator=None, category_separator='/'):
+                 category_separator='/'):
         morfessor.MorfessorIO.__init__(
             self, encoding=encoding,
             construction_separator=construction_separator,
             comment_start=comment_start, compound_separator=compound_separator,
-            atom_separator=atom_separator)
+            atom_separator=None)
         self.category_separator = category_separator
+
+    def write_segmentation_file(self, file_name, segmentations, **kwargs):
+        """Write segmentation file.
+
+        File format (single line, wrapped only for pep8):
+        <count> <construction1><cat_sep><category1><cons_sep>...
+                <constructionN><cat_sep><categoryN>
+        """
+
+        _logger.info("Saving segmentations to '%s'..." % file_name)
+        with self._open_text_file_write(file_name) as file_obj:
+            d = datetime.datetime.now().replace(microsecond=0)
+            file_obj.write('# Output from Morfessor Cat-MAP {}, {!s}\n'.format(
+                __version__, d))
+            for count, morphs in segmentations:
+                s = self.construction_separator.join(
+                    [u'{}{}{}'.format(m.morph, self.category_separator,
+                                      m.category)
+                     for m in morphs])
+                file_obj.write(u'{} {}\n'.format(count, s))
+        _logger.info("Done.")
 
 
 class CatmapModel(object):
@@ -537,6 +569,7 @@ class CatmapModel(object):
         temporaries = set()
 
         # Cost of each possible split into two parts
+        tmp_valid = MorphUsageProperties.valid_split_transitions()
         for splitloc in range(1, len(morph)):
             prefix = morph[:splitloc]
             suffix = morph[splitloc:]
@@ -547,7 +580,6 @@ class CatmapModel(object):
             temporaries.update(tmp)
             # Consider tagging the newly formed morphs in all valid ways
             # Simplifying assumption: all instances are tagged the same way
-            tmp_valid = MorphUsageProperties.valid_split_transitions()
             for (prefix_cat, suffix_cat) in tmp_valid:
                 self._modify_coding_costs((prefix, suffix),
                                           (prefix_cat, suffix_cat),

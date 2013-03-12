@@ -95,6 +95,7 @@ class MorphUsageProperties(object):
 
     # Cache for memoized valid transitions
     _valid_split_transitions = None
+    _valid_transitions = None
 
     def __init__(self, ppl_treshold=100, ppl_slope=None, length_treshold=3,
                  length_slope=2, use_word_tokens=True,
@@ -302,7 +303,20 @@ class MorphUsageProperties(object):
                     if (prev_cat, next_cat) in skiplist:
                         continue
                     cls._valid_split_transitions.append((prev_cat, next_cat))
+            cls._valid_split_transitions = tuple(cls._valid_split_transitions)
         return cls._valid_split_transitions
+
+    @classmethod
+    def valid_transitions(cls):
+        if cls._valid_transitions is None:
+            categories = CatmapModel.get_categories(wb=True)
+            for cat1 in categories:
+                for cat2 in categories:
+                    if (cat1, cat2) in cls.zero_transitions:
+                        continue
+                    valid_transitions.append((cat1, cat2))
+            cls._valid_transitions = tuple(cls._valid_transitions)
+        return cls._valid_transitions
 
 ### End of categorization-dependent code
 ########################################
@@ -513,12 +527,7 @@ class CatmapModel(object):
             nclass[category] = float(self._category_totals[i])
 
         num_tokens_tagged = collections.Counter()
-        valid_transitions = []
-        for cat1 in nclass:
-            for cat2 in nclass:
-                if (cat1, cat2) in MorphUsageProperties.zero_transitions:
-                    continue
-                valid_transitions.append((cat1, cat2))
+        valid_transitions = MorphUsageProperties.valid_transitions()
 
         for (cat1, cat2) in valid_transitions:
             # count all possible valid transitions
@@ -1224,12 +1233,6 @@ class CatmapEncoding(morfessor.CorpusEncoding):
     def __init__(self, lexicon_encoding, weight=1.0):
         super(CatmapEncoding, self).__init__(lexicon_encoding, weight)
 
-        # Posterior emission probabilities P(Morph|Category).
-        # A dict of ByCategory objects indexed by morph. Log-probabilities.
-        # No smoothing: default probability is zero
-        self._log_emissionprobs = Sparse(_nt_zeros(ByCategory,
-                                                   zero=LOGPROB_ZERO))
-
         # Counts of emissions observed in the tagged corpus.
         # Not equivalent to _log_emissionprobs (which is the MAP estimate,
         # while these would give the ML estimate)
@@ -1246,17 +1249,10 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         # Single Counter object (ByCategory is unsuitable, need break also).
         self._cat_tagcount = collections.Counter()
 
-        # Cache for transition logprobs, to avoid wasting effort recalculating.
+        # Caches for transition and emission logprobs,
+        # to avoid wasting effort recalculating.
         self._log_transitionprob_cache = dict()
-
-        # The sum of logs of emission and transition costs.
-        self.logemissionsum = 0.0
-        self.logtransitionsum = 0.0
-
-    def set_log_emissionprobs(self, morph, lep):
-        """Initialize the emission log-probabilities
-        to precalculated values."""
-        self._log_emissionprobs[morph] = lep
+        self._log_emissionprob_cache = dict()
 
     def set_transition_counts(self, transitions, num_tokens_tagged):
         """Initialize the transition counts and totals for each
@@ -1273,7 +1269,6 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         self._transition_counts.clear()
         self._cat_tagcount.clear()
         self._log_transitionprob_cache.clear()
-        self.logtransitionsum = 0.0
 
     def update_transitions(self, prev_cat, next_cat, diff_count):
         """Updates the number of observed transitions between
@@ -1314,9 +1309,11 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         return self._log_transitionprob_cache[pair]
 
     def log_emissionprobs(self, morph):
+        # FIXME broken
         return self._log_emissionprobs[morph]
 
     def transit_emit_cost(self, prev_cat, next_cat, morph):
+        # FIXME broken
         """Cost of transitioning from prev_cat to next_cat and emitting
         the morph."""
         if (prev_cat, next_cat) in MorphUsageProperties.zero_transitions:
@@ -1330,7 +1327,6 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         Use before fully reprocessing a tagged segmented corpus."""
         self.tokens = 0
         self.logtokensum = 0.0
-        self.logemissionsum = 0.0
         self._emission_counts.clear()
 
     def update_emission(self, category, morph, diff_count):
@@ -1377,13 +1373,6 @@ class CatmapEncoding(morfessor.CorpusEncoding):
                                        new_emissions[category])
         self._emission_counts[morph] = new_emissions
 
-    def _update_logemissionsum(self, category, morph, diff_count):
-        """Helper function for updating the cumulative emission cost.
-        Should not be called directly."""
-        self.tokens += diff_count
-        self.logemissionsum += (diff_count *
-                             self._log_emissionprobs[morph][category])
-
     def update_count(self, construction, old_count, new_count):
         raise Exception('Inherited method not appropriate for CatmapEncoding')
 
@@ -1395,12 +1384,39 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         if self.boundaries == 0:
             return 0.0
 
+        # This can't be accumulated in log sum form, due to different total
+        # number of transitions
+        categories = CatmapModel.get_categories(wb=True)
+        logtransitionsum = 0.0
+        logcategorysum = 0.0
+        total = 0.0
+        sum_transitions_from = collections.Counter()
+        sum_transitions_to = collections.Counter()
+        for prev_cat in categories:
+            for next_cat in categories:
+                if (prev_cat, next_cat) in cls.zero_transitions:
+                    continue
+                count = self._transition_counts[(prev_cat, next_cat)]
+                if count == 0:
+                    continue
+                sum_transitions_from[prev_cat] += count
+                sum_transitions_to[next_cat] += count
+                total += count
+                logtransitionsum += math.log(count)
+        for cat in categories:
+            if sum_transitions_from[cat] > 0:
+                logtransitionsum -= (len(categories) * 
+                                    math.log(sum_transitions_from[cat]))
+            if sum_transitions_to[cat] > 0:
+                logcategorysum += math.log(sum_transitions_to[cat])
+        logcategorysum -= len(categories) * math.log(total)
+
         n = self.tokens + self.boundaries
-        return  ((#n * math.log(n)
-                  #- self.boundaries * math.log(self.boundaries)
-                  #- self.logtokensum
-                   self.logtransitionsum
-                  + self.logemissionsum
+        return  ((n * math.log(n)
+                  - self.boundaries * math.log(self.boundaries)
+                  - self.logtokensum
+                  + logtransitionsum
+                  + logcategorysum
                  ) * self.weight
                  #+ self.frequency_distribution_cost())
                 )

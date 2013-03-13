@@ -286,8 +286,7 @@ class MorphUsageProperties(object):
 
     def set_count(self, morph, new_count):
         """Set the number of observed occurences of a morph."""
-        self._contexts[morph] = _set_nt_at_index(self._contexts[morph],
-            MorphContext._fields.index('count'), new_count)
+        self._contexts[morph] = self._contexts[morph]._replace(count=new_count)
 
     @classmethod
     def valid_split_transitions(cls):
@@ -309,12 +308,13 @@ class MorphUsageProperties(object):
     @classmethod
     def valid_transitions(cls):
         if cls._valid_transitions is None:
+            cls._valid_transitions = []
             categories = CatmapModel.get_categories(wb=True)
             for cat1 in categories:
                 for cat2 in categories:
                     if (cat1, cat2) in cls.zero_transitions:
                         continue
-                    valid_transitions.append((cat1, cat2))
+                    cls._valid_transitions.append((cat1, cat2))
             cls._valid_transitions = tuple(cls._valid_transitions)
         return cls._valid_transitions
 
@@ -502,8 +502,6 @@ class CatmapModel(object):
                 tmp.append(_condprobs[morph][i] *
                            self._morph_usage.count(morph) /
                            total)
-            lep = _log_catprobs(ByCategory(*tmp))
-            self._catmap_coding.set_log_emissionprobs(morph, lep)
 
         # Calculate letter log probabilities
         total_letter_tokens = sum(num_letter_tokens.values())
@@ -539,13 +537,10 @@ class CatmapModel(object):
 
         normalization = (sum(nclass.values()) /
                          sum(num_tokens_tagged.values()))
-        for key in transitions:
-            transitions[key] *= normalization
-        for key in num_tokens_tagged:
-            num_tokens_tagged[key] *= normalization
-
-        self._catmap_coding.set_transition_counts(transitions,
-                                                  num_tokens_tagged)
+        for (prev_cat, next_cat) in transitions:
+            self._catmap_coding.update_transition_count(
+                prev_cat, next_cat,
+                transitions[(prev_cat, next_cat)] * normalization)
 
     def _calculate_transition_counts(self, segmentations):
         """Count the number of transitions of each type.
@@ -557,7 +552,7 @@ class CatmapModel(object):
                 List of format:
                 (count, (CategorizedMorph1, CategorizedMorph2, ...)), ...
         """
-        self._catmap_coding.clear_transitions()
+        self._catmap_coding.clear_transition_counts()
         for rcount, segments in segmentations:
             # Only the categories matter, not the morphs themselves
             categories = [x.category for x in segments]
@@ -569,8 +564,9 @@ class CatmapModel(object):
                 if pair in MorphUsageProperties.zero_transitions:
                     _logger.warning(u'Impossible transition ' +
                                     u'{!r} -> {!r}'.format(*pair))
-                self._catmap_coding.update_transitions(prev_cat, next_cat,
-                                                       rcount)
+                self._catmap_coding.update_transition_count(prev_cat,
+                                                            next_cat,
+                                                            rcount)
 
     def _split_epoch(self):
         # FIXME random shuffle or sort by length/frequency?
@@ -716,13 +712,14 @@ class CatmapModel(object):
     def _modify_coding_costs(self, morphs, categories, diff_count):
         for (morph, category) in zip(morphs, categories):
             if morph is not None:
-                self._catmap_coding.update_emission(category, morph,
-                                                    diff_count)
+                self._catmap_coding.update_emission_count(category,
+                                                          morph,
+                                                          diff_count)
                 self._modify_morph_count(morph, diff_count)
         for (prev_cat, next_cat) in ngrams(categories, 2):
-            self._catmap_coding.update_transitions(prev_cat,
-                                                    next_cat,
-                                                    diff_count)
+            self._catmap_coding.update_transition_count(prev_cat,
+                                                        next_cat,
+                                                        diff_count)
 
     def _modify_morph_count(self, morph, diff_count):
         """Modifies the count of a morph in the lexicon.
@@ -739,13 +736,15 @@ class CatmapModel(object):
         """Removes a morph completely from the lexicon.
         Transitions and emissions are also updated."""
         self._modify_morph_count(morph, -self._morph_usage.count(morph))
-        return self._catmap_coding.remove_emissions(morph)
+        old_emissions = self._catmap_coding.get_emission_counts(morph)
+        self._catmap_coding.set_emission_counts(morph, _nt_zeros(ByCategory))
+        return old_emissions
 
     def _readd(self, morph, emissions):
         """Readds a morph previously removed from the lexicon.
         Transitions and emissions are also restored."""
         count = sum(emissions)
-        self._catmap_coding.set_emissions(morph, emissions)
+        self._catmap_coding.set_emission_counts(morph, emissions)
         self._modify_morph_count(morph, count)
 
     def viterbi_tag(self, segments):
@@ -950,12 +949,12 @@ class CatmapModel(object):
 
     def _calculate_emission_counts(self, segmentations):
         """Recalculates the emission counts from a retagged segmentation."""
-        self._catmap_coding.clear_emissions()
+        self._catmap_coding.clear_emission_counts()
         for (count, segmentation) in segmentations:
             for morph in segmentation:
-                self._catmap_coding.update_emission(morph.category,
-                                                    morph.morph,
-                                                    count)
+                self._catmap_coding.update_emission_count(morph.category,
+                                                          morph.morph,
+                                                          count)
 
     def convergence_of_cost(self, train_func, max_cost_difference=0,
                             max_iterations=15):
@@ -1064,11 +1063,6 @@ class CatmapModel(object):
                 differences, cost_diff))
             previous_cost = cost
         return current_segmentation
-
-    def log_emissionprobs(self, morph):
-        """Returns the log of the emission probabilities P(morph|Category)
-        for all categories, as a ByCategory object."""
-        return self._catmap_coding.log_emissionprobs(morph)
 
     def get_cost(self):
         """Return current model encoding cost."""
@@ -1234,8 +1228,6 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         super(CatmapEncoding, self).__init__(lexicon_encoding, weight)
 
         # Counts of emissions observed in the tagged corpus.
-        # Not equivalent to _log_emissionprobs (which is the MAP estimate,
-        # while these would give the ML estimate)
         # A dict of ByCategory objects indexed by morph. Counts occurences.
         self._emission_counts = Sparse(_nt_zeros(ByCategory))
 
@@ -1254,23 +1246,20 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         self._log_transitionprob_cache = dict()
         self._log_emissionprob_cache = dict()
 
-    def set_transition_counts(self, transitions, num_tokens_tagged):
-        """Initialize the transition counts and totals for each
-        category to precalculated values."""
-        self._transition_counts = transitions
-        self._cat_tagcount = num_tokens_tagged
+    # Transition count methods
 
     def get_transition_count(self, prev_cat, next_cat):
         return self._transition_counts[(prev_cat, next_cat)]
 
-    def clear_transitions(self):
-        """Resets transition counts, costs and cache.
-        Use before fully reprocessing a tagged segmented corpus."""
-        self._transition_counts.clear()
-        self._cat_tagcount.clear()
-        self._log_transitionprob_cache.clear()
+    def log_transitionprob(self, prev_cat, next_cat):
+        pair = (prev_cat, next_cat)
+        if pair not in self._log_transitionprob_cache:
+            self._log_transitionprob_cache[pair] = (
+                _zlog(self._transition_counts[(prev_cat, next_cat)]) -
+                _zlog(self._cat_tagcount[prev_cat]))
+        return self._log_transitionprob_cache[pair]
 
-    def update_transitions(self, prev_cat, next_cat, diff_count):
+    def update_transition_count(self, prev_cat, next_cat, diff_count):
         """Updates the number of observed transitions between
         categories.
 
@@ -1283,13 +1272,10 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         """
 
         diff_count = float(diff_count)
-        msg = 'update_transitions needs category names, not indices'
+        msg = 'update_transition_count needs category names, not indices'
         assert not isinstance(prev_cat, int), msg
         assert not isinstance(next_cat, int), msg
         pair = (prev_cat, next_cat)
-
-        self.logtransitionsum -= (self._transition_counts[pair] *
-                                  self.log_transitionprob(*pair))
 
         self._transition_counts[pair] += diff_count
         self._cat_tagcount[prev_cat] += diff_count
@@ -1297,81 +1283,79 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         # invalidate cache
         self._log_transitionprob_cache.clear()
 
-        self.logtransitionsum += (self._transition_counts[pair] *
-                                  self.log_transitionprob(*pair))
+    def clear_transition_counts(self):
+        """Resets transition counts, costs and cache.
+        Use before fully reprocessing a tagged segmented corpus."""
+        self._transition_counts.clear()
+        self._cat_tagcount.clear()
+        self._log_transitionprob_cache.clear()
 
-    def log_transitionprob(self, prev_cat, next_cat):
-        pair = (prev_cat, next_cat)
-        if pair not in self._log_transitionprob_cache:
-            self._log_transitionprob_cache[pair] = (
-                _zlog(self._transition_counts[(prev_cat, next_cat)]) -
-                _zlog(self._cat_tagcount[prev_cat]))
-        return self._log_transitionprob_cache[pair]
+    # Emission count methods
 
-    def log_emissionprobs(self, morph):
-        # FIXME broken
-        return self._log_emissionprobs[morph]
+    def get_emission_counts(self, morph):
+        return self._emission_counts[morph]
 
-    def transit_emit_cost(self, prev_cat, next_cat, morph):
-        # FIXME broken
-        """Cost of transitioning from prev_cat to next_cat and emitting
-        the morph."""
-        if (prev_cat, next_cat) in MorphUsageProperties.zero_transitions:
-            return LOGPROB_ZERO
-        next_i = CatmapModel.get_categories().index(next_cat)
-        return (self.log_transitionprob(prev_cat, next_cat) +
-                self._log_emissionprobs[morph][next_i])
+    def log_emissionprob(self, category, morph):
+        pair = (category, morph)
+        if pair not in self._log_emissionprob_cache:
+            cat_index = CatmapModel.get_categories().index(category)
+            self._log_emissionprob_cache[pair] = (
+                _zlog(self._emission_counts[morph][cat_index]) -
+                _zlog(self._cat_tagcount[cat_index]))
+        return self._log_emissionprob_cache[pair]
 
-    def clear_emissions(self):
+    def update_emission_count(self, category, morph, diff_count):
+        """Updates the number of observed emissions of a single morph from a
+        single category, and the logtokensum (which is category independent).
+
+        Arguments:
+            category -- name of category from which emission occurs.
+            morph -- string representation of the morph.
+            diff_count -- the change in the number of occurences.
+        """
+        cat_index = CatmapModel.get_categories().index(category)
+        new_counts = self._emission_counts[morph]._replace(
+            **{category: (self._emission_counts[morph][cat_index] +
+                          diff_count)})
+        self.set_emission_counts(morph, new_counts)
+
+    def set_emission_counts(self, morph, new_counts):
+        """Set the number of emissions of a morph from all categories
+        simultaneously.
+
+        Arguments:
+            morph -- string representation of the morph.
+            new_counts -- ByCategory object with new counts.
+        """
+
+        old_total = sum(self._emission_counts[morph])
+        self._emission_counts[morph] = new_counts
+        new_total = sum(new_counts)
+
+        if old_total > 1:
+            self.logtokensum -= old_total * math.log(old_total)
+        if new_total > 1:
+            self.logtokensum += new_total * math.log(new_total)
+
+        # invalidate cache
+        self._log_emissionprob_cache.clear()
+
+    def clear_emission_counts(self):
         """Resets emission counts and costs.
         Use before fully reprocessing a tagged segmented corpus."""
         self.tokens = 0
         self.logtokensum = 0.0
         self._emission_counts.clear()
 
-    def update_emission(self, category, morph, diff_count):
-        """Updates the number of observed emissions of a single morph from a
-        single category, and the cumulative cost of the corpus.
-        """
-        if not isinstance(category, int):
-            category = CatmapModel.get_categories().index(category)
-        old_count = self._emission_counts[morph][category]
-        new_count = old_count + diff_count
-        if old_count > 1:
-            self.logtokensum -= old_count * math.log(old_count)
-        if new_count > 1:
-            self.logtokensum += new_count * math.log(new_count)
-        self._update_logemissionsum(category, morph, diff_count)
-        self._emission_counts[morph] = _set_nt_at_index(
-            self._emission_counts[morph], category, new_count)
+    # General methods
 
-    def remove_emissions(self, morph):
-        """Removes all emissions of a morph from all categories"""
-        old_emissions = self._emission_counts[morph]
-        for category in range(len(CatmapModel.get_categories())):
-            diff_count = -self._emission_counts[morph][category]
-            self._update_logemissionsum(category, morph, diff_count)
-        del self._emission_counts[morph]
-        return old_emissions
-
-    def get_emissions(self, morph):
-        return ByCategory(*self._emission_counts[morph])
-
-    def set_emissions(self, morph, new_emissions):
-        """Set the number of emissions of a morph from all categories
-        simultaneously.
-
-        Arguments:
-            morph -- string representation of the morph
-            new_emissions -- ByCategory object with new counts.
-        """
-
-        if morph in self._emission_counts:
-            self.remove_emissions(morph)
-        for category in range(len(CatmapModel.get_categories())):
-            self._update_logemissionsum(category, morph,
-                                       new_emissions[category])
-        self._emission_counts[morph] = new_emissions
+    def transit_emit_cost(self, prev_cat, next_cat, morph):
+        """Cost of transitioning from prev_cat to next_cat and emitting
+        the morph."""
+        if (prev_cat, next_cat) in MorphUsageProperties.zero_transitions:
+            return LOGPROB_ZERO
+        return (self.log_transitionprob(prev_cat, next_cat) +
+                self.log_emissionprob(next_cat, morph))
 
     def update_count(self, construction, old_count, new_count):
         raise Exception('Inherited method not appropriate for CatmapEncoding')
@@ -1390,11 +1374,13 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         logtransitionsum = 0.0
         logcategorysum = 0.0
         total = 0.0
+        # FIXME: this can be optimized when getting rid of the assertions
         sum_transitions_from = collections.Counter()
         sum_transitions_to = collections.Counter()
+        forbidden = MorphUsageProperties.zero_transitions
         for prev_cat in categories:
             for next_cat in categories:
-                if (prev_cat, next_cat) in cls.zero_transitions:
+                if (prev_cat, next_cat) in forbidden:
                     continue
                 count = self._transition_counts[(prev_cat, next_cat)]
                 if count == 0:
@@ -1404,11 +1390,15 @@ class CatmapEncoding(morfessor.CorpusEncoding):
                 total += count
                 logtransitionsum += math.log(count)
         for cat in categories:
-            if sum_transitions_from[cat] > 0:
-                logtransitionsum -= (len(categories) * 
-                                    math.log(sum_transitions_from[cat]))
-            if sum_transitions_to[cat] > 0:
-                logcategorysum += math.log(sum_transitions_to[cat])
+            # These hold, because for each incoming transition there is
+            # exactly one outgoing transition (except for word boundary,
+            # of which there are one of each in every word)
+            assert sum_transitions_from[cat] == sum_transitions_to[cat]
+            assert sum_transitions_to[cat] == self._cat_tagcount[cat]
+
+            if self._cat_tagcount[cat] > 0:
+                logtransitionsum -= ((len(categories) - 1) * 
+                                    math.log(self._cat_tagcount[cat]))
         logcategorysum -= len(categories) * math.log(total)
 
         n = self.tokens + self.boundaries
@@ -1452,24 +1442,6 @@ class Sparse(dict):
         else:
             dict.__setitem__(self, key, value)
 
-    def set_at_index(self, key, index, value):
-        """Convenience function to simulate mutability of the contained
-        namedtuples. Calls _set_nt_at_index with the current value
-        and stores the result in its place.
-        """
-
-        if key not in self:
-            nt = self._default
-            self[key] = nt
-        else:
-            nt = self[key]
-        nt = _set_nt_at_index(nt, index, value)
-        if nt == self._default:
-            if key in self:
-                del self[key]
-        else:
-            self[key] = nt
-
 
 def sigmoid(value, treshold, slope):
     return 1.0 / (1.0 + math.exp(-slope * (value - treshold)))
@@ -1505,20 +1477,6 @@ def _nt_zeros(constructor, zero=0.0):
     without needing to know the number of fields."""
     zeros = [zero] * len(constructor._fields)
     return constructor(*zeros)
-
-
-def _set_nt_at_index(previous_namedtuple, index, new_value):
-    """Convenience function to return a copy of a namedtuple with
-    just one value altered.
-    Arguments:
-        previous_namedtuple -- namedtuple to use for all unchanged values.
-        index -- index of value to change
-        new_value -- new value to set at index
-    """
-
-    mutable = list(previous_namedtuple)
-    mutable[index] = new_value
-    return previous_namedtuple.__class__(*mutable)
 
 
 def _minargmin(sequence):

@@ -3,6 +3,7 @@
 Tests for Morfessor 2.0 Categories-MAP variant.
 """
 
+import collections
 import logging
 import math
 import re
@@ -161,15 +162,17 @@ class TestProbabilityEstimation(unittest.TestCase):
     def test_posterior_emission_probs(self):
         for morph in self.posteriors:
             reference = self.posteriors[morph]
-            try:
-                observed = _exp_catprobs(self.model.log_emissionprobs(morph))
-            except KeyError:
-                raise KeyError('%s not in observed morphs' % (morph,))
             msg = 'P(%s | "%s"), %s not almost equal to %s'
 
             for (i, category) in enumerate(self.model.get_categories()):
-                self.assertAlmostEqual(observed[i], reference[i], places=9,
-                    msg=msg % (morph, category, observed[i], reference[i]))
+                try:
+                    observed = _zexp(
+                        self.model._catmap_coding.log_emissionprob(category,
+                                                                   morph))
+                except KeyError:
+                    raise KeyError('%s not in observed morphs' % (morph,))
+                self.assertAlmostEqual(observed, reference[i], places=9,
+                    msg=msg % (morph, category, observed, reference[i]))
 
     def test_transitions(self):
         categories = self.model.get_categories(True)
@@ -379,6 +382,36 @@ class TestModelConsistency(unittest.TestCase):
             sum(self.model._category_totals) +
                     self.model._catmap_coding.boundaries,
             places=4)
+
+        sum_transitions_from = collections.Counter()
+        sum_transitions_to = collections.Counter()
+        categories = self.model.get_categories(wb=True)
+        forbidden = catmap.MorphUsageProperties.zero_transitions
+        for prev_cat in categories:
+            for next_cat in categories:
+                if (prev_cat, next_cat) in forbidden:
+                    continue
+                count = self.model._catmap_coding._transition_counts[
+                    (prev_cat, next_cat)]
+                if count == 0:
+                    continue
+                sum_transitions_from[prev_cat] += count
+                sum_transitions_to[next_cat] += count
+        for cat in categories:
+            # These hold, because for each incoming transition there is
+            # exactly one outgoing transition (except for word boundary,
+            # of which there are one of each in every word)
+            msg = ('Transition counts were not symmetrical. ' +
+                   u'category {}: {}, {}, {}'.format(cat,
+                    sum_transitions_from[cat], sum_transitions_to[cat],
+                    self.model._catmap_coding._cat_tagcount[cat]))
+
+            self.assertEqual(sum_transitions_from[cat],
+                             sum_transitions_to[cat],
+                             msg)
+            self.assertEqual(sum_transitions_to[cat],
+                             self.model._catmap_coding._cat_tagcount[cat],
+                             msg)
 
 
 def _zexp(x):

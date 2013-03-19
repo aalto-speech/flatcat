@@ -52,6 +52,46 @@ MorphContext = collections.namedtuple('MorphContext',
 # Grid node for viterbi algorithm
 ViterbiNode = collections.namedtuple('ViterbiNode', ['cost', 'backpointer'])
 
+WordAnalysis = collections.namedtuple('WordAnalysis', ['count', 'analysis'])
+
+ChangeCounts = collections.namedtuple('ChangeCounts',
+                                      ['emissions', 'transitions'])
+
+class Transformation(object):
+    __slots__ = ['cost', 'original', 'result', 'change_counts']
+
+    def __init__(self, original, result):
+        self.cost = 0
+        self.original = original
+        self.result = result
+        self.change_counts = ChangeCounts(dict(), dict())
+
+    def apply(self, word, update=False):
+        i = 0
+        out = []
+        while i + len(self.original) < len(word.analysis):
+            if self.original == word.analysis[i:(i + len(self.original))]:
+                out.extend(self.result)
+                i += len(self.original)
+            else:
+                out.append(word.analysis[i])
+                i += 1
+        while i < len(word.analysis):
+            out.append(word.analysis[i])
+            i += 1
+
+        if update:
+            self._update_counts(word.analysis, -word.count)
+            self._update_counts(out, word.count)
+
+        return WordAnalysis(word.count, out)
+    
+    def _update_counts(self, segmentation, count):
+        for cmorph in segmentation:
+            self.change_counts.emissions[cmorph] += count
+        for (prefix, suffix) in ngrams(segmentation, n=2):
+            self.change_counts.transitions[(prefix.category,
+                                            suffix.category)] += count
 
 class MorphContextBuilder(object):
     """Temporary structure used when calculating the MorphContexts."""
@@ -374,6 +414,14 @@ class CatmapModel(object):
         self._morph_usage = morph_usage
         self._transition_cutoff = float(transition_cutoff)
 
+        # The analyzed (segmented and tagged) corpus
+        self.segmentations = []
+
+        # Morph occurence backlinks
+        # A dict of sets. Keys are morphs, set contents are indices to
+        # self.segmentations for words in which the morph occurs
+        self.morph_backlinks = collections.defaultdict(set)
+
         # Cost variables
         self._lexicon_coding = CatmapLexiconEncoding(morph_usage)
         # Catmap encoding also stores the HMM parameters
@@ -389,27 +437,8 @@ class CatmapModel(object):
 
         # Log probabilities of single letters, for alphabetization cost
         # FIXME: no longer needed? assume identical distribution?
+        # FIXME: lexicon logtokens? viterbi analysis of new words?
         self._log_letterprobs = dict()
-
-    def train(self, segmentations):
-        """Perform Cat-MAP training on the model.
-
-        Arguments:
-            segmentations -- Segmentation of corpus using the baseline method.
-                             Format: (count, (morph1, morph2, ...))
-        """
-        # FIXME this is not good for big files. OTOH loading the baseline
-        # will be done differently.
-        segmentations = tuple(segmentations)
-        self.load_baseline(segmentations)
-        segmentations = self.convergence_of_analysis(
-            self._calculate_transition_counts,
-            self.viterbi_tag_corpus,
-            segmentations, max_iterations=1)    # FIXME debug max
-        self._calculate_emission_counts(segmentations)
-        segmentations = self.convergence_of_cost(
-            self._split_epoch,
-            max_iterations=2)    # FIXME debug max
 
     def load_baseline(self, segmentations, no_emissions=False):
         """Initialize the model using the segmentation produced by a morfessor
@@ -427,29 +456,40 @@ class CatmapModel(object):
                             emission counts. (Default: False)
         """
 
-        segmentations = tuple(segmentations)
-        self._estimate_emission_posteriors(segmentations)
+        # FIXME: Initialize self.morph_backlinks
+        self.segmentations = [WordAnalysis(*x) for x in segmentations]
+        self._estimate_emission_posteriors()
         self._unigram_transition_probs()
         if no_emissions:
             return
-        retagged = tuple(self.viterbi_tag_corpus(segmentations))
-        self._calculate_transition_counts(retagged)
-        self._calculate_emission_counts(retagged)
+        self.viterbi_tag_corpus()
+        self._calculate_transition_counts()
+        self._calculate_emission_counts()
 
-    def _reestimate_probabilities(self, segmentations):
+    def train(self):
+        """Perform Cat-MAP training on the model.
+        The model must have been initialized by loading a baseline.
+        """
+        self.convergence_of_analysis(
+            self._calculate_transition_counts,
+            self.viterbi_tag_corpus,
+            max_iterations=1)    # FIXME debug max
+        self._calculate_emission_counts()
+        self.convergence_of_cost(
+            self._split_epoch,
+            max_iterations=2)    # FIXME debug max
+
+    def _reestimate_probabilities(self):
         """Re-estimates model parameters from a segmented, tagged corpus.
 
         theta(t) = arg min { L( theta, Y(t), D ) }
         """
-        self._estimate_emission_posteriors(segmentations)
-        self._calculate_transition_counts(segmentations)
-        self._calculate_emission_counts(segmentations)
+        self._estimate_emission_posteriors()
+        self._calculate_transition_counts()
+        self._calculate_emission_counts()
 
-    def _estimate_emission_posteriors(self, segmentations):
+    def _estimate_emission_posteriors(self):
         """Estimates P(Category|Morph), P(Category) and P(Morph|Category).
-        Arguments:
-            segmentations -- Segmentation of corpus, with or without
-                             category tags.
         """
 
         num_letter_tokens = collections.Counter()
@@ -461,7 +501,7 @@ class CatmapModel(object):
         # A dict of ByCategory objects indexed by morph. Actual probabilities.
         _condprobs = dict()
 
-        for rcount, segments in segmentations:
+        for rcount, segments in self.segmentations:
             self._catmap_coding.boundaries += rcount
             # Category tags are not needed for these calculations
             segments = [CatmapModel._detag_morph(x) for x in segments]
@@ -542,18 +582,14 @@ class CatmapModel(object):
                 prev_cat, next_cat,
                 transitions[(prev_cat, next_cat)] * normalization)
 
-    def _calculate_transition_counts(self, segmentations):
+    def _calculate_transition_counts(self):
         """Count the number of transitions of each type.
         Can be used to estimate transition probabilities from
         a category-tagged segmented corpus.
-
-        Arguments:
-            segmentations -- Category-tagged segmented corpus.
-                List of format:
-                (count, (CategorizedMorph1, CategorizedMorph2, ...)), ...
         """
+
         self._catmap_coding.clear_transition_counts()
-        for rcount, segments in segmentations:
+        for rcount, segments in self.segmentations:
             # Only the categories matter, not the morphs themselves
             categories = [x.category for x in segments]
             # Include word boundaries
@@ -567,6 +603,15 @@ class CatmapModel(object):
                 self._catmap_coding.update_transition_count(prev_cat,
                                                             next_cat,
                                                             rcount)
+
+    def _calculate_emission_counts(self):
+        """Recalculates the emission counts from a retagged segmentation."""
+        self._catmap_coding.clear_emission_counts()
+        for (count, segmentation) in self.segmentations:
+            for morph in segmentation:
+                self._catmap_coding.update_emission_count(morph.category,
+                                                          morph.morph,
+                                                          count)
 
     def _split_epoch(self):
         # FIXME random shuffle or sort by length/frequency?
@@ -647,9 +692,10 @@ class CatmapModel(object):
             #if prefix != suffix:
             #    self._recursive_split(suffix)
 
-    def _join_epoch(self, segmentations):
+    def _join_epoch(self):
         # FIXME random shuffle or sort by bigram frequency?
-        for (count, segments) in segmentations:
+        # FIXME this is broken
+        for (count, segments) in self.segmentations:
             segments = [WORD_BOUNDARY] + segments + [WORD_BOUNDARY]
             for quad in ngrams(segments, n=4):
                 prev_morph, prefix, suffix, next_morph = quad
@@ -816,11 +862,15 @@ class CatmapModel(object):
                 categories[backtrace.backpointer]))
         return result
 
-    def viterbi_tag_corpus(self, segmentations):
-        """Convenience wrapper around viterbi_tag for a segmented corpus
-        with attached counts. Input can be with or without tags."""
-        for (count, segmentation) in segmentations:
-            yield (count, self.viterbi_tag(segmentation))
+    def viterbi_tag_corpus(self):
+        """(Re)tags the corpus segmentations using viterbi_tag"""
+        num_changed_words = 0
+        for (i, word) in enumerate(self.segmentations):
+            self.segmentations[i] = WordAnalysis(word.count,
+                self.viterbi_tag(word.analysis))
+            if word != self.segmentations[i]:
+                num_changed_words += 1
+        return num_changed_words
 
     def viterbi_segment(self, segments):
         """Simultaneously segment and tag a word using the learned model.
@@ -947,15 +997,6 @@ class CatmapModel(object):
                 word = (word,)
             yield (count, self.viterbi_segment(word))
 
-    def _calculate_emission_counts(self, segmentations):
-        """Recalculates the emission counts from a retagged segmentation."""
-        self._catmap_coding.clear_emission_counts()
-        for (count, segmentation) in segmentations:
-            for morph in segmentation:
-                self._catmap_coding.update_emission_count(morph.category,
-                                                          morph.morph,
-                                                          count)
-
     def convergence_of_cost(self, train_func, max_cost_difference=0,
                             max_iterations=15):
         """Iterates the specified training function until the model cost
@@ -994,54 +1035,49 @@ class CatmapModel(object):
                 _logger.info(u'Cost difference: {}'.format(cost_diff))
             previous_cost = cost
 
-    def convergence_of_analysis(self, train_func, resegment_func, corpus,
+    def convergence_of_analysis(self, train_func, resegment_func,
                                 max_differences=0,
                                 max_cost_difference=-10000,
                                 max_iterations=15):
         """Iterates the specified training function until the segmentations
-        produced by the model for the given input no longer change more than
+        produced by the model no longer changes more than
         the specified treshold, until the model cost no longer improves
         enough or until maximum number of iterations is reached.
 
         On each iteration the current optimal analysis for the corpus is
-        produced by giving the corpus as input to resegment_func.
+        produced by calling resegment_func.
         This corresponds to:
 
         Y(t) = arg min { L( theta(t-1), Y, D ) }
 
-        Then the analysis of the previous iteration is given
-        as argument to the train_func function, which corresponds to:
+        Then the train_func function is called, which corresponds to:
 
         theta(t) = arg min { L( theta, Y(t), D ) }
 
+        Neither train_func nor resegment_func may require any arguments.
+
         Arguments:
-            train_func -- A method of CatmapModel that takes one argument:
-                          segmentations, and which causes some aspect
+            train_func -- A method of CatmapModel which causes some aspect
                           of the model to be trained.
-            resegment_func -- A method of CatmapModed that resegments or
+            resegment_func -- A method of CatmapModel that resegments or
                               retags the segmentations, to produce the
-                              results to compare.  Takes one argument:
-                              the (tagged or untagged) segmentations.
-            segmentations -- list of (count, segmentation) pairs. Can be
-                             either tagged or untagged.
+                              results to compare. Should return the number
+                              of changed words.
             max_differences -- Maximum number of words with changed
                                segmentation or category tags in the final
                                iteration. Default 0.
             max_cost_difference -- Stop iterating if cost reduction between
                                    iterations is below this limit.
             max_iterations -- Maximum number of iterations. Default 15.
-        Returns:
-            Tagged segmentation produced by last iteration.
         """
 
-        current_segmentation = tuple(resegment_func(corpus))
         previous_cost = self.get_cost()
         for iteration in range(max_iterations):
-            previous_segmentation = current_segmentation
             _logger.info(u'Iteration {!r} number {}/{}.'.format(
                 train_func.__name__, iteration + 1, max_iterations))
+
             # perform the optimization
-            train_func(previous_segmentation)
+            train_func()
 
             cost = self.get_cost()
             cost_diff = cost - previous_cost
@@ -1049,12 +1085,10 @@ class CatmapModel(object):
                 _logger.info(u'Converged, with cost difference ' +
                     u'{} in final iteration.'.format(cost_diff))
                 break
-            current_segmentation = tuple(
-                resegment_func(previous_segmentation))
-            differences = 0
-            for (r, o) in zip(previous_segmentation, current_segmentation):
-                if r != o:
-                    differences += 1
+
+            # perform the reanalysis
+            differences = resegment_func()
+
             if differences <= max_differences:
                 _logger.info(u'Converged, with ' +
                     u'{} differences in final iteration.'.format(differences))
@@ -1062,7 +1096,6 @@ class CatmapModel(object):
             _logger.info(u'{} differences. Cost difference: {}'.format(
                 differences, cost_diff))
             previous_cost = cost
-        return current_segmentation
 
     def get_cost(self):
         """Return current model encoding cost."""

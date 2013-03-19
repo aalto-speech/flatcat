@@ -46,7 +46,9 @@ ByCategory = collections.namedtuple('ByCategory',
 # morph belonging to a category.
 MorphContext = collections.namedtuple('MorphContext',
                                       ['count', 'left_perplexity',
-                                       'right_perplexity'])
+                                       'right_perplexity',
+                                       'transition_counts_in',
+                                       'transition_counts_out'])
 
 
 # Grid node for viterbi algorithm
@@ -59,6 +61,8 @@ class MorphContextBuilder(object):
         self.count = 0
         self.left = collections.Counter()
         self.right = collections.Counter()
+        self.transition_counts_in = Sparse(default=0)
+        self.transition_counts_out = Sparse(default=0)
 
     @property
     def left_perplexity(self):
@@ -128,7 +132,7 @@ class MorphUsageProperties(object):
             self._ppl_slope = 10.0 / self._ppl_treshold
 
         # Counts of different contexts in which a morph occurs
-        self._contexts = Sparse(MorphContext(0, 1.0, 1.0))
+        self._contexts = Sparse(default=MorphContext(0, 1.0, 1.0, {}, {}))
         self._context_builders = collections.defaultdict(MorphContextBuilder)
 
     def clear(self):
@@ -170,7 +174,9 @@ class MorphUsageProperties(object):
             tmp = self._context_builders[morph]
             self._contexts[morph] = MorphContext(tmp.count,
                                                  tmp.left_perplexity,
-                                                 tmp.right_perplexity)
+                                                 tmp.right_perplexity,
+                                                 tmp.transition_counts_in,
+                                                 tmp.transition_counts_out)
         self._context_builders.clear()
 
     def condprob(self, morph):
@@ -242,16 +248,27 @@ class MorphUsageProperties(object):
             if i == 0:
                 # Prefix inherits left perplexity of leftmost parent
                 l_ppl = self._contexts[old_morphs[0]].left_perplexity
+                # and also the distribution of preceding categories
+                transition_counts_in = Sparse(
+                    self._contexts[old_morphs[0]].transition_counts_in,
+                    default=0)
             else:
                 # Otherwise assume that the morph doesn't appear in any
                 # other contexts, which gives perplexity 1.0
                 l_ppl = 1.0
+                # And empty preceding category distribution
+                transition_counts_in = Sparse(default=0)
             if i == len(new_morphs) - 1:
                 r_ppl = self._contexts[old_morphs[-1]].right_perplexity
+                transition_counts_out = Sparse(
+                    self._contexts[old_morphs[-1]].transition_counts_out,
+                    default=0)
             else:
                 r_ppl = 1.0
+                transition_counts_out = Sparse(default=0)
             count = 0   # estimating does not add instances of the morph
-            self._contexts[morph] = MorphContext(count, l_ppl, r_ppl)
+            self._contexts[morph] = MorphContext(count, l_ppl, r_ppl,
+                transition_counts_in, transition_counts_out)
             temporaries.append(morph)
         return temporaries
 
@@ -287,6 +304,17 @@ class MorphUsageProperties(object):
     def set_count(self, morph, new_count):
         """Set the number of observed occurences of a morph."""
         self._contexts[morph] = self._contexts[morph]._replace(count=new_count)
+
+    def update_transition_count(self, prefix, suffix, prefix_cat, suffix_cat, count):
+        pair = (prefix_cat, suffix_cat)
+        if prefix in self._contexts:
+            self._contexts[prefix].transition_counts_out[pair] += count
+        if suffix in self._contexts:
+            self._contexts[suffix].transition_counts_in[pair] += count
+
+    def transitions(self, morph):
+        return (self._contexts[morph].transition_counts_in,
+                self._contexts[morph].transition_counts_out)
 
     @classmethod
     def valid_split_transitions(cls):
@@ -554,19 +582,22 @@ class CatmapModel(object):
         """
         self._catmap_coding.clear_transition_counts()
         for rcount, segments in segmentations:
-            # Only the categories matter, not the morphs themselves
-            categories = [x.category for x in segments]
             # Include word boundaries
-            categories.insert(0, WORD_BOUNDARY)
-            categories.append(WORD_BOUNDARY)
-            for (prev_cat, next_cat) in ngrams(categories, 2):
-                pair = (prev_cat, next_cat)
+            wb = CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)
+            seg_boundaries = [wb] + list(segments) + [wb]
+            for (prefix, suffix) in ngrams(seg_boundaries, 2):
+                pair = (prefix.category, suffix.category)
                 if pair in MorphUsageProperties.zero_transitions:
                     _logger.warning(u'Impossible transition ' +
                                     u'{!r} -> {!r}'.format(*pair))
-                self._catmap_coding.update_transition_count(prev_cat,
-                                                            next_cat,
+                self._catmap_coding.update_transition_count(prefix.category,
+                                                            suffix.category,
                                                             rcount)
+                self._morph_usage.update_transition_count(prefix.morph,
+                                                          suffix.morph,
+                                                          prefix.category,
+                                                          suffix.category,
+                                                          rcount)
 
     def _split_epoch(self):
         # FIXME random shuffle or sort by length/frequency?
@@ -738,6 +769,19 @@ class CatmapModel(object):
         self._modify_morph_count(morph, -self._morph_usage.count(morph))
         old_emissions = self._catmap_coding.get_emission_counts(morph)
         self._catmap_coding.set_emission_counts(morph, _nt_zeros(ByCategory))
+
+        (transitions_in, transitions_out) = self._morph_usage.transitions(morph)
+        for own_cat in CatmapModel.get_categories():
+            for neighbour_cat in CatmapModel.get_categories():
+                # transitions in to this morph
+                self._catmap_coding.update_transition_count(
+                    neighbour_cat, own_cat, 
+                    -transitions_in[(neighbour_cat, own_cat)])
+                # transitions out of this morph
+                self._catmap_coding.update_transition_count(
+                    own_cat, neighbour_cat, 
+                    -transitions_out[(own_cat, neighbour_cat)])
+                    
         return old_emissions
 
     def _readd(self, morph, emissions):
@@ -746,6 +790,18 @@ class CatmapModel(object):
         count = sum(emissions)
         self._catmap_coding.set_emission_counts(morph, emissions)
         self._modify_morph_count(morph, count)
+
+        (transitions_in, transitions_out) = self._morph_usage.transitions(morph)
+        for own_cat in CatmapModel.get_categories():
+            for neighbour_cat in CatmapModel.get_categories():
+                # transitions in to this morph
+                self._catmap_coding.update_transition_count(
+                    neighbour_cat, own_cat, 
+                    transitions_in[(neighbour_cat, own_cat)])
+                # transitions out of this morph
+                self._catmap_coding.update_transition_count(
+                    own_cat, neighbour_cat, 
+                    transitions_out[(own_cat, neighbour_cat)])
 
     def viterbi_tag(self, segments):
         """Tag a pre-segmented word using the learned model.
@@ -1229,7 +1285,7 @@ class CatmapEncoding(morfessor.CorpusEncoding):
 
         # Counts of emissions observed in the tagged corpus.
         # A dict of ByCategory objects indexed by morph. Counts occurences.
-        self._emission_counts = Sparse(_nt_zeros(ByCategory))
+        self._emission_counts = Sparse(default=_nt_zeros(ByCategory))
 
         # Counts of transitions between categories.
         # P(Category -> Category) can be calculated from these.
@@ -1296,6 +1352,7 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         return self._emission_counts[morph]
 
     def log_emissionprob(self, category, morph):
+        # FIXME: this should include the condprobs
         pair = (category, morph)
         if pair not in self._log_emissionprob_cache:
             cat_index = CatmapModel.get_categories().index(category)
@@ -1393,8 +1450,9 @@ class CatmapEncoding(morfessor.CorpusEncoding):
             # These hold, because for each incoming transition there is
             # exactly one outgoing transition (except for word boundary,
             # of which there are one of each in every word)
-            assert sum_transitions_from[cat] == sum_transitions_to[cat]
-            assert sum_transitions_to[cat] == self._cat_tagcount[cat]
+            #assert sum_transitions_from[cat] == sum_transitions_to[cat]
+            #assert sum_transitions_to[cat] == self._cat_tagcount[cat]
+            print('{}, {}, {}'.format(sum_transitions_from[cat], sum_transitions_to[cat], self._cat_tagcount[cat]))
 
             if self._cat_tagcount[cat] > 0:
                 logtransitionsum -= ((len(categories) - 1) * 
@@ -1417,17 +1475,17 @@ class Sparse(dict):
     as possible. If a value becomes equal to the default value, it (and the
     key associated with it) are transparently removed.
 
-    Only supports namedtuple values.
+    Only supports immutable values, e.g. namedtuples.
     """
 
-    def __init__(self, default=None, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         """Create a new Sparse datastructure.
-        Arguments:
+        Keyword arguments:
             default -- Default value. Unlike defaultdict this should be a
-                       prototype namedtuple, not a factory.
+                       prototype immutable, not a factory.
         """
 
-        self._default = default
+        self._default = kwargs.pop('default')
         dict.__init__(self, *args, **kwargs)
 
     def __getitem__(self, key):

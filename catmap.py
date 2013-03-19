@@ -128,7 +128,7 @@ class MorphUsageProperties(object):
             self._ppl_slope = 10.0 / self._ppl_treshold
 
         # Counts of different contexts in which a morph occurs
-        self._contexts = Sparse(MorphContext(0, 1.0, 1.0))
+        self._contexts = Sparse(default=MorphContext(0, 1.0, 1.0))
         self._context_builders = collections.defaultdict(MorphContextBuilder)
 
     def clear(self):
@@ -1229,7 +1229,7 @@ class CatmapEncoding(morfessor.CorpusEncoding):
 
         # Counts of emissions observed in the tagged corpus.
         # A dict of ByCategory objects indexed by morph. Counts occurences.
-        self._emission_counts = Sparse(_nt_zeros(ByCategory))
+        self._emission_counts = Sparse(default=_nt_zeros(ByCategory))
 
         # Counts of transitions between categories.
         # P(Category -> Category) can be calculated from these.
@@ -1417,17 +1417,17 @@ class Sparse(dict):
     as possible. If a value becomes equal to the default value, it (and the
     key associated with it) are transparently removed.
 
-    Only supports namedtuple values.
+    Only supports immutable values, e.g. namedtuples.
     """
 
-    def __init__(self, default=None, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         """Create a new Sparse datastructure.
-        Arguments:
+        Keyword arguments:
             default -- Default value. Unlike defaultdict this should be a
-                       prototype namedtuple, not a factory.
+                       prototype immutable, not a factory.
         """
 
-        self._default = default
+        self._default = kwargs.pop('default')
         dict.__init__(self, *args, **kwargs)
 
     def __getitem__(self, key):

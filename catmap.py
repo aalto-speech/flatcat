@@ -31,6 +31,11 @@ class WordBoundary(object):
 
 WORD_BOUNDARY = WordBoundary()
 
+# Grid node for viterbi algorithm
+ViterbiNode = collections.namedtuple('ViterbiNode', ['cost', 'backpointer'])
+
+WordAnalysis = collections.namedtuple('WordAnalysis', ['count', 'analysis'])
+
 ##################################
 ### Categorization-dependent code:
 ### to change the categories, only code in this section needs to be changed.
@@ -47,102 +52,6 @@ ByCategory = collections.namedtuple('ByCategory',
 MorphContext = collections.namedtuple('MorphContext',
                                       ['count', 'left_perplexity',
                                        'right_perplexity'])
-
-
-# Grid node for viterbi algorithm
-ViterbiNode = collections.namedtuple('ViterbiNode', ['cost', 'backpointer'])
-
-WordAnalysis = collections.namedtuple('WordAnalysis', ['count', 'analysis'])
-
-
-class ChangeCounts(object):
-    __slots__ = ['emissions', 'transitions',
-                 'backlinks_remove', 'backlinks_add']
-
-    def __init__(self, emissions=None, transitions=None):
-        if emissions is None:
-            self.emissions = dict()
-        else:
-            self.emissions = emissions
-        if transitions is None:
-            self.transitions = dict()
-        else:
-            self.transitions = transitions
-        self.backlinks_remove = collections.defaultdict(set)
-        self.backlinks_add = collections.defaultdict(set)
-
-    def update(self, analysis, count, corpus_index=None):
-        for cmorph in analysis:
-            self.emissions[cmorph] += count
-            if corpus_index is not None:
-                if count < 0:
-                    self.backlinks_remove[cmorph.morph].add(corpus_index)
-                elif count > 0:
-                    self.backlinks_add[cmorph.morph].add(corpus_index)
-        for (prefix, suffix) in ngrams(analysis, n=2):
-            self.transitions[(prefix.category, suffix.category)] += count
-        # Make sure that backlinks_remove and backlinks_add are disjoint
-        # Removal followed by readding is the same as just adding
-        for morph in self.backlinks_add:
-            self.backlinks_remove[morph].difference_update(
-                self.backlinks_add[morph])
-
-
-class Transformation(object):
-    __slots__ = ['cost', 'rule', 'result', 'change_counts']
-
-    def __init__(self, rule, result):
-        self.cost = 0
-        self.rule = rule
-        self.result = result
-        self.change_counts = ChangeCounts()
-
-    def apply(self, word, update=False):
-        i = 0
-        out = []
-        while i + len(self.rule) <= len(word.analysis):
-            if self.rule.match(word.analysis, i):
-                out.extend(self.result)
-                i += len(self.rule)
-            else:
-                out.append(word.analysis[i])
-                i += 1
-        while i < len(word.analysis):
-            out.append(word.analysis[i])
-            i += 1
-
-        if update:
-            self.change_counts.update(word.analysis, -word.count)
-            self.change_counts.update(out, word.count)
-
-        return WordAnalysis(word.count, out)
-
-
-class TransformationRule(object):
-    """A simple transformation rule that requires a pattern of category
-    and/or morph matches. Don't care -values are marked by None.
-    This simple rule does not account for context outside the part to
-    be replaced.
-    """
-
-    def __init__(self, categorized_morphs):
-        self._rule = categorized_morphs
-
-    def __len__(self):
-        return len(self._rule)
-
-    def match(self, analysis, i):
-        for (j, cmorph) in enumerate(analysis[i:(i + len(self))]):
-            if self._rule[j].category != CategorizedMorph.no_category:
-                # Rule requires category at this point to match
-                if self._rule[j].category != cmorph.category:
-                    return False
-            if self._rule[j].morph is not None:
-                # Rule requires morph at this point to match
-                if self._rule[j].morph != cmorph.morph:
-                    return False
-        # No comparison failed
-        return True
 
 
 class MorphContextBuilder(object):
@@ -1163,6 +1072,25 @@ class CatmapModel(object):
         # FIXME: annotation coding cost for supervised
         return self._catmap_coding.get_cost() + self._lexicon_coding.get_cost()
 
+    def update_counts(self, change_counts):
+        for cmorph in change_counts.emissions:
+            self._catmap_coding.update_emission_count(
+                cmorph.category,
+                cmorph.morph,
+                change_counts.emissions[cmorph])
+
+        for (prev_cat, next_cat) in change_counts.transitions:
+            self._catmap_coding.update_transition_count(
+                prev_cat, next_cat,
+                change_counts.transitions[(prev_cat, next_cat)])
+
+        for morph in change_counts.backlinks_remove:
+            self.morph_backlinks[morph].difference_update(
+                change_counts.backlinks_remove[morph])
+        for morph in change_counts.backlinks_remove:
+            self.morph_backlinks[morph].update(
+                change_counts.backlinks_add[morph])
+
     @staticmethod
     def get_categories(wb=False):
         """The category tags supported by this model.
@@ -1223,6 +1151,96 @@ class CategorizedMorph(object):
 
     def __len__(self):
         return len(self.morph)
+
+
+class ChangeCounts(object):
+    __slots__ = ['emissions', 'transitions',
+                 'backlinks_remove', 'backlinks_add']
+
+    def __init__(self, emissions=None, transitions=None):
+        if emissions is None:
+            self.emissions = dict()
+        else:
+            self.emissions = emissions
+        if transitions is None:
+            self.transitions = dict()
+        else:
+            self.transitions = transitions
+        self.backlinks_remove = collections.defaultdict(set)
+        self.backlinks_add = collections.defaultdict(set)
+
+    def update(self, analysis, count, corpus_index=None):
+        for cmorph in analysis:
+            self.emissions[cmorph] += count
+            if corpus_index is not None:
+                if count < 0:
+                    self.backlinks_remove[cmorph.morph].add(corpus_index)
+                elif count > 0:
+                    self.backlinks_add[cmorph.morph].add(corpus_index)
+        for (prefix, suffix) in ngrams(analysis, n=2):
+            self.transitions[(prefix.category, suffix.category)] += count
+        # Make sure that backlinks_remove and backlinks_add are disjoint
+        # Removal followed by readding is the same as just adding
+        for morph in self.backlinks_add:
+            self.backlinks_remove[morph].difference_update(
+                self.backlinks_add[morph])
+
+
+class Transformation(object):
+    __slots__ = ['cost', 'rule', 'result', 'change_counts']
+
+    def __init__(self, rule, result):
+        self.cost = 0
+        self.rule = rule
+        self.result = result
+        self.change_counts = ChangeCounts()
+
+    def apply(self, word, update=False):
+        i = 0
+        out = []
+        while i + len(self.rule) <= len(word.analysis):
+            if self.rule.match(word.analysis, i):
+                out.extend(self.result)
+                i += len(self.rule)
+            else:
+                out.append(word.analysis[i])
+                i += 1
+        while i < len(word.analysis):
+            out.append(word.analysis[i])
+            i += 1
+
+        if update:
+            self.change_counts.update(word.analysis, -word.count)
+            self.change_counts.update(out, word.count)
+
+        return WordAnalysis(word.count, out)
+
+
+class TransformationRule(object):
+    """A simple transformation rule that requires a pattern of category
+    and/or morph matches. Don't care -values are marked by None.
+    This simple rule does not account for context outside the part to
+    be replaced.
+    """
+
+    def __init__(self, categorized_morphs):
+        self._rule = categorized_morphs
+
+    def __len__(self):
+        return len(self._rule)
+
+    def match(self, analysis, i):
+        for (j, cmorph) in enumerate(analysis[i:(i + len(self))]):
+            if self._rule[j].category != CategorizedMorph.no_category:
+                # Rule requires category at this point to match
+                if self._rule[j].category != cmorph.category:
+                    return False
+            if self._rule[j].morph is not None:
+                # Rule requires morph at this point to match
+                if self._rule[j].morph != cmorph.morph:
+                    return False
+        # No comparison failed
+        return True
 
 
 class Marginalizer(object):

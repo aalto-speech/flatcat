@@ -54,25 +54,56 @@ ViterbiNode = collections.namedtuple('ViterbiNode', ['cost', 'backpointer'])
 
 WordAnalysis = collections.namedtuple('WordAnalysis', ['count', 'analysis'])
 
-ChangeCounts = collections.namedtuple('ChangeCounts',
-                                      ['emissions', 'transitions'])
+
+class ChangeCounts(object):
+    __slots__ = ['emissions', 'transitions',
+                 'backlinks_remove', 'backlinks_add']
+
+    def __init__(self, emissions=None, transitions=None):
+        if emissions is None:
+            self.emissions = dict()
+        else:
+            self.emissions = emissions
+        if transitions is None:
+            self.transitions = dict()
+        else:
+            self.transitions = transitions
+        self.backlinks_remove = collections.defaultdict(set)
+        self.backlinks_add = collections.defaultdict(set)
+
+    def update(self, analysis, count, corpus_index=None):
+        for cmorph in analysis:
+            self.emissions[cmorph] += count
+            if corpus_index is not None:
+                if count < 0:
+                    self.backlinks_remove[cmorph.morph].add(corpus_index)
+                elif count > 0:
+                    self.backlinks_add[cmorph.morph].add(corpus_index)
+        for (prefix, suffix) in ngrams(analysis, n=2):
+            self.transitions[(prefix.category, suffix.category)] += count
+        # Make sure that backlinks_remove and backlinks_add are disjoint
+        # Removal followed by readding is the same as just adding
+        for morph in self.backlinks_add:
+            self.backlinks_remove[morph].difference_update(
+                self.backlinks_add[morph])
+
 
 class Transformation(object):
-    __slots__ = ['cost', 'original', 'result', 'change_counts']
+    __slots__ = ['cost', 'rule', 'result', 'change_counts']
 
-    def __init__(self, original, result):
+    def __init__(self, rule, result):
         self.cost = 0
-        self.original = original
+        self.rule = rule
         self.result = result
-        self.change_counts = ChangeCounts(dict(), dict())
+        self.change_counts = ChangeCounts()
 
     def apply(self, word, update=False):
         i = 0
         out = []
-        while i + len(self.original) < len(word.analysis):
-            if self.original == word.analysis[i:(i + len(self.original))]:
+        while i + len(self.rule) <= len(word.analysis):
+            if self.rule.match(word.analysis, i):
                 out.extend(self.result)
-                i += len(self.original)
+                i += len(self.rule)
             else:
                 out.append(word.analysis[i])
                 i += 1
@@ -81,17 +112,38 @@ class Transformation(object):
             i += 1
 
         if update:
-            self._update_counts(word.analysis, -word.count)
-            self._update_counts(out, word.count)
+            self.change_counts.update(word.analysis, -word.count)
+            self.change_counts.update(out, word.count)
 
         return WordAnalysis(word.count, out)
-    
-    def _update_counts(self, segmentation, count):
-        for cmorph in segmentation:
-            self.change_counts.emissions[cmorph] += count
-        for (prefix, suffix) in ngrams(segmentation, n=2):
-            self.change_counts.transitions[(prefix.category,
-                                            suffix.category)] += count
+
+
+class TransformationRule(object):
+    """A simple transformation rule that requires a pattern of category
+    and/or morph matches. Don't care -values are marked by None.
+    This simple rule does not account for context outside the part to
+    be replaced.
+    """
+
+    def __init__(self, categorized_morphs):
+        self._rule = categorized_morphs
+
+    def __len__(self):
+        return len(self._rule)
+
+    def match(self, analysis, i):
+        for (j, cmorph) in enumerate(analysis[i:(i + len(self))]):
+            if self._rule[j].category != CategorizedMorph.no_category:
+                # Rule requires category at this point to match
+                if self._rule[j].category != cmorph.category:
+                    return False
+            if self._rule[j].morph is not None:
+                # Rule requires morph at this point to match
+                if self._rule[j].morph != cmorph.morph:
+                    return False
+        # No comparison failed
+        return True
+
 
 class MorphContextBuilder(object):
     """Temporary structure used when calculating the MorphContexts."""
@@ -456,8 +508,7 @@ class CatmapModel(object):
                             emission counts. (Default: False)
         """
 
-        # FIXME: Initialize self.morph_backlinks
-        self.segmentations = [WordAnalysis(*x) for x in segmentations]
+        self.add_corpus_data(segmentations)
         self._estimate_emission_posteriors()
         self._unigram_transition_probs()
         if no_emissions:
@@ -465,6 +516,16 @@ class CatmapModel(object):
         self.viterbi_tag_corpus()
         self._calculate_transition_counts()
         self._calculate_emission_counts()
+
+    def add_corpus_data(segmentations):
+        """Adds the given segmentations (with counts) to the corpus data"""
+        i = len(self.segmentations)
+        for segmentation in segmentations:
+            segmentation = WordAnalysis(segmentation)
+            self.segmentations.append(segmentation)
+            for morph in segmentation.analysis:
+                self.morph_backlinks[morph].add(i)
+            i += 1
 
     def train(self):
         """Perform Cat-MAP training on the model.
@@ -607,8 +668,8 @@ class CatmapModel(object):
     def _calculate_emission_counts(self):
         """Recalculates the emission counts from a retagged segmentation."""
         self._catmap_coding.clear_emission_counts()
-        for (count, segmentation) in self.segmentations:
-            for morph in segmentation:
+        for (count, analysis) in self.segmentations:
+            for morph in analysis:
                 self._catmap_coding.update_emission_count(morph.category,
                                                           morph.morph,
                                                           count)
@@ -1430,7 +1491,7 @@ class CatmapEncoding(morfessor.CorpusEncoding):
             assert sum_transitions_to[cat] == self._cat_tagcount[cat]
 
             if self._cat_tagcount[cat] > 0:
-                logtransitionsum -= ((len(categories) - 1) * 
+                logtransitionsum -= ((len(categories) - 1) *
                                     math.log(self._cat_tagcount[cat]))
         logcategorysum -= len(categories) * math.log(total)
 

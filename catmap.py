@@ -174,7 +174,7 @@ class MorphUsageProperties(object):
                                                  tmp.right_perplexity)
         self._context_builders.clear()
 
-    def condprob(self, morph):
+    def condprobs(self, morph):
         """Calculate conditional probabilities P(Category|Morph) from the
         contexts in which the morphs occur.
 
@@ -386,15 +386,7 @@ class CatmapModel(object):
         # Cost variables
         self._lexicon_coding = CatmapLexiconEncoding(morph_usage)
         # Catmap encoding also stores the HMM parameters
-        self._catmap_coding = CatmapEncoding(self._lexicon_coding)
-
-        # Priors for categories P(Category)
-        # Single ByCategory object. Log-probabilities.
-        self._log_catpriors = None
-
-        # Count of total number of tokens tagged in each category
-        # Single ByCategory object. Counts.
-        self._category_totals = None
+        self._catmap_coding = CatmapEncoding(morph_usage, self._lexicon_coding)
 
         # Log probabilities of single letters, for alphabetization cost
         # FIXME: no longer needed? assume identical distribution?
@@ -411,14 +403,16 @@ class CatmapModel(object):
             no_emissions -- If True, no retagging/reestimation
                             will be performed.
                             Transition probabilities will remain as unigram
-                            estimates, and emission counts will be zero.
+                            estimates, emission counts will be zero and
+                            category total counts will be zero.
                             This means that the model is not completely
                             initialized: you will need to set the
-                            emission counts. (Default: False)
+                            emission counts and category totals.
+                            (Default: False)
         """
 
         self.add_corpus_data(segmentations)
-        self._estimate_emission_posteriors()
+        self._calculate_usage_features()
         self._unigram_transition_probs()
         if no_emissions:
             return
@@ -426,11 +420,11 @@ class CatmapModel(object):
         self._calculate_transition_counts()
         self._calculate_emission_counts()
 
-    def add_corpus_data(segmentations):
+    def add_corpus_data(self, segmentations):
         """Adds the given segmentations (with counts) to the corpus data"""
         i = len(self.segmentations)
         for segmentation in segmentations:
-            segmentation = WordAnalysis(segmentation)
+            segmentation = WordAnalysis(*segmentation)
             self.segmentations.append(segmentation)
             for morph in segmentation.analysis:
                 self.morph_backlinks[morph].add(i)
@@ -454,22 +448,18 @@ class CatmapModel(object):
 
         theta(t) = arg min { L( theta, Y(t), D ) }
         """
-        self._estimate_emission_posteriors()
+        self._calculate_usage_features()
         self._calculate_transition_counts()
         self._calculate_emission_counts()
 
-    def _estimate_emission_posteriors(self):
-        """Estimates P(Category|Morph), P(Category) and P(Morph|Category).
+    def _calculate_usage_features(self):
+        """Recalculates the morph usage features (perplexities).
         """
 
         num_letter_tokens = collections.Counter()
         self._catmap_coding.boundaries = 0
         self._lexicon_coding.clear()
         self._morph_usage.clear()
-
-        # Conditional probabilities P(Category|Morph).
-        # A dict of ByCategory objects indexed by morph. Actual probabilities.
-        _condprobs = dict()
 
         for rcount, segments in self.segmentations:
             self._catmap_coding.boundaries += rcount
@@ -493,25 +483,8 @@ class CatmapModel(object):
                     num_letter_tokens[letter] += pcount
         self._morph_usage.compress_contexts()
 
-        # Calculate conditional probabilities from the encountered contexts
-        marginalizer = Marginalizer()
         for morph in self._morph_usage.seen_morphs():
             self._lexicon_coding.add(morph)
-            _condprobs[morph] = self._morph_usage.condprob(morph)
-            # Marginalize (scale by frequency and accumulate elementwise)
-            marginalizer.add(self._morph_usage.count(morph),
-                             _condprobs[morph])
-        # Category priors from marginalization
-        self._log_catpriors = _log_catprobs(marginalizer.normalized())
-
-        # Calculate posterior emission probabilities
-        self._category_totals = marginalizer.category_token_count
-        for morph in self._morph_usage.seen_morphs():
-            tmp = []
-            for (i, total) in enumerate(self._category_totals):
-                tmp.append(_condprobs[morph][i] *
-                           self._morph_usage.count(morph) /
-                           total)
 
         # Calculate letter log probabilities
         total_letter_tokens = sum(num_letter_tokens.values())
@@ -529,10 +502,18 @@ class CatmapModel(object):
         boundaries.
         """
 
+        marginalizer = Marginalizer()
+        for morph in self._morph_usage.seen_morphs():
+            # Un-normalied marginalzation
+            # (scale by frequency and accumulate elementwise)
+            marginalizer.add(self._morph_usage.count(morph),
+                             self._morph_usage.condprobs(morph))
+        category_totals = marginalizer.category_token_count
+
         transitions = collections.Counter()
         nclass = {WORD_BOUNDARY: self.word_tokens}
         for (i, category) in enumerate(CatmapModel.get_categories()):
-            nclass[category] = float(self._category_totals[i])
+            nclass[category] = float(category_totals[i])
 
         num_tokens_tagged = collections.Counter()
         valid_transitions = MorphUsageProperties.valid_transitions()
@@ -1336,7 +1317,8 @@ class CatmapEncoding(morfessor.CorpusEncoding):
     """
     # can inherit without change: frequency_distribution_cost,
 
-    def __init__(self, lexicon_encoding, weight=1.0):
+    def __init__(self, morph_usage, lexicon_encoding, weight=1.0):
+        self._morph_usage = morph_usage
         super(CatmapEncoding, self).__init__(lexicon_encoding, weight)
 
         # Counts of emissions observed in the tagged corpus.
@@ -1408,12 +1390,21 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         return self._emission_counts[morph]
 
     def log_emissionprob(self, category, morph):
+        """-Log of posterior emission probability P(morph|category)"""
         pair = (category, morph)
         if pair not in self._log_emissionprob_cache:
             cat_index = CatmapModel.get_categories().index(category)
+            # Not equal to what you get by:
+            # _zlog(self._emission_counts[morph][cat_index]) +
+            print('parts: {}, {}, {}. cat_index {}'.format(
+                self._morph_usage.count(morph),
+                self._morph_usage.condprobs(morph)[cat_index],
+                self._cat_tagcount[category],
+                cat_index))
             self._log_emissionprob_cache[pair] = (
-                _zlog(self._emission_counts[morph][cat_index]) -
-                _zlog(self._cat_tagcount[cat_index]))
+                _zlog(self._morph_usage.count(morph)) +
+                _zlog(self._morph_usage.condprobs(morph)[cat_index]) -
+                _zlog(self._cat_tagcount[category]))
         return self._log_emissionprob_cache[pair]
 
     def update_emission_count(self, category, morph, diff_count):

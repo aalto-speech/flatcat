@@ -54,6 +54,20 @@ class TestProbabilityEstimation(unittest.TestCase):
         self.model = _load_catmap(self.baseline.get_segmentations(),
                                   no_emissions=True)
 
+        # Need to set category totals manually
+        marginalizer = catmap.Marginalizer()
+        for morph in self.model._morph_usage.seen_morphs():
+            # Un-normalied marginalzation
+            # (scale by frequency and accumulate elementwise)
+            marginalizer.add(self.model._morph_usage.count(morph),
+                             self.model._morph_usage.condprobs(morph))
+        category_totals = marginalizer.category_token_count
+        for (i, category) in enumerate(self.model.get_categories()):
+            self.model._catmap_coding._cat_tagcount[category] = (
+                category_totals[i])
+        self.model._catmap_coding._cat_tagcount[catmap.WORD_BOUNDARY] = (
+            self.model._catmap_coding.boundaries)
+
     def setUp(self):
         self.perplexities = dict()
         self.condprobs = dict()
@@ -144,7 +158,7 @@ class TestProbabilityEstimation(unittest.TestCase):
             reference = self.condprobs[morph]
             if morph not in self.model._morph_usage.seen_morphs():
                 raise KeyError('%s not in observed morphs' % (morph,))
-            observed = self.model._morph_usage.condprob(morph)
+            observed = self.model._morph_usage.condprobs(morph)
             msg = 'P(%s | "%s"), %s not almost equal to %s'
 
             for (i, category) in enumerate(self.model.get_categories()):
@@ -152,12 +166,14 @@ class TestProbabilityEstimation(unittest.TestCase):
                     msg=msg % (category, morph, observed[i], reference[i]))
 
     def test_catpriors(self):
+        tot = float(sum(self.model._catmap_coding._cat_tagcount.values()) -
+            self.model._catmap_coding.boundaries)
         for (i, category) in enumerate(self.model.get_categories()):
             reference = self.catpriors
-            observed = _exp_catprobs(self.model._log_catpriors)
+            observed = float(self.model._catmap_coding._cat_tagcount[i]) / tot
             msg = 'P(%s), %s not almost equal to %s'
-            self.assertAlmostEqual(observed[i], reference[i], places=9,
-                msg=msg % (category, observed[i], reference[i]))
+            self.assertAlmostEqual(observed, reference[i], places=9,
+                msg=msg % (category, observed, reference[i]))
 
     def test_posterior_emission_probs(self):
         for morph in self.posteriors:
@@ -344,13 +360,20 @@ class TestModelConsistency(unittest.TestCase):
         self.initial_state_asserts()
 
     def presplit(self):
-        segmentations = tuple(self.model.viterbi_tag_corpus(
-            TestModelConsistency.dummy_segmentation))
-        self.model._calculate_transition_counts(segmentations)
-        self.model._calculate_emission_counts(segmentations)
+        self.model.viterbi_tag_corpus()
+        self.model._calculate_transition_counts()
+        self.model._calculate_emission_counts()
 
     def initial_state_asserts(self):
-        self.assertAlmostEqual(sum(self.model._category_totals), 2.0, places=9)
+        marginalizer = catmap.Marginalizer()
+        for morph in self.model._morph_usage.seen_morphs():
+            # Un-normalied marginalzation
+            # (scale by frequency and accumulate elementwise)
+            marginalizer.add(self.model._morph_usage.count(morph),
+                             self.model._morph_usage.condprobs(morph))
+        category_totals = marginalizer.category_token_count
+ 
+        self.assertAlmostEqual(sum(category_totals), 2.0, places=9)
 
         # morph usage
         self.assertEqual(self.model._morph_usage.seen_morphs(),
@@ -376,11 +399,6 @@ class TestModelConsistency(unittest.TestCase):
         self.assertAlmostEqual(
             sum(self.model._catmap_coding._transition_counts.values()),
             sum(self.model._catmap_coding._cat_tagcount.values()),
-            places=4)
-        self.assertAlmostEqual(
-            sum(self.model._catmap_coding._cat_tagcount.values()),
-            sum(self.model._category_totals) +
-                    self.model._catmap_coding.boundaries,
             places=4)
 
         sum_transitions_from = collections.Counter()
@@ -415,7 +433,7 @@ class TestModelConsistency(unittest.TestCase):
 
 
 def _zexp(x):
-    if x == catmap.LOGPROB_ZERO:
+    if x >= catmap.LOGPROB_ZERO:
         return 0.0
     return math.exp(-x)
 

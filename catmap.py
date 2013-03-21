@@ -1348,9 +1348,12 @@ class CatmapEncoding(morfessor.CorpusEncoding):
     def log_transitionprob(self, prev_cat, next_cat):
         pair = (prev_cat, next_cat)
         if pair not in self._log_transitionprob_cache:
-            self._log_transitionprob_cache[pair] = (
-                _zlog(self._transition_counts[(prev_cat, next_cat)]) -
-                _zlog(self._cat_tagcount[prev_cat]))
+            if self._cat_tagcount[prev_cat] == 0:
+                self._log_transitionprob_cache[pair] = LOGPROB_ZERO
+            else:
+                self._log_transitionprob_cache[pair] = (
+                    _zlog(self._transition_counts[(prev_cat, next_cat)]) -
+                    _zlog(self._cat_tagcount[prev_cat]))
         return self._log_transitionprob_cache[pair]
 
     def update_transition_count(self, prev_cat, next_cat, diff_count):
@@ -1396,13 +1399,16 @@ class CatmapEncoding(morfessor.CorpusEncoding):
             cat_index = CatmapModel.get_categories().index(category)
             # Not equal to what you get by:
             # _zlog(self._emission_counts[morph][cat_index]) +
-            self._log_emissionprob_cache[pair] = (
-                _zlog(self._morph_usage.count(morph)) +
-                _zlog(self._morph_usage.condprobs(morph)[cat_index]) -
-                    # using tagcount here mixes feature-based true distr
-                    # with the count based observed distribution, which
-                    # makes the emissions improper
-                _zlog(self._cat_tagcount[category]))
+            if self._cat_tagcount[category] == 0:
+                self._log_emissionprob_cache[pair] = LOGPROB_ZERO
+            else:
+                self._log_emissionprob_cache[pair] = (
+                    _zlog(self._morph_usage.count(morph)) +
+                    _zlog(self._morph_usage.condprobs(morph)[cat_index]) -
+                        # using tagcount here mixes feature-based true distr
+                        # with the count based observed distribution, which
+                        # makes the emissions improper
+                    _zlog(self._cat_tagcount[category]))
         return self._log_emissionprob_cache[pair]
 
     def update_emission_count(self, category, morph, diff_count):

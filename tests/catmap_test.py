@@ -368,7 +368,7 @@ class TestModelConsistency(unittest.TestCase):
             marginalizer.add(self.model._morph_usage.count(morph),
                              self.model._morph_usage.condprobs(morph))
         category_totals = marginalizer.category_token_count
- 
+
         self.assertAlmostEqual(sum(category_totals), 2.0, places=9)
 
         # morph usage
@@ -403,12 +403,14 @@ class TestModelConsistency(unittest.TestCase):
         forbidden = catmap.MorphUsageProperties.zero_transitions
         for prev_cat in categories:
             for next_cat in categories:
-                if (prev_cat, next_cat) in forbidden:
-                    continue
                 count = self.model._catmap_coding._transition_counts[
                     (prev_cat, next_cat)]
                 if count == 0:
                     continue
+                if (prev_cat, next_cat) in forbidden:
+                    # FIXME, make it an assert once the cause is fixed
+                    print('Nonzero count for forbidden transition ' +
+                        u'{} -> {}'.format(prev_cat, next_cat))
                 sum_transitions_from[prev_cat] += count
                 sum_transitions_to[next_cat] += count
         for cat in categories:

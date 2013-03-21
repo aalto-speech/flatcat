@@ -54,20 +54,6 @@ class TestProbabilityEstimation(unittest.TestCase):
         self.model = _load_catmap(self.baseline.get_segmentations(),
                                   no_emissions=True)
 
-        # Need to set category totals manually
-        marginalizer = catmap.Marginalizer()
-        for morph in self.model._morph_usage.seen_morphs():
-            # Un-normalied marginalzation
-            # (scale by frequency and accumulate elementwise)
-            marginalizer.add(self.model._morph_usage.count(morph),
-                             self.model._morph_usage.condprobs(morph))
-        category_totals = marginalizer.category_token_count
-        for (i, category) in enumerate(self.model.get_categories()):
-            self.model._catmap_coding._cat_tagcount[category] = (
-                category_totals[i])
-        self.model._catmap_coding._cat_tagcount[catmap.WORD_BOUNDARY] = (
-            self.model._catmap_coding.boundaries)
-
     def setUp(self):
         self.perplexities = dict()
         self.condprobs = dict()
@@ -166,16 +152,24 @@ class TestProbabilityEstimation(unittest.TestCase):
                     msg=msg % (category, morph, observed[i], reference[i]))
 
     def test_catpriors(self):
-        tot = float(sum(self.model._catmap_coding._cat_tagcount.values()) -
-            self.model._catmap_coding.boundaries)
+        # Need to set category totals manually
+        marginalizer = catmap.Marginalizer()
+        for morph in self.model._morph_usage.seen_morphs():
+            # Un-normalized marginalzation
+            # (scale by frequency and accumulate elementwise)
+            marginalizer.add(self.model._morph_usage.count(morph),
+                             self.model._morph_usage.condprobs(morph))
+        observed = marginalizer.normalized()
+
         for (i, category) in enumerate(self.model.get_categories()):
             reference = self.catpriors
-            observed = float(self.model._catmap_coding._cat_tagcount[i]) / tot
             msg = 'P(%s), %s not almost equal to %s'
-            self.assertAlmostEqual(observed, reference[i], places=9,
-                msg=msg % (category, observed, reference[i]))
+            self.assertAlmostEqual(observed[i], reference[i], places=9,
+                msg=msg % (category, observed[i], reference[i]))
 
     def test_posterior_emission_probs(self):
+        sumA = 0.0
+        sumB = 0.0
         for morph in self.posteriors:
             reference = self.posteriors[morph]
             msg = 'P(%s | "%s"), %s not almost equal to %s'
@@ -189,6 +183,9 @@ class TestProbabilityEstimation(unittest.TestCase):
                     raise KeyError('%s not in observed morphs' % (morph,))
                 self.assertAlmostEqual(observed, reference[i], places=9,
                     msg=msg % (morph, category, observed, reference[i]))
+                sumA += observed
+                sumB += reference[i]
+        #print('sums {} vs {}'.format(sumA, sumB))
 
     def test_transitions(self):
         categories = self.model.get_categories(True)
@@ -361,8 +358,7 @@ class TestModelConsistency(unittest.TestCase):
 
     def presplit(self):
         self.model.viterbi_tag_corpus()
-        self.model._calculate_transition_counts()
-        self.model._calculate_emission_counts()
+        self.model._reestimate_probabilities()
 
     def initial_state_asserts(self):
         marginalizer = catmap.Marginalizer()

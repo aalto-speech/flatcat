@@ -515,19 +515,18 @@ class CatmapModel(object):
         for (i, category) in enumerate(CatmapModel.get_categories()):
             nclass[category] = float(category_totals[i])
 
-        num_tokens_tagged = collections.Counter()
+        num_tokens_tagged = 0.0
         valid_transitions = MorphUsageProperties.valid_transitions()
 
         for (cat1, cat2) in valid_transitions:
             # count all possible valid transitions
-            num_tokens_tagged[cat1] += nclass[cat2]
+            num_tokens_tagged += nclass[cat2]
             transitions[(cat1, cat2)] = nclass[cat2]
 
         for pair in MorphUsageProperties.zero_transitions:
-            transitions[pair] = 0
+            transitions[pair] = 0.0
 
-        normalization = (sum(nclass.values()) /
-                         sum(num_tokens_tagged.values()))
+        normalization = (sum(nclass.values()) / num_tokens_tagged)
         for (prev_cat, next_cat) in transitions:
             self._catmap_coding.update_transition_count(
                 prev_cat, next_cat,
@@ -1279,6 +1278,7 @@ class CatmapLexiconEncoding(morfessor.LexiconEncoding):
         self.logfeaturesum = 0.0
         self.tokens = 0
         self.boundaries = 0
+        self.atoms.clear()
 
     def add(self, morph):
         super(CatmapLexiconEncoding, self).add(morph)
@@ -1396,14 +1396,12 @@ class CatmapEncoding(morfessor.CorpusEncoding):
             cat_index = CatmapModel.get_categories().index(category)
             # Not equal to what you get by:
             # _zlog(self._emission_counts[morph][cat_index]) +
-            print('parts: {}, {}, {}. cat_index {}'.format(
-                self._morph_usage.count(morph),
-                self._morph_usage.condprobs(morph)[cat_index],
-                self._cat_tagcount[category],
-                cat_index))
             self._log_emissionprob_cache[pair] = (
                 _zlog(self._morph_usage.count(morph)) +
                 _zlog(self._morph_usage.condprobs(morph)[cat_index]) -
+                    # using tagcount here mixes feature-based true distr
+                    # with the count based observed distribution, which
+                    # makes the emissions improper
                 _zlog(self._cat_tagcount[category]))
         return self._log_emissionprob_cache[pair]
 

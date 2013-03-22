@@ -132,11 +132,17 @@ class MorphUsageProperties(object):
         self._contexts = Sparse(default=MorphContext(0, 1.0, 1.0))
         self._context_builders = collections.defaultdict(MorphContextBuilder)
 
+        # Cache for memoized feature-based conditional class probabilities
+        self._condprob_cache = collections.defaultdict(int)
+        self._marginalizer = None
+
     def clear(self):
         """Resets the context variables.
         Use before fully reprocessing a segmented corpus."""
         self._contexts.clear()
         self._context_builders.clear()
+        self._condprob_cache.clear()
+        self._marginalizer = None
 
     def add_to_context(self, morph, pcount, rcount, i, segments):
         """Collect information about the contexts in which the morph occurs"""
@@ -175,38 +181,63 @@ class MorphUsageProperties(object):
         self._context_builders.clear()
 
     def condprobs(self, morph):
-        """Calculate conditional probabilities P(Category|Morph) from the
-        contexts in which the morphs occur.
+        """Calculate feature-based conditional probabilities P(Category|Morph)
+        from the contexts in which the morphs occur.
 
         Arguments:
             morph -- A string representation of the morph type.
         """
-        context = self._contexts[morph]
+        if morph not in self._condprob_cache:
+            context = self._contexts[morph]
 
-        prelike = sigmoid(context.right_perplexity, self._ppl_treshold,
-                          self._ppl_slope)
-        suflike = sigmoid(context.left_perplexity, self._ppl_treshold,
-                          self._ppl_slope)
-        stmlike = sigmoid(len(morph), self._length_treshold,
-                          self._length_slope)
+            prelike = sigmoid(context.right_perplexity, self._ppl_treshold,
+                            self._ppl_slope)
+            suflike = sigmoid(context.left_perplexity, self._ppl_treshold,
+                            self._ppl_slope)
+            stmlike = sigmoid(len(morph), self._length_treshold,
+                            self._length_slope)
 
-        p_nonmorpheme = (1. - prelike) * (1. - suflike) * (1. - stmlike)
+            p_nonmorpheme = (1. - prelike) * (1. - suflike) * (1. - stmlike)
 
-        if p_nonmorpheme == 1:
-            p_pre = 0.0
-            p_suf = 0.0
-            p_stm = 0.0
-        else:
-            if p_nonmorpheme < 0.001:
-                p_nonmorpheme = 0.001
+            if p_nonmorpheme == 1:
+                p_pre = 0.0
+                p_suf = 0.0
+                p_stm = 0.0
+            else:
+                if p_nonmorpheme < 0.001:
+                    p_nonmorpheme = 0.001
 
-            normcoeff = ((1.0 - p_nonmorpheme) /
-                         ((prelike ** 2) + (suflike ** 2) + (stmlike ** 2)))
-            p_pre = (prelike ** 2) * normcoeff
-            p_suf = (suflike ** 2) * normcoeff
-            p_stm = 1.0 - p_pre - p_suf - p_nonmorpheme
+                normcoeff = ((1.0 - p_nonmorpheme) /
+                            ((prelike ** 2) + (suflike ** 2) + (stmlike ** 2)))
+                p_pre = (prelike ** 2) * normcoeff
+                p_suf = (suflike ** 2) * normcoeff
+                p_stm = 1.0 - p_pre - p_suf - p_nonmorpheme
 
-        return ByCategory(p_pre, p_stm, p_suf, p_nonmorpheme)
+            self._condprob_cache[morph] = ByCategory(p_pre, p_stm, p_suf,
+                                                     p_nonmorpheme)
+        return self._condprob_cache[morph]
+
+    @property
+    def marginal_class_probs(self):
+        """True distribution of class probabilities,
+        calculated by marginalizing over the feature based conditional
+        probabilities over all observed morphs.
+        This will not give the same result as the observed count based
+        calculation.
+        """
+        return self._get_marginalizer().normalized()
+
+    @property
+    def category_token_count(self):
+        return self._get_marginalizer().category_token_count
+
+    def _get_marginalizer(self):
+        if self._marginalizer is None:
+            self._marginalizer = Marginalizer()
+            for morph in self.seen_morphs():
+                self._marginalizer.add(self.count(morph),
+                                       self.condprobs(morph))
+        return self._marginalizer
 
     def feature_cost(self, morph):
         """The cost of encoding the necessary features along with a morph.
@@ -502,13 +533,7 @@ class CatmapModel(object):
         boundaries.
         """
 
-        marginalizer = Marginalizer()
-        for morph in self._morph_usage.seen_morphs():
-            # Un-normalied marginalzation
-            # (scale by frequency and accumulate elementwise)
-            marginalizer.add(self._morph_usage.count(morph),
-                             self._morph_usage.condprobs(morph))
-        category_totals = marginalizer.category_token_count
+        category_totals = self._morph_usage.category_token_count
 
         transitions = collections.Counter()
         nclass = {WORD_BOUNDARY: self.word_tokens}
@@ -1405,10 +1430,7 @@ class CatmapEncoding(morfessor.CorpusEncoding):
                 self._log_emissionprob_cache[pair] = (
                     _zlog(self._morph_usage.count(morph)) +
                     _zlog(self._morph_usage.condprobs(morph)[cat_index]) -
-                        # using tagcount here mixes feature-based true distr
-                        # with the count based observed distribution, which
-                        # makes the emissions improper
-                    _zlog(self._cat_tagcount[category]))
+                    _zlog(self._morph_usage.category_token_count[cat_index]))
         return self._log_emissionprob_cache[pair]
 
     def update_emission_count(self, category, morph, diff_count):

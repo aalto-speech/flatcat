@@ -152,14 +152,7 @@ class TestProbabilityEstimation(unittest.TestCase):
                     msg=msg % (category, morph, observed[i], reference[i]))
 
     def test_catpriors(self):
-        # Need to set category totals manually
-        marginalizer = catmap.Marginalizer()
-        for morph in self.model._morph_usage.seen_morphs():
-            # Un-normalized marginalzation
-            # (scale by frequency and accumulate elementwise)
-            marginalizer.add(self.model._morph_usage.count(morph),
-                             self.model._morph_usage.condprobs(morph))
-        observed = marginalizer.normalized()
+        observed = self.model._morph_usage.marginal_class_probs
 
         for (i, category) in enumerate(self.model.get_categories()):
             reference = self.catpriors
@@ -361,13 +354,7 @@ class TestModelConsistency(unittest.TestCase):
         self.model._reestimate_probabilities()
 
     def initial_state_asserts(self):
-        marginalizer = catmap.Marginalizer()
-        for morph in self.model._morph_usage.seen_morphs():
-            # Un-normalied marginalzation
-            # (scale by frequency and accumulate elementwise)
-            marginalizer.add(self.model._morph_usage.count(morph),
-                             self.model._morph_usage.condprobs(morph))
-        category_totals = marginalizer.category_token_count
+        category_totals = self.model._morph_usage.category_token_count
 
         self.assertAlmostEqual(sum(category_totals), 2.0, places=9)
 

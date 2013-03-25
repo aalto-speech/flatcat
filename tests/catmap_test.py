@@ -300,28 +300,39 @@ class TestModelConsistency(unittest.TestCase):
         # else should always lower the cost.
         self.assertTrue(mid_cost < old_cost)
 
-    def test_modify_coding_costs(self):
-        self._modify_coding_costs('AA', 'BBBBB', 'PRE', 'STM', 2)
-        self._modify_coding_costs('A', 'B', 'PRE', 'STM', 2)
-        self._modify_coding_costs('A', 'A', 'PRE', 'STM', 2)
-
-    def _modify_coding_costs(self, prefix, suffix,
-                             prefix_cat, suffix_cat, count):
+#    def test_modify_coding_costs(self):
+#        self._modify_coding_costs('AA', 'BBBBB', 'PRE', 'STM', 2)
+#        self._modify_coding_costs('A', 'B', 'PRE', 'STM', 2)
+#        self._modify_coding_costs('A', 'A', 'PRE', 'STM', 2)
+#    def _transform(self, transform_generator, reverse_generator):
+        
+    def test_update_counts(self):
         self.presplit()
-
+        # manual change to join the one occurence of AA BBBBB
+        cc = catmap.ChangeCounts(
+            emissions = {catmap.CategorizedMorph('AA', 'ZZZ'): -1,
+                         catmap.CategorizedMorph('BBBBB', 'STM'): -1,
+                         catmap.CategorizedMorph('AABBBBB', 'STM'): 1},
+            transitions = {(catmap.WORD_BOUNDARY, 'ZZZ'): -1,
+                           ('ZZZ', 'STM'): -1,
+                           (catmap.WORD_BOUNDARY, 'STM'): 1})
+        def apply_update_counts():
+            self.model._update_counts(cc, 1)
+        def revert_update_counts():
+            self.model._update_counts(cc, -1)
+        self._apply_revert(apply_update_counts, revert_update_counts)
+        
+    def _apply_revert(self, apply_func, revert_func):
         old_cost = self.model.get_cost()
-        self.model._modify_coding_costs((prefix, suffix),
-                                        (prefix_cat, suffix_cat),
-                                        count)
+        apply_func()
 
         mid_cost = self.model.get_cost()
 
-        self.model._modify_coding_costs((prefix, suffix),
-                                        (prefix_cat, suffix_cat),
-                                        -count)
+        revert_func()
         new_cost = self.model.get_cost()
 
-        msg = (u'_modify_coding_costs with opposite sign ' +
+        msg = (u'_apply_revert with {} and {} '.format(apply_func.__name__,
+                    revert_func.__name__) +
                u'did not return to same cost ' +
                u'old: {}, new: {} '.format(old_cost, new_cost))
         self.assertAlmostEqual(old_cost, new_cost, places=4, msg=msg)

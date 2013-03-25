@@ -495,7 +495,7 @@ class CatmapModel(object):
         for rcount, segments in self.segmentations:
             self._catmap_coding.boundaries += rcount
             # Category tags are not needed for these calculations
-            segments = [CatmapModel._detag_morph(x) for x in segments]
+            segments = CatmapModel.detag_word(segments)
 
             if self._morph_usage.use_word_tokens:
                 pcount = rcount
@@ -598,9 +598,8 @@ class CatmapModel(object):
             for transform in transform_group:
                 for target in targets:
                     old_analysis = self.segmentations[target]
-                    new_analysis = transform.apply(old_analysis,
-                                                   self.viterbi_tag,
-                                                   update_counts=True)
+                    new_analysis = transform.apply(old_analysis, self)
+
                     if old_analysis == new_analysis:
                         continue
                     matched_targets.add(target)
@@ -619,13 +618,12 @@ class CatmapModel(object):
                 self._update_counts(best[1].change_counts, 1)
                 for target in best[2]:
                     new_analysis = best[1].apply(self.segmentations[target],
-                                                 self.viterbi_tag,
-                                                 update_counts=False)
+                                                 self, corpus_index=target)
                     self.segmentations[target] = new_analysis
                     # any morph used in the best segmentation
                     # is no longer temporary
                     temporaries.difference_update(
-                        [self._detag_morph(morph) for morph in new_analysis])
+                        self.detag_word(new_analysis.analysis))
             self._morph_usage.remove_temporaries(temporaries)
 
     def _split_generator(self):
@@ -863,7 +861,7 @@ class CatmapModel(object):
         best = []
 
         # Throw away old category information, if any
-        segments = [self._detag_morph(morph) for morph in segments]
+        segments = self.detag_word(segments)
         for (i, morph) in enumerate(segments):
             for next_cat in range(len(categories)):
                 if next_cat == wb:
@@ -923,7 +921,7 @@ class CatmapModel(object):
             word = segments
         else:
             # Throw away old category information, if any
-            segments = [self._detag_morph(morph) for morph in segments]
+            segments = self.detag_word(segments)
             # Merge potential segments
             word = ''.join(segments)
 
@@ -1186,7 +1184,11 @@ class CatmapModel(object):
         return morph
 
     @staticmethod
-    def _detag_corpus(segmentations):
+    def detag_word(segments):
+        return [CatmapModel._detag_morph(x) for x in segments]
+
+    @staticmethod
+    def detag_corpus(segmentations):
         """Removes category tags from a segmented corpus."""
         for rcount, segments in segmentations:
             yield ((rcount, [CatmapModel._detag_morph(x) for x in segments]))
@@ -1203,7 +1205,10 @@ class CatmapModel(object):
 
 
 class CategorizedMorph(object):
-    """Represents a morph with attached category information."""
+    """Represents a morph with attached category information.
+    These objects should be treated as immutable, even though
+    it is not enforced by the code.
+    """
     no_category = object()
 
     __slots__ = ['morph', 'category']
@@ -1226,6 +1231,9 @@ class CategorizedMorph(object):
         return (self.morph == other.morph and
                 self.category == other.category)
 
+    def __hash__(self):
+        return hash(self.__repr__())
+
     def __len__(self):
         return len(self.morph)
 
@@ -1236,11 +1244,11 @@ class ChangeCounts(object):
 
     def __init__(self, emissions=None, transitions=None):
         if emissions is None:
-            self.emissions = dict()
+            self.emissions = collections.Counter()
         else:
             self.emissions = emissions
         if transitions is None:
-            self.transitions = dict()
+            self.transitions = collections.Counter()
         else:
             self.transitions = transitions
         self.backlinks_remove = collections.defaultdict(set)
@@ -1254,7 +1262,10 @@ class ChangeCounts(object):
                     self.backlinks_remove[cmorph.morph].add(corpus_index)
                 elif count > 0:
                     self.backlinks_add[cmorph.morph].add(corpus_index)
-        for (prefix, suffix) in ngrams(analysis, n=2):
+        wb_extended = list(analysis)
+        wb_extended.insert(0, CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY))
+        wb_extended.append(CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY))
+        for (prefix, suffix) in ngrams(wb_extended, n=2):
             self.transitions[(prefix.category, suffix.category)] += count
         # Make sure that backlinks_remove and backlinks_add are disjoint
         # Removal followed by readding is the same as just adding
@@ -1272,7 +1283,11 @@ class Transformation(object):
         self.result = result
         self.change_counts = ChangeCounts()
 
-    def apply(self, word, tagfunc, update_counts=False):
+    def __repr__(self):
+        return '{}({}, {})'.format(self.__class__.__name__,
+                                   self.rule, self.result)
+
+    def apply(self, word, model, corpus_index=None):
         i = 0
         out = []
         matches = 0
@@ -1289,12 +1304,25 @@ class Transformation(object):
             i += 1
 
         if matches > 0:
+            # Morph counts need to be updated before tagging,
+            # to get sensible emission probabilities for new morphs
+            for morph in model.detag_word(word.analysis):
+                model._modify_morph_count(morph, -word.count)
+            for morph in model.detag_word(out):
+                model._modify_morph_count(morph, word.count)
             # Only retag if the rule matched something
-            out = tagfunc(out)
+            out = model.viterbi_tag(out)
 
-            if update_counts:
-                self.change_counts.update(word.analysis, -word.count)
-                self.change_counts.update(out, word.count)
+            if corpus_index is None:
+                # Only revert morph count if not reapplying
+                for morph in model.detag_word(word.analysis):
+                    model._modify_morph_count(morph, word.count)
+                for morph in model.detag_word(out):
+                    model._modify_morph_count(morph, -word.count)
+
+            self.change_counts.update(word.analysis, -word.count,
+                                      corpus_index)
+            self.change_counts.update(out, word.count, corpus_index)
 
         return WordAnalysis(word.count, out)
 
@@ -1311,6 +1339,9 @@ class TransformationRule(object):
 
     def __len__(self):
         return len(self._rule)
+
+    def __repr__(self):
+        return u'{}({})'.format(self.__class__.__name__, self._rule)
 
     def match(self, analysis, i):
         for (j, cmorph) in enumerate(analysis[i:(i + len(self))]):
@@ -1480,6 +1511,10 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         self._transition_counts[pair] += diff_count
         self._cat_tagcount[prev_cat] += diff_count
 
+        msg = 'subzero transition count for {}'.format(pair)
+        assert self._transition_counts[pair] >= 0, msg
+        assert self._cat_tagcount[prev_cat] >= 0
+
         # invalidate cache
         self._log_transitionprob_cache.clear()
 
@@ -1595,7 +1630,8 @@ class CatmapEncoding(morfessor.CorpusEncoding):
                 sum_transitions_from[prev_cat] += count
                 sum_transitions_to[next_cat] += count
                 total += count
-                logtransitionsum += math.log(count)
+                if count > 0:
+                    logtransitionsum += math.log(count)
         for cat in categories:
             # These hold, because for each incoming transition there is
             # exactly one outgoing transition (except for word boundary,

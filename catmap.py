@@ -471,7 +471,7 @@ class CatmapModel(object):
             max_iterations=1)    # FIXME debug max
         self._calculate_emission_counts()
         self.convergence_of_cost(
-            self._split_epoch,
+            self._split_generator,
             max_iterations=2)    # FIXME debug max
 
     def _reestimate_probabilities(self):
@@ -588,11 +588,75 @@ class CatmapModel(object):
                                                           morph.morph,
                                                           count)
 
-    def _split_epoch(self):
+    def _transformation_epoch(self, transformation_generator):
+        for experiment in transformation_generator:
+            (transform_group, targets, temporaries) = experiment
+            # Cost of doing nothing
+            best = (self.get_cost(), None, set())
+
+            matched_targets = set()
+            for transform in transform_group:
+                for target in targets:
+                    old_analysis = self.segmentations[target]
+                    new_analysis = transform.apply(old_analysis,
+                                                   self.viterbi_tag,
+                                                   update_counts=True)
+                    if old_analysis == new_analysis:
+                        continue
+                    matched_targets.add(target)
+                # All transforms in group must match the same words
+                targets = matched_targets
+
+                # Apply change to encoding
+                self._update_counts(transform.change_counts, 1)
+                cost = self.get_cost()
+                if cost < best[0]:
+                    best = (cost, transform, matched_targets)
+                # Revert change to encoding
+                self._update_counts(transform.change_counts, -1)
+
+            if best[1] is not None:
+                self._update_counts(best[1].change_counts, 1)
+                for target in best[2]:
+                    new_analysis = best[1].apply(self.segmentations[target],
+                                                 self.viterbi_tag,
+                                                 update_counts=False)
+                    self.segmentations[target] = new_analysis
+                    # any morph used in the best segmentation
+                    # is no longer temporary
+                    temporaries.difference_update(
+                        [self._detag_morph(morph) for morph in new_analysis])
+            self._morph_usage.remove_temporaries(temporaries)
+
+    def _split_generator(self):
         # FIXME random shuffle or sort by length/frequency?
         epoch_morphs = tuple(self._morph_usage.seen_morphs())
         for morph in epoch_morphs:
-            self._split_morph(morph)
+            if len(morph) == 1:
+                continue
+            if self._morph_usage.count(morph) == 0:
+                continue
+
+            # Match the parent morph with any category
+            rule = TransformationRule((CategorizedMorph(morph, None),))
+            transforms = []
+            # Apply to all words in which the morph occurs
+            targets = self.morph_backlinks[morph]
+            # Temporary estimated contexts
+            temporaries = set()
+            for splitloc in range(1, len(morph)):
+                prefix = morph[:splitloc]
+                suffix = morph[splitloc:]
+                # Make sure that there are context features available
+                # (real or estimated) for the submorphs
+                tmp = (self._morph_usage.estimate_contexts(morph,
+                                                           (prefix, suffix)))
+                temporaries.update(tmp)
+                transforms.append(
+                    Transformation(rule,
+                                   (CategorizedMorph(prefix, None),
+                                    CategorizedMorph(suffix, None))))
+            yield (transforms, targets, temporaries)
 
     def _split_morph(self, morph):
         if len(morph) == 1:
@@ -972,7 +1036,7 @@ class CatmapModel(object):
                 word = (word,)
             yield (count, self.viterbi_segment(word))
 
-    def convergence_of_cost(self, train_func, max_cost_difference=0,
+    def convergence_of_cost(self, transform_generator, max_cost_difference=0,
                             max_iterations=15):
         """Iterates the specified training function until the model cost
         no longer improves enough or until maximum number of iterations
@@ -984,9 +1048,10 @@ class CatmapModel(object):
         the morphs already stored in the lexicon.
 
         Arguments:
-            train_func -- A method of CatmapModel that takes one argument:
-                          segmentations, and which causes some aspect
-                          of the model to be trained.
+            transform_generator -- A function that returns a
+                                   transform generator,
+                                   which can be given as argument to
+                                   _transformation_epoch
             max_cost_difference -- Stop iterating if cost reduction between
                                    iterations is below this limit.
             max_iterations -- Maximum number of iterations. Default 15.
@@ -995,10 +1060,10 @@ class CatmapModel(object):
         previous_cost = self.get_cost()
         for iteration in range(max_iterations):
             _logger.info(u'Iteration {!r} number {}/{}.'.format(
-                train_func.__name__, iteration + 1, max_iterations))
+                transform_generator.__name__, iteration + 1, max_iterations))
 
             # perform the optimization
-            train_func()
+            self._transformation_epoch(transform_generator())
 
             cost = self.get_cost()
             cost_diff = cost - previous_cost
@@ -1077,22 +1142,29 @@ class CatmapModel(object):
         # FIXME: annotation coding cost for supervised
         return self._catmap_coding.get_cost() + self._lexicon_coding.get_cost()
 
-    def update_counts(self, change_counts):
+    def _update_counts(self, change_counts, multiplier):
         for cmorph in change_counts.emissions:
             self._catmap_coding.update_emission_count(
                 cmorph.category,
                 cmorph.morph,
-                change_counts.emissions[cmorph])
+                change_counts.emissions[cmorph] * multiplier)
 
         for (prev_cat, next_cat) in change_counts.transitions:
             self._catmap_coding.update_transition_count(
                 prev_cat, next_cat,
-                change_counts.transitions[(prev_cat, next_cat)])
+                change_counts.transitions[(prev_cat, next_cat)] * multiplier)
 
-        for morph in change_counts.backlinks_remove:
+        if multiplier > 0:
+            bl_rm = change_counts.backlinks_remove
+            bl_add = change_counts.backlinks_add
+        else:
+            bl_rm = change_counts.backlinks_add
+            bl_add = change_counts.backlinks_remove
+
+        for morph in bl_rm:
             self.morph_backlinks[morph].difference_update(
                 change_counts.backlinks_remove[morph])
-        for morph in change_counts.backlinks_remove:
+        for morph in bl_add:
             self.morph_backlinks[morph].update(
                 change_counts.backlinks_add[morph])
 
@@ -1200,13 +1272,15 @@ class Transformation(object):
         self.result = result
         self.change_counts = ChangeCounts()
 
-    def apply(self, word, update=False):
+    def apply(self, word, tagfunc, update_counts=False):
         i = 0
         out = []
+        matches = 0
         while i + len(self.rule) <= len(word.analysis):
             if self.rule.match(word.analysis, i):
                 out.extend(self.result)
                 i += len(self.rule)
+                matches += 1
             else:
                 out.append(word.analysis[i])
                 i += 1
@@ -1214,9 +1288,13 @@ class Transformation(object):
             out.append(word.analysis[i])
             i += 1
 
-        if update:
-            self.change_counts.update(word.analysis, -word.count)
-            self.change_counts.update(out, word.count)
+        if matches > 0:
+            # Only retag if the rule matched something
+            out = tagfunc(out)
+
+            if update_counts:
+                self.change_counts.update(word.analysis, -word.count)
+                self.change_counts.update(out, word.count)
 
         return WordAnalysis(word.count, out)
 

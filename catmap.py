@@ -479,6 +479,7 @@ class CatmapModel(object):
             self.viterbi_tag_corpus,
             max_iterations=1)    # FIXME debug max
         self._calculate_emission_counts()
+        self._reestimate_probabilities()
         self.convergence_of_cost(
             self._split_generator,
             max_iterations=2)    # FIXME debug max

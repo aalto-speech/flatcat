@@ -1293,7 +1293,7 @@ class Transformation(object):
     __slots__ = ['cost', 'rule', 'result', 'change_counts']
 
     def __init__(self, rule, result):
-        self.cost = 0
+        self.cost = 0       # FIXME not used at the moment
         self.rule = rule
         self.result = result
         self.change_counts = ChangeCounts()
@@ -1353,6 +1353,8 @@ class TransformationRule(object):
     """
 
     def __init__(self, categorized_morphs):
+        if isinstance(categorized_morphs, CategorizedMorph):
+            categorized_morphs = [categorized_morphs]
         self._rule = categorized_morphs
 
     def __len__(self):
@@ -1599,8 +1601,10 @@ class CatmapEncoding(morfessor.CorpusEncoding):
 
         if old_total > 1:
             self.logtokensum -= old_total * math.log(old_total)
+            self.tokens -= old_total
         if new_total > 1:
             self.logtokensum += new_total * math.log(new_total)
+            self.tokens += new_total
 
         # invalidate cache
         self._log_emissionprob_cache.clear()

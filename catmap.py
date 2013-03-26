@@ -478,10 +478,16 @@ class CatmapModel(object):
             self._calculate_transition_counts,
             self.viterbi_tag_corpus,
             max_iterations=1)    # FIXME debug max
+
         self._calculate_emission_counts()
         self._reestimate_probabilities()
+
         self.convergence_of_cost(
             self._split_generator,
+            max_iterations=2)    # FIXME debug max
+        self._reestimate_probabilities()
+        self.convergence_of_cost(
+            self._join_generator,
             max_iterations=2)    # FIXME debug max
 
     def _reestimate_probabilities(self):
@@ -667,88 +673,31 @@ class CatmapModel(object):
                                     CategorizedMorph(suffix, None))))
             yield (transforms, targets, temporaries)
 
-    def _split_morph(self, morph):
-        if len(morph) == 1:
-            return
-        total_count = self._morph_usage.count(morph)
-        if total_count == 0:
-            return
-
-        # Cost of leaving the morph un-split
-        best = (self.get_cost(), 0, None)
-
-        # Remove all instances of the morph
-        old_emissions = self._remove(morph)
-        msg = (u'count {} for "{}" did not match sum of emissions {}'.format(
-            total_count, morph, sum(old_emissions)))
-        assert total_count == sum(old_emissions), msg
-
-        # Temporary estimated contexts
-        temporaries = set()
-
-        # Cost of each possible split into two parts
-        tmp_valid = MorphUsageProperties.valid_split_transitions()
-        for splitloc in range(1, len(morph)):
-            prefix = morph[:splitloc]
-            suffix = morph[splitloc:]
-            # Make sure that there are context features available
-            # (real or estimated) for the submorphs
-            tmp = (self._morph_usage.estimate_contexts(morph,
-                                                       (prefix, suffix)))
-            temporaries.update(tmp)
-            # Consider tagging the newly formed morphs in all valid ways
-            # Simplifying assumption: all instances are tagged the same way
-            for (prefix_cat, suffix_cat) in tmp_valid:
-                self._modify_coding_costs((prefix, suffix),
-                                          (prefix_cat, suffix_cat),
-                                          total_count)
-
-                cost = self.get_cost()
-
-                if cost < best[0]:
-                    best = (cost, splitloc, (prefix_cat, suffix_cat))
-
-                # Undo the changes
-                self._modify_coding_costs((prefix, suffix),
-                                          (prefix_cat, suffix_cat),
-                                          -total_count)
-
-        if best[1] == 0:
-            # Best option was to do nothing: revert changes
-            self._readd(morph, old_emissions)
-            self._morph_usage.remove_temporaries(temporaries)
-        else:
-            splitloc = best[1]
-            prefix_cat, suffix_cat = best[2]
-            prefix = morph[:splitloc]
-            suffix = morph[splitloc:]
-            _logger.debug(u'Found a good split {}/{} + {}/{}'.format(
-                prefix, prefix_cat, suffix, suffix_cat))
-            # Re-apply the best split
-            self._modify_coding_costs((prefix, suffix),
-                                        (prefix_cat, suffix_cat),
-                                        total_count)
-            # New morphs used in split should no longer be removed
-            if prefix in temporaries:
-                temporaries.remove(prefix)
-            if suffix in temporaries:
-                temporaries.remove(suffix)
-            self._morph_usage.remove_temporaries(temporaries)
-
-            # FIXME recursion disabled
-            #self._recursive_split(prefix)
-            #if prefix != suffix:
-            #    self._recursive_split(suffix)
-
-    def _join_epoch(self):
+    def _join_generator(self):
         # FIXME random shuffle or sort by bigram frequency?
-        # FIXME this is broken
+        bigram_freqs = collections.Counter()
         for (count, segments) in self.segmentations:
-            segments = [WORD_BOUNDARY] + segments + [WORD_BOUNDARY]
-            for quad in ngrams(segments, n=4):
-                prev_morph, prefix, suffix, next_morph = quad
-                self._join_bimorph(prev_morph, prefix, suffix, next_morph,
-                                   count)
+#            segments = [WORD_BOUNDARY] + segments + [WORD_BOUNDARY]
+#            for quad in ngrams(segments, n=4):
+#                prev_morph, prefix, suffix, next_morph = quad
+#                # calculate context type, add to bigram
+            for bigram in ngrams(segments, n=2):
+                bigram_freqs[bigram] += count
+
+        for (bigram, count) in bigram_freqs.most_common():
+            # Require both morphs and tags to match
+            rule = TransformationRule(bigram)
+            (prefix, suffix) = bigram
+            joined = prefix.morph + suffix.morph
+            temporaries = set(self._morph_usage.estimate_contexts(
+                (prefix.morph, suffix.morph), joined))
+            transform = Transformation(rule, (CategorizedMorph(joined, None),))
+            # targets will be a subset of the intersection of the
+            # occurences of both submorphs
+            targets = set(self.morph_backlinks[prefix.morph])
+            targets.intersection_update(self.morph_backlinks[suffix.morph])
+            if len(targets) > 0:
+                yield([transform], targets, temporaries)
 
     def _join_bimorph(self, prev_morph, prefix, suffix, next_morph, count):
         # Cost of leaving the morphs un-joined
@@ -1296,7 +1245,10 @@ class Transformation(object):
     def __init__(self, rule, result):
         self.cost = 0       # FIXME not used at the moment
         self.rule = rule
-        self.result = result
+        if isinstance(result, CategorizedMorph):
+            self.result = (result,)
+        else:
+            self.result = result
         self.change_counts = ChangeCounts()
 
     def __repr__(self):
@@ -1355,7 +1307,7 @@ class TransformationRule(object):
 
     def __init__(self, categorized_morphs):
         if isinstance(categorized_morphs, CategorizedMorph):
-            categorized_morphs = [categorized_morphs]
+            categorized_morphs = (categorized_morphs,)
         self._rule = categorized_morphs
 
     def __len__(self):

@@ -317,8 +317,17 @@ class MorphUsageProperties(object):
         return self._contexts[morph].count
 
     def set_count(self, morph, new_count):
-        """Set the number of observed occurences of a morph."""
+        """Set the number of observed occurences of a morph.
+        Also updates the true category distribution.
+        """
+
+        if self._marginalizer is not None and self.count(morph) > 0:
+            self._marginalizer.add(-self.count(morph),
+                                   self.condprobs(morph))
         self._contexts[morph] = self._contexts[morph]._replace(count=new_count)
+        if self._marginalizer is not None and self.count(morph) > 0:
+            self._marginalizer.add(self.count(morph),
+                                   self.condprobs(morph))
 
     @classmethod
     def valid_split_transitions(cls):
@@ -615,7 +624,7 @@ class CatmapModel(object):
                 self._update_counts(transform.change_counts, -1)
 
             if best[1] is not None:
-                self._update_counts(best[1].change_counts, 1)
+                best[1].reset_counts()
                 for target in best[2]:
                     new_analysis = best[1].apply(self.segmentations[target],
                                                  self, corpus_index=target)
@@ -624,6 +633,7 @@ class CatmapModel(object):
                     # is no longer temporary
                     temporaries.difference_update(
                         self.detag_word(new_analysis.analysis))
+                self._update_counts(best[1].change_counts, 1)
             self._morph_usage.remove_temporaries(temporaries)
 
     def _split_generator(self):
@@ -810,6 +820,7 @@ class CatmapModel(object):
         old_count = self._morph_usage.count(morph)
         new_count = old_count + diff_count
         self._morph_usage.set_count(morph, new_count)
+        self._catmap_coding._log_emissionprob_cache.clear()
         if old_count == 0 and new_count > 0:
             self._lexicon_coding.add(morph)
         elif old_count > 0 and new_count == 0:
@@ -841,6 +852,10 @@ class CatmapModel(object):
                         use viterbi_segment(compound).
         """
 
+        # To make sure that internally impossible states are penalized
+        # even more than impossible states caused by zero parameters.
+        extrazero = LOGPROB_ZERO ** 2
+
         # This function uses internally indices of categories,
         # instead of names and the word boundary object,
         # to remove the need to look them up constantly.
@@ -851,7 +866,7 @@ class CatmapModel(object):
         # the lowest accumulated cost ending in each possible state.
         # and back pointers that indicate the best path.
         # Initialized to pseudo-zero for all states
-        grid = [[ViterbiNode(LOGPROB_ZERO, None)] * len(categories)]
+        grid = [[ViterbiNode(extrazero, None)] * len(categories)]
         # Except probability one that first state is a word boundary
         grid[0][wb] = ViterbiNode(0, None)
 
@@ -867,7 +882,7 @@ class CatmapModel(object):
                 if next_cat == wb:
                     # Impossible to visit boundary in the middle of the
                     # sequence
-                    best.append(ViterbiNode(LOGPROB_ZERO, None))
+                    best.append(ViterbiNode(extrazero, None))
                     continue
                 for prev_cat in range(len(categories)):
                     # Cost of selecting prev_cat as previous state
@@ -1326,6 +1341,9 @@ class Transformation(object):
 
         return WordAnalysis(word.count, out)
 
+    def reset_counts(self):
+        self.change_counts = ChangeCounts()
+
 
 class TransformationRule(object):
     """A simple transformation rule that requires a pattern of category
@@ -1544,6 +1562,8 @@ class CatmapEncoding(morfessor.CorpusEncoding):
                     _zlog(self._morph_usage.count(morph)) +
                     _zlog(self._morph_usage.condprobs(morph)[cat_index]) -
                     _zlog(self._morph_usage.category_token_count[cat_index]))
+        msg = u'emission {} -> {} has probability > 1'.format(category, morph)
+        assert self._log_emissionprob_cache[pair] >= 0, msg
         return self._log_emissionprob_cache[pair]
 
     def update_emission_count(self, category, morph, diff_count):
@@ -1560,6 +1580,9 @@ class CatmapEncoding(morfessor.CorpusEncoding):
             **{category: (self._emission_counts[morph][cat_index] +
                           diff_count)})
         self.set_emission_counts(morph, new_counts)
+
+        # invalidate cache
+        self._log_emissionprob_cache.clear()
 
     def set_emission_counts(self, morph, new_counts):
         """Set the number of emissions of a morph from all categories
@@ -1588,6 +1611,7 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         self.tokens = 0
         self.logtokensum = 0.0
         self._emission_counts.clear()
+        self._log_emissionprob_cache.clear()
 
     # General methods
 

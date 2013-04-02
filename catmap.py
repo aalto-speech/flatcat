@@ -95,7 +95,6 @@ class MorphUsageProperties(object):
                                  ('STM', 'PRE'))
 
     # Cache for memoized valid transitions
-    _valid_split_transitions = None
     _valid_transitions = None
 
     def __init__(self, ppl_treshold=100, ppl_slope=None, length_treshold=3,
@@ -329,23 +328,6 @@ class MorphUsageProperties(object):
         if self._marginalizer is not None and self.count(morph) > 0:
             self._marginalizer.add(self.count(morph),
                                    self.condprobs(morph))
-
-    @classmethod
-    def valid_split_transitions(cls):
-        """Returns all category pairs that are considered valid ways
-        to split a morph."""
-        if cls._valid_split_transitions is None:
-            cls._valid_split_transitions = []
-            categories = list(ByCategory._fields)
-            skiplist = list(MorphUsageProperties.zero_transitions)
-            skiplist.extend(MorphUsageProperties.invalid_split_transitions)
-            for prev_cat in categories:
-                for next_cat in categories:
-                    if (prev_cat, next_cat) in skiplist:
-                        continue
-                    cls._valid_split_transitions.append((prev_cat, next_cat))
-            cls._valid_split_transitions = tuple(cls._valid_split_transitions)
-        return cls._valid_split_transitions
 
     @classmethod
     def valid_transitions(cls):
@@ -632,13 +614,15 @@ class CatmapModel(object):
                                                           count)
 
     def _transformation_epoch(self, transformation_generator):
+        EpochNode = collections.namedtuple('EpochNode', ['cost',
+                                                         'transform',
+                                                         'targets'])
         for experiment in transformation_generator:
             (transform_group, targets, temporaries) = experiment
             if len(transform_group) == 0:
                 continue
             # Cost of doing nothing
-            best = (self.get_cost(), None, set())   # FIXME namedtuple
-            old_cost = best[0]
+            best = EpochNode(self.get_cost(), None, set())
 
             matched_targets = set()
             num_matches = 0
@@ -671,32 +655,33 @@ class CatmapModel(object):
                 # Apply change to encoding
                 self._update_counts(transform.change_counts, 1)
                 cost = self.get_cost()
-                if cost < best[0]:
-                    best = (cost, transform, matched_targets)
+                if cost < best.cost:
+                    best = EpochNode(cost, transform, matched_targets)
                 # Revert change to encoding
                 self._update_counts(transform.change_counts, -1)
                 for morph in self.detag_word(transform.result):
                     self._modify_morph_count(morph, -num_matches)
 
-            if best[1] is None:
+            if best.transform is None:
                 # Best option was to do nothing. Revert morph count.
                 for morph in self.detag_word(transform_group[0].rule):
                     self._modify_morph_count(morph, num_matches)
             else:
                 # A real change was the best option
-                best[1].reset_counts()
-                for target in best[2]:
-                    for morph in self.detag_word(best[1].result):
+                best.transform.reset_counts()
+                for target in best.targets:
+                    for morph in self.detag_word(best.transform.result):
                         # Add the new representation to morph counts
                         self._modify_morph_count(morph, num_matches)
-                    new_analysis = best[1].apply(self.segmentations[target],
-                                                 self, corpus_index=target)
+                    new_analysis = best.transform.apply(
+                                        self.segmentations[target],
+                                        self, corpus_index=target)
                     self.segmentations[target] = new_analysis
                     # any morph used in the best segmentation
                     # is no longer temporary
                     temporaries.difference_update(
                         self.detag_word(new_analysis.analysis))
-                self._update_counts(best[1].change_counts, 1)
+                self._update_counts(best.transform.change_counts, 1)
             self._morph_usage.remove_temporaries(temporaries)
             self.debug_costhistory_chosen.append(       # FIXME debug
                 (len(self.debug_costhistory),
@@ -758,71 +743,6 @@ class CatmapModel(object):
             if len(targets) > 0:
                 yield([transform], targets, temporaries)
 
-    def _join_bimorph(self, prev_morph, prefix, suffix, next_morph, count):
-        # Cost of leaving the morphs un-joined
-        best = (self.get_cost(), None)
-        old_cost = best[0]
-
-        old_categories = []
-        if prev_morph == WORD_BOUNDARY:
-            old_categories.append(WORD_BOUNDARY)
-        else:
-            old_categories.append(prev_morph.category)
-        old_categories.extend((prefix.category, suffix.category))
-        if next_morph == WORD_BOUNDARY:
-            old_categories.append(WORD_BOUNDARY)
-        else:
-            old_categories.append(next_morph.category)
-        morph = ''.join((prefix.morph, suffix.morph))
-        old_morphs = (None, prefix.morph, suffix.morph, None)
-        new_morphs = (None, morph, None)
-
-        # Remove *these* instances of the child morphs
-        # This is different from the old Cat-MAP
-        self._modify_coding_costs(old_morphs, old_categories, -count)
-
-        # Temporary estimated contexts
-        temporaries = set()
-
-        # Make sure that there are context features available
-        # (real or estimated) for the new morph
-        self._morph_usage.estimate_contexts((prefix, suffix), morph)
-
-        # Cost of each tagging of the joined morph
-        for new_cat in CatmapModel.get_categories():
-            new_categories = (old_categories[0], new_cat, old_categories[-1])
-            self._modify_coding_costs(new_morphs, new_categories, count)
-
-            cost = self.get_cost()
-
-            if cost < best[0]:
-                best = (cost, new_cat)
-
-            # Undo the changes
-            self._modify_coding_costs(new_morphs, new_categories, -count)
-
-        if best[1] is None:
-            # Best option was to do nothing: revert changes
-            self._modify_coding_costs(old_morphs, old_categories, count)
-        else:
-            # Re-apply with the best tag
-            new_categories = (old_categories[0], best[1], old_categories[-1])
-            self._modify_coding_costs(new_morphs, new_categories, count)
-            _logger.debug(u'Found a good join {} + {} -> {}/{}'.format(
-                prefix, suffix, morph, best[1]))
-
-    def _modify_coding_costs(self, morphs, categories, diff_count):
-        for (morph, category) in zip(morphs, categories):
-            if morph is not None:
-                self._catmap_coding.update_emission_count(category,
-                                                          morph,
-                                                          diff_count)
-                self._modify_morph_count(morph, diff_count)
-        for (prev_cat, next_cat) in ngrams(categories, 2):
-            self._catmap_coding.update_transition_count(prev_cat,
-                                                        next_cat,
-                                                        diff_count)
-
     def _modify_morph_count(self, morph, diff_count):
         """Modifies the count of a morph in the lexicon.
         Does not affect transitions or emissions."""
@@ -835,20 +755,31 @@ class CatmapModel(object):
         elif old_count > 0 and new_count == 0:
             self._lexicon_coding.remove(morph)
 
-    def _remove(self, morph):
-        """Removes a morph completely from the lexicon.
-        Transitions and emissions are also updated."""
-        self._modify_morph_count(morph, -self._morph_usage.count(morph))
-        old_emissions = self._catmap_coding.get_emission_counts(morph)
-        self._catmap_coding.set_emission_counts(morph, _nt_zeros(ByCategory))
-        return old_emissions
+    def _update_counts(self, change_counts, multiplier):
+        for cmorph in change_counts.emissions:
+            self._catmap_coding.update_emission_count(
+                cmorph.category,
+                cmorph.morph,
+                change_counts.emissions[cmorph] * multiplier)
 
-    def _readd(self, morph, emissions):
-        """Readds a morph previously removed from the lexicon.
-        Transitions and emissions are also restored."""
-        count = sum(emissions)
-        self._catmap_coding.set_emission_counts(morph, emissions)
-        self._modify_morph_count(morph, count)
+        for (prev_cat, next_cat) in change_counts.transitions:
+            self._catmap_coding.update_transition_count(
+                prev_cat, next_cat,
+                change_counts.transitions[(prev_cat, next_cat)] * multiplier)
+
+        if multiplier > 0:
+            bl_rm = change_counts.backlinks_remove
+            bl_add = change_counts.backlinks_add
+        else:
+            bl_rm = change_counts.backlinks_add
+            bl_add = change_counts.backlinks_remove
+
+        for morph in bl_rm:
+            self.morph_backlinks[morph].difference_update(
+                change_counts.backlinks_remove[morph])
+        for morph in bl_add:
+            self.morph_backlinks[morph].update(
+                change_counts.backlinks_add[morph])
 
     def viterbi_tag(self, segments):
         """Tag a pre-segmented word using the learned model.
@@ -1172,32 +1103,6 @@ class CatmapModel(object):
         cost = self._catmap_coding.get_cost() + self._lexicon_coding.get_cost()
         self.debug_costhistory.append(cost)
         return cost
-
-    def _update_counts(self, change_counts, multiplier):
-        for cmorph in change_counts.emissions:
-            self._catmap_coding.update_emission_count(
-                cmorph.category,
-                cmorph.morph,
-                change_counts.emissions[cmorph] * multiplier)
-
-        for (prev_cat, next_cat) in change_counts.transitions:
-            self._catmap_coding.update_transition_count(
-                prev_cat, next_cat,
-                change_counts.transitions[(prev_cat, next_cat)] * multiplier)
-
-        if multiplier > 0:
-            bl_rm = change_counts.backlinks_remove
-            bl_add = change_counts.backlinks_add
-        else:
-            bl_rm = change_counts.backlinks_add
-            bl_add = change_counts.backlinks_remove
-
-        for morph in bl_rm:
-            self.morph_backlinks[morph].difference_update(
-                change_counts.backlinks_remove[morph])
-        for morph in bl_add:
-            self.morph_backlinks[morph].update(
-                change_counts.backlinks_add[morph])
 
     @staticmethod
     def get_categories(wb=False):

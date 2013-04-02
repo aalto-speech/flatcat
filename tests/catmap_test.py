@@ -272,57 +272,31 @@ class TestModelConsistency(unittest.TestCase):
         self.presplit()
         self.initial_state_asserts()
 
-    def test_remove_readd(self):
-        self.presplit()
-
-        morph = 'AA'
-
-        old_cost = self.model.get_cost()
-        old_emissions = self.model._remove(morph)
-
-        mid_cost = self.model.get_cost()
-
-        self.model._readd(morph, old_emissions)
-        new_cost = self.model.get_cost()
-
-        msg = (u'_remove followed by _readd did not return to same cost ' +
-               u'old: {}, new: {}'.format(old_cost, new_cost))
-        self.assertAlmostEqual(old_cost, new_cost, places=4, msg=msg)
-
-        # The model should have returned to initial state
-        self.initial_state_asserts()
-
-        # sanity check: costs should never be negative
-        self.assertTrue(old_cost >= 0)
-        self.assertTrue(mid_cost >= 0)
-        self.assertTrue(new_cost >= 0)
-        # sanity check: removing a morph but not replacing it with anything
-        # else should always lower the cost.
-        self.assertTrue(mid_cost < old_cost)
-
-#    def test_modify_coding_costs(self):
-#        self._modify_coding_costs('AA', 'BBBBB', 'PRE', 'STM', 2)
-#        self._modify_coding_costs('A', 'B', 'PRE', 'STM', 2)
-#        self._modify_coding_costs('A', 'A', 'PRE', 'STM', 2)
-#    def _transform(self, transform_generator, reverse_generator):
-        
+#    def test_transforms(self):
+#        self.model.add_corpus_data(TestModelConsistency.simple_segmentation)
+#        self.presplit()
+#        # FIXME unimplemented
+#
     def test_update_counts(self):
         self.presplit()
         # manual change to join the one occurence of AA BBBBB
         cc = catmap.ChangeCounts(
-            emissions = {catmap.CategorizedMorph('AA', 'ZZZ'): -1,
-                         catmap.CategorizedMorph('BBBBB', 'STM'): -1,
-                         catmap.CategorizedMorph('AABBBBB', 'STM'): 1},
-            transitions = {(catmap.WORD_BOUNDARY, 'ZZZ'): -1,
-                           ('ZZZ', 'STM'): -1,
-                           (catmap.WORD_BOUNDARY, 'STM'): 1})
+            emissions={catmap.CategorizedMorph('AA', 'ZZZ'): -1,
+                       catmap.CategorizedMorph('BBBBB', 'STM'): -1,
+                       catmap.CategorizedMorph('AABBBBB', 'STM'): 1},
+            transitions={(catmap.WORD_BOUNDARY, 'ZZZ'): -1,
+                         ('ZZZ', 'STM'): -1,
+                         (catmap.WORD_BOUNDARY, 'STM'): 1})
+
         def apply_update_counts():
             self.model._update_counts(cc, 1)
+
         def revert_update_counts():
             self.model._update_counts(cc, -1)
-        self._apply_revert(apply_update_counts, revert_update_counts)
-        
-    def _apply_revert(self, apply_func, revert_func):
+
+        self._apply_revert(apply_update_counts, revert_update_counts, False)
+
+    def _apply_revert(self, apply_func, revert_func, is_remove):
         old_cost = self.model.get_cost()
         apply_func()
 
@@ -345,8 +319,12 @@ class TestModelConsistency(unittest.TestCase):
         self.assertTrue(mid_cost >= 0)
         self.assertTrue(new_cost >= 0)
         # sanity check: adding submorphs without removing the parent
-        # first should always increase the cost
-        self.assertTrue(mid_cost > old_cost)
+        # first should always increase the cost, while removing without
+        # replacing should always lower the cost
+        if is_remove:
+            self.assertTrue(mid_cost < old_cost)
+        else:
+            self.assertTrue(mid_cost > old_cost)
 
     def test_estimate_remove_temporaries(self):
         self.presplit()

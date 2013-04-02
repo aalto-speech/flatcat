@@ -286,7 +286,7 @@ class TestModelConsistency(unittest.TestCase):
         self.model.add_corpus_data(
             TestModelConsistency.one_split_segmentation)
         self.presplit()
-        
+
         tmp = ((('AA', 'BBBBB'), ('AABBBBB',)),           # join
                (('AASSSSS',), ('AA', 'SSSSS')),           # split
                (('BBBBB',), ('B', 'B', 'B', 'B', 'B')))   # silly
@@ -433,7 +433,8 @@ class TestModelConsistency(unittest.TestCase):
             'lexicon_logtokensum': float(
                 self.model._lexicon_coding.logtokensum),
             'logfeaturesum': float(self.model._lexicon_coding.logfeaturesum)}
-        for (i, tmp) in enumerate(self.model._morph_usage.category_token_count):
+        for (i, tmp) in enumerate(
+                self.model._morph_usage.category_token_count):
             state_approx[u'category_token_count_{}'.format(i)] = float(tmp)
         return (state_exact, state_approx)
 

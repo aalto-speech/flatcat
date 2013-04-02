@@ -228,6 +228,10 @@ class MorphUsageProperties(object):
 
     @property
     def category_token_count(self):
+        """Un-normalized distribution of class probabilities,
+        the sum of which is the number of observed morphs.
+        See marginal_class_probs for the normalized version.
+        """
         return self._get_marginalizer().category_token_count
 
     def _get_marginalizer(self):
@@ -614,6 +618,17 @@ class CatmapModel(object):
                                                           count)
 
     def _find_in_corpus(self, rule, targets=None):
+        """Returns the indices of words in the corpus segmentation
+        matching the given rule, and the total number of matches, which
+        can be larger than the length of matched_targets, if there
+        are several matches in some word(s).
+
+        Arguments:
+            rule -- A TransformationRule describing the criteria for a match.
+            targets -- A set of indices to limit the search to, or None to
+                       search all segmentations. Default: full search.
+        """
+
         if targets is None:
             targets = range(len(self.segmentations))
 
@@ -630,6 +645,31 @@ class CatmapModel(object):
         return matched_targets, num_matches
 
     def _transformation_epoch(self, transformation_generator):
+        """Performs each experiment yielded by the transform generator,
+        in sequence, always choosing the alternative that minimizes the
+        model cost, or making no change if all choices would increase the
+        cost.
+
+        An experiment is a set of transformations sharing a common matching
+        rule. The individual transformations in the set are considered to
+        be mutually exclusive, only one of them can be chosen.
+
+        Can be used to split, join or otherwise re-segment.
+        Can even be abused to alter the corpus: it is up to the caller to
+        ensure that the rules and results detokenize to the same string.
+
+        Arguments:
+            transformation_generator -- a generator yielding
+                (transform_group, targets, temporaries)
+                tuples, where
+                    transform_group -- a list of Transform objects.
+                    targets -- an initial guess of indices of matching
+                               words in the corpus. Can contain false
+                               positives, but should not omit positive
+                               indices (they will be missed).
+                    temporaries -- new morphs with estimated contexts.
+        """
+
         EpochNode = collections.namedtuple('EpochNode', ['cost',
                                                          'transform',
                                                          'targets'])
@@ -696,6 +736,9 @@ class CatmapModel(object):
                 self.get_cost()))
 
     def _split_generator(self):
+        """Generates splits of seen morphs into two submorphs.
+        Use with _transformation_epoch
+        """
         # FIXME random shuffle or sort by length/frequency?
         epoch_morphs = tuple(self._morph_usage.seen_morphs())
         for morph in epoch_morphs:
@@ -726,6 +769,10 @@ class CatmapModel(object):
             yield (transforms, targets, temporaries)
 
     def _join_generator(self):
+        """Generates joins of consecutive morphs into a supermorph.
+        Currently does not treat different contexts separately (FIXME).
+        Use with _transformation_epoch
+        """
         # FIXME random shuffle or sort by bigram frequency?
         bigram_freqs = collections.Counter()
         for (count, segments) in self.segmentations:
@@ -764,6 +811,13 @@ class CatmapModel(object):
             self._lexicon_coding.remove(morph)
 
     def _update_counts(self, change_counts, multiplier):
+        """Updates the model counts according to the pre-calculated
+        ChangeCounts object (e.g. calculated in Transformation).
+
+        Arguments:
+            change_counts -- A ChangeCounts object
+            multiplier -- +1 to apply the change, -1 to revert it.
+        """
         for cmorph in change_counts.emissions:
             self._catmap_coding.update_emission_count(
                 cmorph.category,
@@ -955,7 +1009,6 @@ class CatmapModel(object):
                                     morph))
                             if cost <= best.cost:
                                 prev_start = prev_pos - prev_len
-                                prev_morph = word[prev_start:prev_pos]
                                 best = ViterbiNode(cost, ((prev_len, prev_cat),
                                     CategorizedMorph(morph,
                                                      categories[next_cat])))
@@ -971,7 +1024,6 @@ class CatmapModel(object):
                             WORD_BOUNDARY))
                 if cost <= best.cost:
                     prev_start = len(word) - prev_len
-                    prev_morph = word[prev_start:]
                     best = ViterbiNode(cost, ((prev_len, prev_cat),
                         CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)))
 
@@ -1201,6 +1253,18 @@ class ChangeCounts(object):
         self.backlinks_add = collections.defaultdict(set)
 
     def update(self, analysis, count, corpus_index=None):
+        """Updates the counts to add or remove the effects of an analysis.
+
+        Arguments:
+            analysis -- A tuple of CategorizedMorphs.
+            count -- The occurence count of the analyzed word.
+                     A negative count removes the effects of the analysis.
+            corpus_index -- If not None, the mapping between the morphs
+                            and the indices of words in the corpus that they
+                            occur in will be updated. corpus_index is then
+                            the index of the current occurence being updated.
+        """
+
         for cmorph in analysis:
             self.emissions[cmorph] += count
             if corpus_index is not None:
@@ -1221,6 +1285,9 @@ class ChangeCounts(object):
 
 
 class Transformation(object):
+    """A transformation of a certain pattern of morphs and/or categories,
+    to be (partially) replaced by another representation.
+    """
     __slots__ = ['rule', 'result', 'change_counts']
 
     def __init__(self, rule, result):
@@ -1236,6 +1303,20 @@ class Transformation(object):
                                    self.rule, self.result)
 
     def apply(self, word, model, corpus_index=None):
+        """Tries to apply this transformation to an analysis.
+        If the transformation doesn't match, the input is returned unchanged.
+        If the transformation matches, changes are made greedily from the
+        beginning of the analysis, until the whole sequence has been
+        processed. After this the segmentation is retagged using viterbi
+        tagging with the given model.
+
+        Arguments:
+            word -- A WordAnalysis object.
+            model -- The current model to use for tagging.
+            corpus_index -- Index of the word in the corpus, or None if
+                            the change is temporary and morph to word
+                            backlinks don't need to be updated.
+        """
         i = 0
         out = []
         matches = 0
@@ -1287,6 +1368,8 @@ class TransformationRule(object):
         return u'{}({})'.format(self.__class__.__name__, self._rule)
 
     def match_at(self, analysis, i):
+        """Returns true if this rule matches the analysis
+        at the given index."""
         for (j, cmorph) in enumerate(analysis[i:(i + len(self))]):
             if self._rule[j].category != CategorizedMorph.no_category:
                 # Rule requires category at this point to match
@@ -1300,6 +1383,8 @@ class TransformationRule(object):
         return True
 
     def num_matches(self, analysis):
+        """Total number of matches of this rule in the analysis.
+        Greedy application of the rule is used."""
         i = 0
         matches = 0
         while i + len(self) <= len(analysis):

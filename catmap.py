@@ -663,11 +663,12 @@ class CatmapModel(object):
                 (transform_group, targets, temporaries)
                 tuples, where
                     transform_group -- a list of Transform objects.
-                    targets -- an initial guess of indices of matching
-                               words in the corpus. Can contain false
+                    targets -- a set with an initial guess of indices of
+                               matching words in the corpus. Can contain false
                                positives, but should not omit positive
                                indices (they will be missed).
-                    temporaries -- new morphs with estimated contexts.
+                    temporaries -- a set of new morphs with estimated
+                                   contexts.
         """
 
         EpochNode = collections.namedtuple('EpochNode', ['cost',
@@ -797,6 +798,11 @@ class CatmapModel(object):
             targets.intersection_update(self.morph_backlinks[suffix.morph])
             if len(targets) > 0:
                 yield([transform], targets, temporaries)
+
+    def _resegment_generator(self):
+        for (i, word) in enumerate(self.segmentations):
+            yield ([ViterbiResegmentTransformation(word, self)],
+                   set([i]), set())
 
     def _modify_morph_count(self, morph, diff_count):
         """Modifies the count of a morph in the lexicon.
@@ -1341,6 +1347,28 @@ class Transformation(object):
             self.change_counts.update(out, word.count, corpus_index)
 
         return WordAnalysis(word.count, out)
+
+    def reset_counts(self):
+        self.change_counts = ChangeCounts()
+
+
+class ViterbiResegmentTransformation(object):
+    def __init__(self, word, model):
+        self.rule = TransformationRule(tuple(word.analysis))
+        self.result = model.viterbi_segment(word.analysis)
+        self.change_counts = ChangeCounts()
+
+    def __repr__(self):
+        return '{}({}, {})'.format(self.__class__.__name__,
+                                   self.rule, self.result)
+
+    def apply(self, word, model, corpus_index=None):
+        if word.analysis != self.rule:
+            return word
+        self.change_counts.update(word.analysis, -word.count,
+                                    corpus_index)
+        self.change_counts.update(self.result, word.count, corpus_index)
+        return WordAnalysis(word.count, self.result)
 
     def reset_counts(self):
         self.change_counts = ChangeCounts()

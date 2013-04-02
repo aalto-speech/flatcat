@@ -613,6 +613,22 @@ class CatmapModel(object):
                                                           morph.morph,
                                                           count)
 
+    def _find_in_corpus(self, rule, targets=None):
+        if targets is None:
+            targets = range(len(self.segmentations))
+
+        matched_targets = set()
+        num_matches = 0
+        for target in targets:
+            old_analysis = self.segmentations[target]
+            tmp_matches = (old_analysis.count *
+                            rule.num_matches(
+                                old_analysis.analysis))
+            if tmp_matches > 0:
+                matched_targets.add(target)
+                num_matches += tmp_matches
+        return matched_targets, num_matches
+
     def _transformation_epoch(self, transformation_generator):
         EpochNode = collections.namedtuple('EpochNode', ['cost',
                                                          'transform',
@@ -624,18 +640,10 @@ class CatmapModel(object):
             # Cost of doing nothing
             best = EpochNode(self.get_cost(), None, set())
 
-            matched_targets = set()
-            num_matches = 0
-            for target in targets:
-                # All transforms in group must match the same words,
-                # we can use just the first transform
-                old_analysis = self.segmentations[target]
-                tmp_matches = (old_analysis.count *
-                               transform_group[0].rule.num_matches(
-                                    old_analysis.analysis))
-                if tmp_matches > 0:
-                    matched_targets.add(target)
-                    num_matches += tmp_matches
+            # All transforms in group must match the same words,
+            # we can use just the first transform
+            matched_targets, num_matches = self._find_in_corpus(
+                transform_group[0].rule, targets)
             if num_matches == 0:
                 continue
 

@@ -178,7 +178,6 @@ class TestProbabilityEstimation(unittest.TestCase):
                     msg=msg % (morph, category, observed, reference[i]))
                 sumA += observed
                 sumB += reference[i]
-        #print('sums {} vs {}'.format(sumA, sumB))
 
     def test_transitions(self):
         categories = self.model.get_categories(True)
@@ -249,14 +248,24 @@ class TestModelConsistency(unittest.TestCase):
     dummy_segmentation = (
         (1, ('AA', 'BBBBB')),)
 
-    simple_segmentation = (
-        (1, ('AA', 'BBBBB')),
-        (1, ('AA', 'CCCC')),
-        (1, ('BBBBB', 'EE')),
-        (2, ('DDDDD',)),
-        (1, ('AADDDDDEE',)),
-        (1, ('ZZBBBBB',)),
-        (1, ('BBBBBZZ',)))
+    one_split_segmentation = (
+        (500, ('AA', 'BBBBB')),
+        (500, ('BBBBB', 'EE')),
+        (500, ('AA', 'CCCC')),
+        (500, ('CCCC', 'EE')),
+        (500, ('AA', 'DDDD')),
+        (500, ('DDDD', 'EE')),
+        (500, ('AA', 'FFFF')),
+        (500, ('FFFF', 'EE')),
+        (500, ('AA', 'GGGG')),
+        (500, ('GGGG', 'EE')),
+        (2000, ('BBBBB',)),
+        (2000, ('CCCC',)),
+        (2000, ('DDDD',)),
+        (2000, ('FFFF',)),
+        (2000, ('GGGG',)),
+        (500, ('SSSSS',)),
+        (2, ('AASSSSS',)))
 
     def setUp(self):
         self.model = _load_catmap(TestModelConsistency.dummy_segmentation)
@@ -271,12 +280,53 @@ class TestModelConsistency(unittest.TestCase):
         segmentation is consistent."""
         self.presplit()
         self.initial_state_asserts()
+#test_modify_morph_count
 
-#    def test_transforms(self):
-#        self.model.add_corpus_data(TestModelConsistency.simple_segmentation)
-#        self.presplit()
-#        # FIXME unimplemented
-#
+    def test_transforms(self):
+        self.model.add_corpus_data(
+            TestModelConsistency.one_split_segmentation)
+        self.presplit()
+        
+        tmp = ((('AA', 'BBBBB'), ('AABBBBB',)),           # join
+               (('AASSSSS',), ('AA', 'SSSSS')),           # split
+               (('BBBBB',), ('B', 'B', 'B', 'B', 'B')))   # silly
+
+        def simple_transformation(old_analysis, new_analysis):
+            return catmap.Transformation(
+                catmap.TransformationRule(
+                    [catmap.CategorizedMorph(morph, None)
+                        for morph in old_analysis]),
+                [catmap.CategorizedMorph(morph, None)
+                    for morph in new_analysis])
+
+        def apply_transformation(transformation):
+            matched_targets, num_matches = self.model._find_in_corpus(
+                transformation.rule, None)
+
+            for morph in self.model.detag_word(transformation.rule):
+                # Remove the old representation, but only from
+                # morph counts (emissions and transitions updated later)
+                self.model._modify_morph_count(morph, -num_matches)
+            for morph in self.model.detag_word(transformation.result):
+                # Add the new representation to morph counts
+                self.model._modify_morph_count(morph, num_matches)
+
+            for i in matched_targets:
+                new_analysis = transformation.apply(
+                    self.model.segmentations[i],
+                    self.model, corpus_index=i)
+                self.model.segmentations[i] = new_analysis
+            self.model._update_counts(transformation.change_counts, 1)
+
+        for a, b in tmp:
+            forward = simple_transformation(a, b)
+            backward = simple_transformation(b, a)
+
+            self._apply_revert(
+                lambda: apply_transformation(forward),
+                lambda: apply_transformation(backward),
+                None)
+
     def test_update_counts(self):
         self.presplit()
         # manual change to join the one occurence of AA BBBBB
@@ -297,6 +347,7 @@ class TestModelConsistency(unittest.TestCase):
         self._apply_revert(apply_update_counts, revert_update_counts, False)
 
     def _apply_revert(self, apply_func, revert_func, is_remove):
+        state_exact, state_approx = self.store_state()
         old_cost = self.model.get_cost()
         apply_func()
 
@@ -312,7 +363,7 @@ class TestModelConsistency(unittest.TestCase):
         self.assertAlmostEqual(old_cost, new_cost, places=4, msg=msg)
 
         # The model should have returned to initial state
-        self.initial_state_asserts()
+        self.compare_to_stored_state(state_exact, state_approx)
 
         # sanity check: costs should never be negative
         self.assertTrue(old_cost >= 0)
@@ -321,10 +372,11 @@ class TestModelConsistency(unittest.TestCase):
         # sanity check: adding submorphs without removing the parent
         # first should always increase the cost, while removing without
         # replacing should always lower the cost
-        if is_remove:
-            self.assertTrue(mid_cost < old_cost)
-        else:
-            self.assertTrue(mid_cost > old_cost)
+        if is_remove is not None:
+            if is_remove:
+                self.assertTrue(mid_cost < old_cost)
+            else:
+                self.assertTrue(mid_cost > old_cost)
 
     def test_estimate_remove_temporaries(self):
         self.presplit()
@@ -365,6 +417,35 @@ class TestModelConsistency(unittest.TestCase):
 
         # catmap coding
         self.general_consistency_asserts()
+
+    def store_state(self):
+        state_exact = {
+            'seen_morphs': tuple(self.model._morph_usage.seen_morphs()),
+            'contexts': dict(self.model._morph_usage._contexts),
+            'lexicon_tokens': int(self.model._lexicon_coding.tokens),
+            'segmentations': tuple(self.model.segmentations),
+            'emission_counts': _remove_zeros(
+                self.model._catmap_coding._emission_counts),
+            'transition_counts': _remove_zeros(
+                self.model._catmap_coding._transition_counts),
+            'cat_tagcount': dict(self.model._catmap_coding._cat_tagcount)}
+        state_approx = {
+            'lexicon_logtokensum': float(
+                self.model._lexicon_coding.logtokensum),
+            'logfeaturesum': float(self.model._lexicon_coding.logfeaturesum)}
+        for (i, tmp) in enumerate(self.model._morph_usage.category_token_count):
+            state_approx[u'category_token_count_{}'.format(i)] = float(tmp)
+        return (state_exact, state_approx)
+
+    def compare_to_stored_state(self, state_exact, state_approx):
+        current_exact, current_approx = self.store_state()
+        for key in state_exact:
+            self.assertEqual(state_exact[key], current_exact[key],
+                u'Reverting did not return to same state: {}'.format(key))
+        for key in state_approx:
+            self.assertAlmostEqual(state_approx[key], current_approx[key],
+                places=3,
+                msg=u'Reverting did not return to same state: {}'.format(key))
 
     def general_consistency_asserts(self):
         """ These values should be internally consistent at all times."""
@@ -417,6 +498,9 @@ def _exp_catprobs(probs):
     probabilities into one with actual probabilities"""
     return catmap.ByCategory(*[_zexp(x) for x in probs])
 
+
+def _remove_zeros(d):
+    return {key: d[key] for key in d if d[key] != 0}
 
 if __name__ == '__main__':
     unittest.main()

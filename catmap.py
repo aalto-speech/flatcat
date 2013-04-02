@@ -325,6 +325,7 @@ class MorphUsageProperties(object):
             self._marginalizer.add(-self.count(morph),
                                    self.condprobs(morph))
         self._contexts[morph] = self._contexts[morph]._replace(count=new_count)
+        assert self.count(morph) >= 0
         if self._marginalizer is not None and self.count(morph) > 0:
             self._marginalizer.add(self.count(morph),
                                    self.condprobs(morph))
@@ -362,6 +363,11 @@ class MorphUsageProperties(object):
 ### End of categorization-dependent code
 ########################################
 
+class InvalidCategoryError(Exception):
+    def __init__(self, category):
+        Exception.__init__(
+            u'This model does not recognize the category {}'.format(
+                category))
 
 class CatmapIO(morfessor.MorfessorIO):
     """Extends data file formats to include category tags."""
@@ -395,6 +401,22 @@ class CatmapIO(morfessor.MorfessorIO):
                                       m.category)
                      for m in morphs])
                 file_obj.write(u'{} {}\n'.format(count, s))
+        _logger.info("Done.")
+
+    def read_segmentation_file(self, file_name, **kwargs):
+        """Read segmentation file.
+        see docstring for write_segmentation_file for file format.
+        """
+        _logger.info("Reading segmentations from '%s'..." % file_name)
+        for line in self._read_text_file(file_name):
+            count, analysis = line.split(' ', 1)
+            cmorphs = []
+            for morph_cat in analysis.split(self.construction_separator):
+                morph, category = morph_cat.split(self.category_separator)
+                if category not in CatmapModel.get_categories():
+                    raise InvalidCategoryError(category)
+                cmorphs.append(CategorizedMorph(morph, category))
+            yield(int(count), tuple(cmorphs))
         _logger.info("Done.")
 
 
@@ -432,6 +454,9 @@ class CatmapModel(object):
         # FIXME: no longer needed? assume identical distribution?
         # FIXME: lexicon logtokens? viterbi analysis of new words?
         self._log_letterprobs = dict()
+
+        self.debug_costhistory = []
+        self.debug_costhistory_chosen = []
 
     def load_baseline(self, segmentations, no_emissions=False):
         """Initialize the model using the segmentation produced by a morfessor
@@ -607,20 +632,39 @@ class CatmapModel(object):
     def _transformation_epoch(self, transformation_generator):
         for experiment in transformation_generator:
             (transform_group, targets, temporaries) = experiment
+            if len(transform_group) == 0:
+                continue
             # Cost of doing nothing
-            best = (self.get_cost(), None, set())
+            best = (self.get_cost(), None, set())   # FIXME namedtuple
+            old_cost = best[0]
 
             matched_targets = set()
+            num_matches = 0
+            for target in targets:
+                # All transforms in group must match the same words,
+                # we can use just the first transform
+                old_analysis = self.segmentations[target]
+                tmp_matches = (old_analysis.count * 
+                               transform_group[0].rule.num_matches(
+                                    old_analysis.analysis))
+                if tmp_matches > 0:
+                    matched_targets.add(target)
+                    num_matches += tmp_matches
+            if num_matches == 0:
+                continue
+
+            for morph in self.detag_word(transform_group[0].rule):
+                # Remove the old representation, but only from
+                # morph counts (emissions and transitions updated later)
+                self._modify_morph_count(morph, -num_matches)
+
             for transform in transform_group:
-                for target in targets:
+                for morph in self.detag_word(transform.result):
+                    # Add the new representation to morph counts
+                    self._modify_morph_count(morph, num_matches)
+                for target in matched_targets:
                     old_analysis = self.segmentations[target]
                     new_analysis = transform.apply(old_analysis, self)
-
-                    if old_analysis == new_analysis:
-                        continue
-                    matched_targets.add(target)
-                # All transforms in group must match the same words
-                targets = matched_targets
 
                 # Apply change to encoding
                 self._update_counts(transform.change_counts, 1)
@@ -629,10 +673,15 @@ class CatmapModel(object):
                     best = (cost, transform, matched_targets)
                 # Revert change to encoding
                 self._update_counts(transform.change_counts, -1)
+                for morph in self.detag_word(transform.result):
+                    self._modify_morph_count(morph, -num_matches)
 
             if best[1] is not None:
                 best[1].reset_counts()
                 for target in best[2]:
+                    for morph in self.detag_word(best[1].result):
+                        # Add the new representation to morph counts
+                        self._modify_morph_count(morph, num_matches)
                     new_analysis = best[1].apply(self.segmentations[target],
                                                  self, corpus_index=target)
                     self.segmentations[target] = new_analysis
@@ -641,7 +690,12 @@ class CatmapModel(object):
                     temporaries.difference_update(
                         self.detag_word(new_analysis.analysis))
                 self._update_counts(best[1].change_counts, 1)
+                if self.get_cost() > old_cost:
+                    print('increased cost {} {} {}'.format(best[1], best[1].change_counts.transitions,
+                        best[1].change_counts.emissions))
+                    assert False
             self._morph_usage.remove_temporaries(temporaries)
+            self.debug_costhistory_chosen.append((len(self.debug_costhistory), self.get_cost()))
 
     def _split_generator(self):
         # FIXME random shuffle or sort by length/frequency?
@@ -811,6 +865,10 @@ class CatmapModel(object):
         # to remove the need to look them up constantly.
         categories = CatmapModel.get_categories(wb=True)
         wb = categories.index(WORD_BOUNDARY)
+        forbidden = []
+        for (prev_cat, next_cat) in MorphUsageProperties.zero_transitions:
+            forbidden.append((categories.index(prev_cat),
+                              categories.index(next_cat)))
 
         # Grid consisting of
         # the lowest accumulated cost ending in each possible state.
@@ -835,6 +893,9 @@ class CatmapModel(object):
                     best.append(ViterbiNode(extrazero, None))
                     continue
                 for prev_cat in range(len(categories)):
+                    if (prev_cat, next_cat) in forbidden:
+                        cost.append(extrazero)
+                        continue
                     # Cost of selecting prev_cat as previous state
                     # if now at next_cat
                     cost.append(grid[i][prev_cat].cost +
@@ -1103,7 +1164,9 @@ class CatmapModel(object):
     def get_cost(self):
         """Return current model encoding cost."""
         # FIXME: annotation coding cost for supervised
-        return self._catmap_coding.get_cost() + self._lexicon_coding.get_cost()
+        cost = self._catmap_coding.get_cost() + self._lexicon_coding.get_cost()
+        self.debug_costhistory.append(cost)
+        return cost
 
     def _update_counts(self, change_counts, multiplier):
         for cmorph in change_counts.emissions:
@@ -1240,10 +1303,9 @@ class ChangeCounts(object):
 
 
 class Transformation(object):
-    __slots__ = ['cost', 'rule', 'result', 'change_counts']
+    __slots__ = ['rule', 'result', 'change_counts']
 
     def __init__(self, rule, result):
-        self.cost = 0       # FIXME not used at the moment
         self.rule = rule
         if isinstance(result, CategorizedMorph):
             self.result = (result,)
@@ -1260,7 +1322,7 @@ class Transformation(object):
         out = []
         matches = 0
         while i + len(self.rule) <= len(word.analysis):
-            if self.rule.match(word.analysis, i):
+            if self.rule.match_at(word.analysis, i):
                 out.extend(self.result)
                 i += len(self.rule)
                 matches += 1
@@ -1272,21 +1334,8 @@ class Transformation(object):
             i += 1
 
         if matches > 0:
-            # Morph counts need to be updated before tagging,
-            # to get sensible emission probabilities for new morphs
-            for morph in model.detag_word(word.analysis):
-                model._modify_morph_count(morph, -word.count)
-            for morph in model.detag_word(out):
-                model._modify_morph_count(morph, word.count)
             # Only retag if the rule matched something
             out = model.viterbi_tag(out)
-
-            if corpus_index is None:
-                # Only revert morph count if not reapplying
-                for morph in model.detag_word(word.analysis):
-                    model._modify_morph_count(morph, word.count)
-                for morph in model.detag_word(out):
-                    model._modify_morph_count(morph, -word.count)
 
             self.change_counts.update(word.analysis, -word.count,
                                       corpus_index)
@@ -1313,10 +1362,13 @@ class TransformationRule(object):
     def __len__(self):
         return len(self._rule)
 
+    def __iter__(self):
+        return iter(self._rule)
+
     def __repr__(self):
         return u'{}({})'.format(self.__class__.__name__, self._rule)
 
-    def match(self, analysis, i):
+    def match_at(self, analysis, i):
         for (j, cmorph) in enumerate(analysis[i:(i + len(self))]):
             if self._rule[j].category != CategorizedMorph.no_category:
                 # Rule requires category at this point to match
@@ -1328,6 +1380,17 @@ class TransformationRule(object):
                     return False
         # No comparison failed
         return True
+
+    def num_matches(self, analysis):
+        i = 0
+        matches = 0
+        while i + len(self) <= len(analysis):
+            if self.match_at(analysis, i):
+                i += len(self)
+                matches += 1
+            else:
+                i += 1
+        return matches
 
 
 class Marginalizer(object):
@@ -1370,7 +1433,7 @@ class CatmapLexiconEncoding(morfessor.LexiconEncoding):
     """Extends LexiconEncoding to include the coding costs of the
     encoding cost of morph usage (context) features.
     """
-    # FIXME qq, should this be renamed CatmapParameterEncoding?
+    # FIXME, should this be renamed CatmapParameterEncoding?
     # i.e., is it P(lexicon) or P(theta) = P(lexicon) + P(grammar)?
 
     def __init__(self, morph_usage):
@@ -1484,6 +1547,9 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         self._transition_counts[pair] += diff_count
         self._cat_tagcount[prev_cat] += diff_count
 
+        if self._transition_counts[pair] > 0:
+            assert pair not in MorphUsageProperties.zero_transitions
+
         msg = 'subzero transition count for {}'.format(pair)
         assert self._transition_counts[pair] >= 0, msg
         assert self._cat_tagcount[prev_cat] >= 0
@@ -1587,7 +1653,7 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         """Override for the Encoding get_cost function.
 
         This is P( D_W | theta, Y ) + ???
-        """     # FIXME qq does catmap cost replace or add to baseline cost?
+        """
         if self.boundaries == 0:
             return 0.0
 
@@ -1715,6 +1781,7 @@ def _minargmin(sequence):
 
 def _zlog(x):
     """Logarithm which uses constant value for log(0) instead of -inf"""
+    assert x >= 0.0
     if x == 0:
         return LOGPROB_ZERO
     return -math.log(x)

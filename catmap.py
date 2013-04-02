@@ -363,11 +363,13 @@ class MorphUsageProperties(object):
 ### End of categorization-dependent code
 ########################################
 
+
 class InvalidCategoryError(Exception):
     def __init__(self, category):
         Exception.__init__(
             u'This model does not recognize the category {}'.format(
                 category))
+
 
 class CatmapIO(morfessor.MorfessorIO):
     """Extends data file formats to include category tags."""
@@ -644,7 +646,7 @@ class CatmapModel(object):
                 # All transforms in group must match the same words,
                 # we can use just the first transform
                 old_analysis = self.segmentations[target]
-                tmp_matches = (old_analysis.count * 
+                tmp_matches = (old_analysis.count *
                                transform_group[0].rule.num_matches(
                                     old_analysis.analysis))
                 if tmp_matches > 0:
@@ -676,7 +678,12 @@ class CatmapModel(object):
                 for morph in self.detag_word(transform.result):
                     self._modify_morph_count(morph, -num_matches)
 
-            if best[1] is not None:
+            if best[1] is None:
+                # Best option was to do nothing. Revert morph count.
+                for morph in self.detag_word(transform_group[0].rule):
+                    self._modify_morph_count(morph, num_matches)
+            else:
+                # A real change was the best option
                 best[1].reset_counts()
                 for target in best[2]:
                     for morph in self.detag_word(best[1].result):
@@ -690,12 +697,10 @@ class CatmapModel(object):
                     temporaries.difference_update(
                         self.detag_word(new_analysis.analysis))
                 self._update_counts(best[1].change_counts, 1)
-                if self.get_cost() > old_cost:
-                    print('increased cost {} {} {}'.format(best[1], best[1].change_counts.transitions,
-                        best[1].change_counts.emissions))
-                    assert False
             self._morph_usage.remove_temporaries(temporaries)
-            self.debug_costhistory_chosen.append((len(self.debug_costhistory), self.get_cost()))
+            self.debug_costhistory_chosen.append(       # FIXME debug
+                (len(self.debug_costhistory),
+                self.get_cost()))
 
     def _split_generator(self):
         # FIXME random shuffle or sort by length/frequency?

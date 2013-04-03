@@ -489,19 +489,36 @@ class CatmapModel(object):
         """
         self.convergence_of_analysis(
             self._calculate_transition_counts,
-            self.viterbi_tag_corpus,
-            max_iterations=1)    # FIXME debug max
+            self.viterbi_tag_corpus)
+        #    max_iterations=1)    # FIXME debug max
 
         self._calculate_emission_counts()
         self._reestimate_probabilities()
 
+        self.convergence_of_analysis(
+            self.train_iteration,
+            self.viterbi_tag_corpus)
+
+    def train_iteration(self):
+        """One iteration of training, which contains several epochs
+        of each operation in sequence.
+        """
         self.convergence_of_cost(
-            self._split_generator,
-            max_iterations=2)    # FIXME debug max
+            self._split_generator)
+        #    max_iterations=2)    # FIXME debug max
         self._reestimate_probabilities()
         self.convergence_of_cost(
-            self._join_generator,
-            max_iterations=2)    # FIXME debug max
+            self._join_generator)
+        #    max_iterations=2)    # FIXME debug max
+        self._reestimate_probabilities()
+        self.convergence_of_cost(
+            self._split_generator)
+        #    max_iterations=2)    # FIXME debug max
+        self._reestimate_probabilities()
+        self.convergence_of_cost(
+            self._resegment_generator,
+            max_iterations=5,
+            must_reestimate=True)
 
     def _reestimate_probabilities(self):
         """Re-estimates model parameters from a segmented, tagged corpus.
@@ -1063,7 +1080,7 @@ class CatmapModel(object):
             yield (count, self.viterbi_segment(word))
 
     def convergence_of_cost(self, transform_generator, max_cost_difference=0,
-                            max_iterations=15):
+                            max_iterations=15, must_reestimate=False):
         """Iterates the specified training function until the model cost
         no longer improves enough or until maximum number of iterations
         is reached.
@@ -1081,6 +1098,9 @@ class CatmapModel(object):
             max_cost_difference -- Stop iterating if cost reduction between
                                    iterations is below this limit.
             max_iterations -- Maximum number of iterations. Default 15.
+            must_reestimate -- Call _reestimate_probabilities after each
+                               epoch. Only necessary if tranformation leaves
+                               the model inconsistent. Default: False.
         """
 
         previous_cost = self.get_cost()
@@ -1090,6 +1110,11 @@ class CatmapModel(object):
 
             # perform the optimization
             self._transformation_epoch(transform_generator())
+
+            # only do full re-estimation of parameters if the
+            # tranformation leaves the model inconsistent
+            if must_reestimate:
+                self._reestimate_probabilities()
 
             cost = self.get_cost()
             cost_diff = cost - previous_cost

@@ -11,8 +11,10 @@ __author_email__ = "morfessor@cis.hut.fi"
 
 import collections
 import datetime
+import functools
 import logging
 import math
+import time
 
 import morfessor
 
@@ -52,6 +54,16 @@ ByCategory = collections.namedtuple('ByCategory',
 MorphContext = collections.namedtuple('MorphContext',
                                       ['count', 'left_perplexity',
                                        'right_perplexity'])
+
+# Represents an iteration when defining the structure of the
+# training sequence.
+# All values should be lists of callables (function references, partials)
+# epochs -- lists the functions that perform the training epochs
+# between -- cleanup/bookkeeping between epochs.
+#            All betweens are called between each epoch.
+# cleanup -- cleanup/bookkeeping between iterations.
+Iteration = collections.namedtuple('Iteration',
+                                    ['epochs', 'between', 'cleanup'])
 
 
 class MorphContextBuilder(object):
@@ -446,6 +458,58 @@ class CatmapModel(object):
         self.debug_costhistory = []
         self.debug_costhistory_chosen = []
 
+        # Counters for the iteration and epoch of training,
+        # to allow resuming training of a pickled model
+        self._iteration_number = 0
+        self._epoch_number = 0
+
+        # Default training sequence.
+        # This can be overridden before calling train
+        # (but it is not recommended to make changes later,
+        # which would lead to unspecified behaviour)
+        self.training_sequence = [
+            # Zero-th pre-iteration: let transitions converge
+            Iteration(
+                epochs=[self._calculate_transition_counts],
+                between=[self._calculate_emission_counts,
+                         self._reestimate_probabilities],
+                cleanup=[]),
+            # First iteration with large max_epochs
+            Iteration(
+                epochs=[functools.partial(self.convergence_of_cost,
+                                          self._split_generator,
+                                          max_iterations=5),
+                        functools.partial(self.convergence_of_cost,
+                                          self._join_generator,
+                                          max_iterations=5),
+                        functools.partial(self.convergence_of_cost,
+                                          self._split_generator,
+                                          max_iterations=5),
+                        functools.partial(self.convergence_of_cost,
+                                          self._resegment_generator,
+                                          max_iterations=5,
+                                          must_reestimate=True)],
+                between=[self._reestimate_probabilities],
+                cleanup=[]),
+            # All subsequent iterations with just one of each
+            Iteration(
+                epochs=[functools.partial(self.convergence_of_cost,
+                                          self._split_generator,
+                                          max_iterations=1),
+                        functools.partial(self.convergence_of_cost,
+                                          self._join_generator,
+                                          max_iterations=1),
+                        functools.partial(self.convergence_of_cost,
+                                          self._split_generator,
+                                          max_iterations=1),
+                        functools.partial(self.convergence_of_cost,
+                                          self._resegment_generator,
+                                          max_iterations=1,
+                                          must_reestimate=True)],
+                between=[self._reestimate_probabilities],
+                cleanup=[])
+        ]
+
     def load_baseline(self, segmentations):
         """Initialize the model using the segmentation produced by a morfessor
         baseline model.
@@ -477,37 +541,34 @@ class CatmapModel(object):
         The model must have been initialized by loading a baseline.
         """
         self.convergence_of_analysis(
-            self._calculate_transition_counts,
-            self.viterbi_tag_corpus)
-        #    max_iterations=1)    # FIXME debug max
-
-        self._calculate_emission_counts()
-        self._reestimate_probabilities()
-
-        self.convergence_of_analysis(
             self.train_iteration,
-            self.viterbi_tag_corpus)
+            max_difference_proportion=0.005)
 
     def train_iteration(self):
         """One iteration of training, which contains several epochs
         of each operation in sequence.
         """
-        self.convergence_of_cost(
-            self._split_generator)
-        #    max_iterations=2)    # FIXME debug max
-        self._reestimate_probabilities()
-        self.convergence_of_cost(
-            self._join_generator)
-        #    max_iterations=2)    # FIXME debug max
-        self._reestimate_probabilities()
-        self.convergence_of_cost(
-            self._split_generator)
-        #    max_iterations=2)    # FIXME debug max
-        self._reestimate_probabilities()
-        self.convergence_of_cost(
-            self._resegment_generator,
-            max_iterations=5,
-            must_reestimate=True)
+
+        if self._iteration_number < len(self.training_sequence):
+            current_iteration = self.training_sequence[self._iteration_number]
+        else:
+            current_iteration = self.training_sequence[-1]
+
+        for (i, current_epoch) in enumerate(current_iteration.epochs):
+            self._epoch_number = i
+            # Call the epoch function reference
+            current_epoch()
+            for between_func in current_iteration.between:
+                # Call cleanup/bookkeeping functions between epochs
+                between_func()
+        # Increment at this point, as cleanup_func typically contains
+        # the pickling, and we want to continue with the next iteration
+        # instead of redoing this one.
+        self._iteration_number += 1
+        # Call cleanup/bookkeeping functions at end of iteration
+        for cleanup_func in current_iteration.cleanup:
+            cleanup_func()
+        _logger.debug(time.strftime("%a, %d.%m.%Y %H:%M:%S"))
 
     def _reestimate_probabilities(self):
         """Re-estimates model parameters from a segmented, tagged corpus.
@@ -1068,7 +1129,7 @@ class CatmapModel(object):
                 word = (word,)
             yield (count, self.viterbi_segment(word))
 
-    def convergence_of_cost(self, transform_generator, max_cost_difference=0,
+    def convergence_of_cost(self, transform_generator, max_cost_difference=5.0,
                             max_iterations=15, must_reestimate=False):
         """Iterates the specified training function until the model cost
         no longer improves enough or until maximum number of iterations
@@ -1085,7 +1146,7 @@ class CatmapModel(object):
                                    which can be given as argument to
                                    _transformation_epoch
             max_cost_difference -- Stop iterating if cost reduction between
-                                   iterations is below this limit.
+                                   iterations is below this limit. Default 5.0
             max_iterations -- Maximum number of iterations. Default 15.
             must_reestimate -- Call _reestimate_probabilities after each
                                epoch. Only necessary if tranformation leaves
@@ -1094,7 +1155,8 @@ class CatmapModel(object):
 
         previous_cost = self.get_cost()
         for iteration in range(max_iterations):
-            _logger.info(u'Iteration {!r} number {}/{}.'.format(
+            _logger.info(u'Iteration {} sub-iteration {}: epoch {!r} number {}/{}.'.format(
+                self._iteration_number, self._epoch_number,
                 transform_generator.__name__, iteration + 1, max_iterations))
 
             # perform the optimization
@@ -1115,8 +1177,9 @@ class CatmapModel(object):
                 _logger.info(u'Cost difference: {}'.format(cost_diff))
             previous_cost = cost
 
-    def convergence_of_analysis(self, train_func, resegment_func,
-                                max_differences=0,
+    def convergence_of_analysis(self, train_func,
+                                resegment_func=None,
+                                max_difference_proportion=0,
                                 max_cost_difference=-10000,
                                 max_iterations=15):
         """Iterates the specified training function until the segmentations
@@ -1142,18 +1205,23 @@ class CatmapModel(object):
             resegment_func -- A method of CatmapModel that resegments or
                               retags the segmentations, to produce the
                               results to compare. Should return the number
-                              of changed words.
-            max_differences -- Maximum number of words with changed
-                               segmentation or category tags in the final
-                               iteration. Default 0.
+                              of changed words. Default: viterbi_tag_corpus
+            max_difference_proportion -- Maximum proportion of words with
+                                         changed segmentation or category
+                                         tags in the final iteration.
+                                         Default 0.
             max_cost_difference -- Stop iterating if cost reduction between
                                    iterations is below this limit.
             max_iterations -- Maximum number of iterations. Default 15.
         """
 
+        if resegment_func is None:
+            resegment_func = self.viterbi_tag_corpus
+
         previous_cost = self.get_cost()
         for iteration in range(max_iterations):
-            _logger.info(u'Iteration {!r} number {}/{}.'.format(
+            _logger.info(u'Iteration {}/{}: {!r} number {}/{}.'.format(
+                self._iteration_number, self._epoch_number,
                 train_func.__name__, iteration + 1, max_iterations))
 
             # perform the optimization
@@ -1169,7 +1237,8 @@ class CatmapModel(object):
             # perform the reanalysis
             differences = resegment_func()
 
-            if differences <= max_differences:
+            if differences <= (max_difference_proportion *
+                               len(self.segmentations)):
                 _logger.info(u'Converged, with ' +
                     u'{} differences in final iteration.'.format(differences))
                 break

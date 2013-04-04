@@ -446,29 +446,18 @@ class CatmapModel(object):
         self.debug_costhistory = []
         self.debug_costhistory_chosen = []
 
-    def load_baseline(self, segmentations, no_emissions=False):
+    def load_baseline(self, segmentations):
         """Initialize the model using the segmentation produced by a morfessor
         baseline model.
 
         Arguments:
             segmentations -- Segmentation of corpus using the baseline method.
                              Format: (count, (morph1, morph2, ...))
-            no_emissions -- If True, no retagging/reestimation
-                            will be performed.
-                            Transition probabilities will remain as unigram
-                            estimates, emission counts will be zero and
-                            category total counts will be zero.
-                            This means that the model is not completely
-                            initialized: you will need to set the
-                            emission counts and category totals.
-                            (Default: False)
         """
 
         self.add_corpus_data(segmentations)
         self._calculate_usage_features()
         self._unigram_transition_probs()
-        if no_emissions:
-            return
         self.viterbi_tag_corpus()
         self._calculate_transition_counts()
         self._calculate_emission_counts()
@@ -1388,7 +1377,7 @@ class ViterbiResegmentTransformation(object):
                                    self.rule, self.result)
 
     def apply(self, word, model, corpus_index=None):
-        if word.analysis != self.rule:
+        if self.rule.num_matches(word.analysis) == 0:
             return word
         self.change_counts.update(word.analysis, -word.count,
                                     corpus_index)

@@ -37,12 +37,32 @@ def _load_baseline():
 
 
 def _load_catmap(baseline_seg, no_emissions=False):
+        """
+        Arguments:
+            baseline_seg -- Segmentation of corpus using the baseline method.
+                             Format: (count, (morph1, morph2, ...))
+            no_emissions -- If True, no retagging/reestimation
+                            will be performed.
+                            Transition probabilities will remain as unigram
+                            estimates, emission counts will be zero and
+                            category total counts will be zero.
+                            This means that the model is not completely
+                            initialized: you will need to set the
+                            emission counts and category totals.
+                            (Default: False)
+        """
+
         m_usage = catmap.MorphUsageProperties(ppl_treshold=10, ppl_slope=1,
                                               length_treshold=3,
                                               length_slope=2,
                                               use_word_tokens=False)
         model = catmap.CatmapModel(m_usage)
-        model.load_baseline(baseline_seg, no_emissions)
+        if no_emissions:
+            model.add_corpus_data(baseline_seg)
+            model._calculate_usage_features()
+            model._unigram_transition_probs()
+        else:
+            model.load_baseline(baseline_seg)
         return model
 
 

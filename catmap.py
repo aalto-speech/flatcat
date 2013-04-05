@@ -414,17 +414,15 @@ class CatmapModel(object):
 
     word_boundary = WORD_BOUNDARY
 
-    def __init__(self, morph_usage, transition_cutoff=0.00000000001):
+    def __init__(self, morph_usage):
         """Initialize a new model instance.
 
         Arguments:
             morph_usage -- A MorphUsageProperties object describing how
                            the usage of a morph affects the category.
-            transition_cutoff -- FIXME
         """
 
         self._morph_usage = morph_usage
-        self._transition_cutoff = float(transition_cutoff)
 
         # The analyzed (segmented and tagged) corpus
         self.segmentations = []
@@ -801,7 +799,7 @@ class CatmapModel(object):
         Use with _transformation_epoch
         """
         # FIXME random shuffle or sort by length/frequency?
-        epoch_morphs = tuple(self._morph_usage.seen_morphs())
+        epoch_morphs = sorted(self._morph_usage.seen_morphs(), key=len)
         for morph in epoch_morphs:
             if len(morph) == 1:
                 continue
@@ -1834,7 +1832,8 @@ class Sparse(dict):
         return dict.__getitem__(self, key)
 
     def __setitem__(self, key, value):
-        if value == self._default:
+        # attribute check is necessary for unpickling
+        if '_default' in self and value == self._default:
             if key in self:
                 del self[key]
         else:

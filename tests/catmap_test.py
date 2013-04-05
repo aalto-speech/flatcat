@@ -375,11 +375,11 @@ class TestModelConsistency(unittest.TestCase):
 
         revert_func()
         new_cost = self.model.get_cost()
-
-        msg = (u'_apply_revert with {} and {} '.format(apply_func.__name__,
-                    revert_func.__name__) +
-               u'did not return to same cost ' +
-               u'old: {}, new: {} '.format(old_cost, new_cost))
+    
+        msg = (u'_apply_revert with {} and {} did not return to same cost. ' +
+               u'old: {}, new: {}')
+        msg = msg.format(apply_func.__name__, revert_func.__name__,
+                         old_cost, new_cost)
         self.assertAlmostEqual(old_cost, new_cost, places=4, msg=msg)
 
         # The model should have returned to initial state
@@ -440,7 +440,7 @@ class TestModelConsistency(unittest.TestCase):
 
     def store_state(self):
         state_exact = {
-            'seen_morphs': tuple(self.model._morph_usage.seen_morphs()),
+            'seen_morphs': sorted(self.model._morph_usage.seen_morphs()),
             'contexts': dict(self.model._morph_usage._contexts),
             'lexicon_tokens': int(self.model._lexicon_coding.tokens),
             'segmentations': tuple(self.model.segmentations),

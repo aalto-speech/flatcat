@@ -7,7 +7,7 @@ __all__ = ['MorfessorException', 'MorfessorIO', 'BaselineModel',
            'AnnotationsModelUpdate', 'Encoding', 'CorpusEncoding',
            'AnnotatedCorpusEncoding', 'LexiconEncoding']
 
-__version__ = '2.0.0alpha1'
+__version__ = '2.0.0alpha3'
 __author__ = 'Sami Virpioja, Peter Smit'
 __author_email__ = "morfessor@cis.hut.fi"
 
@@ -15,6 +15,7 @@ import codecs
 import collections
 import datetime
 import gzip
+import bz2
 import io
 import locale
 import logging
@@ -141,7 +142,7 @@ class MorfessorIO:
 
     def __init__(self, encoding=None, construction_separator=' + ',
                  comment_start='#', compound_separator='\s+',
-                 atom_separator=None):
+                 atom_separator=None, lowercase=False):
         self.encoding = encoding
         self.construction_separator = construction_separator
         self.comment_start = comment_start
@@ -149,6 +150,7 @@ class MorfessorIO:
         self.atom_separator = atom_separator
         if atom_separator is not None:
             self._atom_sep_re = re.compile(atom_separator, re.UNICODE)
+        self.lowercase = lowercase
 
     def read_segmentation_file(self, file_name, **kwargs):
         """Read segmentation file.
@@ -192,6 +194,16 @@ class MorfessorIO:
         """
         for file_name in file_names:
             for item in self.read_corpus_file(file_name):
+                yield item
+
+    def read_corpus_list_files(self, file_names):
+        """Read one or more corpus list files.
+
+        Yield for each compound found (count, compound, compound_atoms).
+
+        """
+        for file_name in file_names:
+            for item in self.read_corpus_list_file(file_name):
                 yield item
 
     def read_corpus_file(self, file_name):
@@ -294,6 +306,8 @@ class MorfessorIO:
                 return file_obj
         elif file_name.endswith('.gz'):
             file_obj = gzip.open(file_name, 'wb')
+        elif file_name.endswith('.bz2'):
+            file_obj = bz2.BZ2File(file_name, 'wb')
         else:
             file_obj = open(file_name, 'wb')
         if self.encoding is None:
@@ -335,6 +349,8 @@ class MorfessorIO:
         else:
             if file_name.endswith('.gz'):
                 file_obj = gzip.open(file_name, 'rb')
+            elif file_name.endswith('.bz2'):
+                file_obj = bz2.BZ2File(file_name, 'rb')
             else:
                 file_obj = open(file_name, 'rb')
 
@@ -347,7 +363,10 @@ class MorfessorIO:
             for line in inp:
                 line = line.rstrip()
                 if len(line) > 0 and not line.startswith(self.comment_start):
-                    yield line
+                    if self.lowercase:
+                        yield line.lower()
+                    else:
+                        yield line
         except KeyboardInterrupt:
             if file_name == '-':
                 _logger.info("Finished reading from stdin")
@@ -371,6 +390,8 @@ class MorfessorIO:
                 try:
                     if f.endswith('.gz'):
                         file_obj = gzip.open(f, 'rb')
+                    elif f.endswith('.bz2'):
+                        file_obj = bz2.BZ2File(f, 'rb')
                     else:
                         file_obj = open(f, 'rb')
 
@@ -404,7 +425,7 @@ class BaselineModel:
     penalty = -9999.9
 
     def __init__(self, forcesplit_list=None, corpusweight=1.0,
-                 use_skips=False):
+                 use_skips=False, nosplit_re=None):
         """Initialize a new model instance.
 
         Arguments:
@@ -437,6 +458,10 @@ class BaselineModel:
             self.forcesplit_list = []
         else:
             self.forcesplit_list = forcesplit_list
+        if nosplit_re is None:
+            self.nosplit_re = None
+        else:
+            self.nosplit_re = re.compile(nosplit_re, re.UNICODE)
 
     @property
     def tokens(self):
@@ -652,6 +677,8 @@ class BaselineModel:
         self._modify_construction_count(construction, -count)
         splitloc = []
         for i in range(1, len(construction)):
+            if self.nosplit_re and self.nosplit_re.match(construction[(i-1):(i+1)]):
+                    continue
             prefix = construction[:i]
             suffix = construction[i:]
             self._modify_construction_count(prefix, count)
@@ -794,16 +821,17 @@ class BaselineModel:
             if c > 0:
                 yield c, self.segment(w)
 
-    def load_data(self, corpus, freqthreshold=1, cfunc=lambda x: x,
+    def load_data(self, data, freqthreshold=1, count_modifier=None,
                   init_rand_split=None):
         """Load data to initialize the model for batch training.
 
         Arguments:
+            data -- iterator/generator of (count, compound, atoms) tuples
             corpus -- corpus instance
             freqthreshold -- discard compounds that occur less than
                              given times in the corpus (default 1)
-            cfunc -- function (int -> int) for modifying the counts
-                     (defaults to identity function)
+            count_modifier -- function for adjusting the counts of each
+                              compound
             init_rand_split -- If given, random split the word with
                                init_rand_split as the probability for each
                                split
@@ -812,10 +840,17 @@ class BaselineModel:
         the total cost.
 
         """
-        for count, _, atoms in corpus:
+        totalcount = collections.Counter()
+        for count, _, atoms in data:
+            totalcount[atoms] += count
+
+        for atoms, count in totalcount.items():
             if count < freqthreshold:
                 continue
-            self._add_compound(atoms, cfunc(count))
+            if count_modifier != None:
+                self._add_compound(atoms, count_modifier(count))
+            else:
+                self._add_compound(atoms, count)
 
             if init_rand_split is not None and init_rand_split > 0:
                 parts = self._random_split(atoms, init_rand_split)
@@ -865,7 +900,8 @@ class BaselineModel:
         return constructions
 
     def train_batch(self, algorithm='recursive', algorithm_params=(),
-                    devel_annotations=None, finish_threshold=0.005):
+                    devel_annotations=None, finish_threshold=0.005,
+                    max_epochs=None):
         """Train the model in batch fashion.
 
         The model is trained with the data already loaded into the model (by
@@ -935,12 +971,15 @@ class BaselineModel:
                 break
             if forced_epochs > 0:
                 forced_epochs -= 1
+            if max_epochs is not None and epochs >= max_epochs:
+                _logger.info("Max number of epochs reached, stop training")
+                break
         _logger.info("Done.")
         return epochs, newcost
 
     def train_online(self, data, count_modifier=None, epoch_interval=10000,
                      algorithm='recursive', algorithm_params=(),
-                     init_rand_split=None):
+                     init_rand_split=None, max_epochs=None):
         """Train the model in online fashion.
 
         The model is trained with the data provided in the data argument.
@@ -1018,6 +1057,9 @@ class BaselineModel:
                 i += 1
 
             epochs += 1
+            if max_epochs is not None and epochs >= max_epochs:
+                _logger.info("Max number of epochs reached, stop training")
+                break
 
         self._epoch_update(epochs)
         newcost = self.get_cost()
@@ -1052,6 +1094,10 @@ class BaselineModel:
             # Note that we can come from any node in history.
             bestpath = None
             bestcost = None
+            if self.nosplit_re and t < clen and \
+                    self.nosplit_re.match(compound[(t-1):(t+1)]):
+                grid.append((clen*badlikelihood, t-1))
+                continue
             for pt in range(max(0, t - maxlen), t):
                 if grid[pt][0] is None:
                     continue
@@ -1087,6 +1133,10 @@ class BaselineModel:
                                  / self._corpus_coding.weight)
                 elif len(construction) == 1:
                     cost += badlikelihood
+                elif self.nosplit_re:
+                    # Some splits are forbidden, so longer unknown
+                    # constructions have to be allowed
+                    cost += len(construction) * badlikelihood
                 else:
                     continue
                 if bestcost is None or cost < bestcost:
@@ -1130,11 +1180,11 @@ class AnnotationsModelUpdate:
 
         if d != 0:
             if d > 0:
-                self.model.corpus_coding.weight *= 1 + 2.0 / epochs
+                self.model._corpus_coding.weight *= 1 + 2.0 / epochs
             else:
-                self.model.corpus_coding.weight *= 1.0 / (1 + 2.0 / epochs)
+                self.model._corpus_coding.weight *= 1.0 / (1 + 2.0 / epochs)
             _logger.info("Corpus weight set to %s" %
-                         self.model.corpus_coding.weight)
+                         self.model._corpus_coding.weight)
             return True
         return False
 
@@ -1245,9 +1295,9 @@ class Encoding(object):
         return n * logn - n + 0.5 * (logn + cls._log2pi)
 
     def frequency_distribution_cost(self):
-        """Calculate -log[(M - 1)! (N - M)! / (N - 1)!]
+        """Calculate -log[(u - 1)! (v - u)! / (v - 1)!]
 
-        M is the number of tokens+boundaries and N the number of types
+        v is the number of tokens+boundaries and u the number of types
 
         """
         if self.types < 2:
@@ -1275,11 +1325,11 @@ class Encoding(object):
             return 0.0
 
         n = self.tokens + self.boundaries
-        return  ((n * math.log(n)
-                  - self.boundaries * math.log(self.boundaries)
-                  - self.logtokensum
-                  + self.permutations_cost()) * self.weight
-                 + self.frequency_distribution_cost())
+        return ((n * math.log(n)
+                 - self.boundaries * math.log(self.boundaries)
+                 - self.logtokensum
+                 + self.permutations_cost()) * self.weight
+                + self.frequency_distribution_cost())
 
 
 class CorpusEncoding(Encoding):
@@ -1322,10 +1372,10 @@ class CorpusEncoding(Encoding):
             return 0.0
 
         n = self.tokens + self.boundaries
-        return  ((n * math.log(n)
-                  - self.boundaries * math.log(self.boundaries)
-                  - self.logtokensum) * self.weight
-                 + self.frequency_distribution_cost())
+        return ((n * math.log(n)
+                 - self.boundaries * math.log(self.boundaries)
+                 - self.logtokensum) * self.weight
+                + self.frequency_distribution_cost())
 
 
 class AnnotatedCorpusEncoding(Encoding):
@@ -1410,10 +1460,10 @@ class AnnotatedCorpusEncoding(Encoding):
         if self.boundaries == 0:
             return 0.0
         n = self.tokens + self.boundaries
-        return  ((n * math.log(self.corpus_coding.tokens +
-                               self.corpus_coding.boundaries)
-                  - self.boundaries * math.log(self.corpus_coding.boundaries)
-                  - self.logtokensum) * self.weight)
+        return ((n * math.log(self.corpus_coding.tokens +
+                              self.corpus_coding.boundaries)
+                 - self.boundaries * math.log(self.corpus_coding.boundaries)
+                 - self.logtokensum) * self.weight)
 
 
 class LexiconEncoding(Encoding):
@@ -1458,7 +1508,7 @@ class LexiconEncoding(Encoding):
         """Return an approximate codelength for new construction."""
         l = len(construction) + 1
         cost = l * math.log(self.tokens + l)
-        cost -= math.log(self.boundaries)
+        cost -= math.log(self.boundaries + 1)
         for atom in construction:
             if atom in self.atoms:
                 c = self.atoms[atom]
@@ -1468,7 +1518,7 @@ class LexiconEncoding(Encoding):
         return cost
 
 
-def main(argv):
+def get_default_argparser():
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -1530,20 +1580,20 @@ Interactive use (read corpus from user):
                  "file (Morfessor 1.0 format)")
     add_arg('-t', '--traindata', dest='trainfiles', action='append',
             default=[], metavar='<file>',
-            help="input corpus file(s) for training (text or gzipped text; "
+            help="input corpus file(s) for training (text or bz2/gzipped text; "
                  "use '-' for standard input; add several times in order to "
                  "append multiple files)")
     add_arg('-T', '--testdata', dest='testfiles', action='append',
             default=[], metavar='<file>',
-            help="input corpus file(s) to analyze (text or gzipped text;  "
+            help="input corpus file(s) to analyze (text or bz2/gzipped text;  "
                  "use '-' for standard input; add several times in order to "
                  "append multiple files)")
-    add_arg('-o', '--output', dest="outfile", default='-', metavar='<file>',
-            help="output file for test data results (for standard output, "
-                 "use '-'; default '%(default)s')")
 
     # Options for output data files
     add_arg = parser.add_argument_group('output data files').add_argument
+    add_arg('-o', '--output', dest="outfile", default='-', metavar='<file>',
+            help="output file for test data results (for standard output, "
+                 "use '-'; default '%(default)s')")
     add_arg('-s', '--save', dest="savefile", default=None, metavar='<file>',
             help="save final model to file (pickled model object)")
     add_arg('-S', '--save-segmentation', dest="savesegfile", default=None,
@@ -1557,7 +1607,10 @@ Interactive use (read corpus from user):
         'data format options').add_argument
     add_arg('-e', '--encoding', dest='encoding', metavar='<encoding>',
             help="encoding of input and output files (if none is given, "
-            "both the local encoding and UTF-8 are tried)")
+                 "both the local encoding and UTF-8 are tried)")
+    add_arg('--lowercase', dest="lowercase", default=False,
+            action='store_true',
+            help="lowercase input data")
     add_arg('--traindata-list', dest="list", default=False,
             action='store_true',
             help="input file(s) for batch training are lists "
@@ -1569,9 +1622,22 @@ Interactive use (read corpus from user):
             metavar='<regexp>',
             help="compound separator regexp (default '%(default)s')")
     add_arg('--analysis-separator', dest='analysisseparator', type=str,
-            default=',', metavar='<regexp>',
+            default=',', metavar='<str>',
             help="separator for different analyses in an annotation file. Use"
                  "  NONE for only allowing one analysis per line")
+    add_arg('--output-format', dest='outputformat', type=str,
+            default=r'{analysis}\n', metavar='<format>',
+            help="format string for --output file (default: '%(default)s'). "
+            "Valid keywords are: "
+            "{analysis} = constructions of the compound, "
+            "{compound} = compound string, "
+            "{count} = count of the compound (currently always 1), and "
+            "{logprob} = log-probability of the compound. Valid escape "
+            "sequences are '\\n' (newline) and '\\t' (tabular)")
+    add_arg('--output-format-separator', dest='outputformatseparator',
+            type=str, default=' ', metavar='<str>',
+            help="construction separator for analysis in --output file "
+            "(default: '%(default)s')")
 
     # Options for model training
     add_arg = parser.add_argument_group(
@@ -1581,7 +1647,7 @@ Interactive use (read corpus from user):
             choices=['none', 'batch', 'init', 'init+batch', 'online',
                      'online+batch'],
             help="training mode ('none', 'init', 'batch', 'init+batch', "
-            "'online', or 'online+batch'; default '%(default)s')")
+                 "'online', or 'online+batch'; default '%(default)s')")
     add_arg('-a', '--algorithm', dest="algorithm", default='recursive',
             metavar='<algorithm>', choices=['recursive', 'viterbi'],
             help="algorithm type ('recursive', 'viterbi'; default "
@@ -1593,6 +1659,12 @@ Interactive use (read corpus from user):
     add_arg('-f', '--forcesplit', dest="forcesplit", type=list, default=['-'],
             metavar='<list>',
             help="force split on given atoms (default %(default)s)")
+    add_arg('-F', '--finish-threshold', dest='finish_threshold', type=float,
+            default=0.005, metavar='<float>',
+            help="Stopping threshold. Training stops when "
+                 "the improvement of the last iteration is"
+                 "smaller then finish_threshold * #boundaries; "
+                 "(default '%(default)s')")
     add_arg('-r', '--randseed', dest="randseed", default=None,
             metavar='<seed>',
             help="seed for random number generator")
@@ -1607,17 +1679,24 @@ Interactive use (read corpus from user):
             metavar='<int>',
             help="compound frequency threshold for batch training (default "
                  "%(default)s)")
+    add_arg('--max-epochs', dest='maxepochs', type=int, default=None,
+            metavar='<int>',
+            help='hard maximum of epochs in training')
+    add_arg('--nosplit-re', dest="nosplit", type=str, default=None,
+            metavar='<regexp>',
+            help="if the expression matches the two surrounding characters, "
+                 "do not allow splitting (default %(default)s)")
     add_arg('--online-epochint', dest="epochinterval", type=int,
             default=10000, metavar='<int>',
             help="epoch interval for online training (default %(default)s)")
     add_arg('--viterbi-smoothing', dest="viterbismooth", default=0,
             type=float, metavar='<float>',
             help="additive smoothing parameter for Viterbi training "
-            "and segmentation (default %(default)s)")
+                 "and segmentation (default %(default)s)")
     add_arg('--viterbi-maxlen', dest="viterbimaxlen", default=30,
             type=int, metavar='<int>',
             help="maximum construction length in Viterbi training "
-            "and segmentation (default %(default)s)")
+                 "and segmentation (default %(default)s)")
 
     # Options for semi-supervised model training
     add_arg = parser.add_argument_group(
@@ -1631,7 +1710,7 @@ Interactive use (read corpus from user):
     add_arg('-w', '--corpusweight', dest="corpusweight", type=float,
             default=1.0, metavar='<float>',
             help="corpus weight parameter (default %(default)s); "
-            "sets the initial value if --develset is used")
+                 "sets the initial value if --develset is used")
     add_arg('-W', '--annotationweight', dest="annotationweight",
             type=float, default=None, metavar='<float>',
             help="corpus weight parameter for annotated data (if unset, the "
@@ -1646,7 +1725,7 @@ Interactive use (read corpus from user):
                  "error stream or log file (default %(default)s)")
     add_arg('--logfile', dest='log_file', metavar='<file>',
             help="write log messages to file in addition to standard "
-            "error stream")
+                 "error stream")
     add_arg('--progressbar', dest='progress', default=False,
             action='store_true',
             help="Force the progressbar to be displayed (possibly lowers the "
@@ -1659,8 +1738,10 @@ Interactive use (read corpus from user):
             version='%(prog)s ' + __version__,
             help="show version number and exit")
 
-    args = parser.parse_args(argv[1:])
+    return parser
 
+
+def main(args):
     if args.verbose >= 2:
         loglevel = logging.DEBUG
     elif args.verbose >= 1:
@@ -1705,14 +1786,16 @@ Interactive use (read corpus from user):
     if (args.loadfile is None and
             args.loadsegfile is None and
             len(args.trainfiles) == 0):
-        parser.error("either model file or training data should be defined")
+        raise ArgumentException("either model file or training data should "
+                                "be defined")
 
     if args.randseed is not None:
         random.seed(args.randseed)
 
     io = MorfessorIO(encoding=args.encoding,
                      compound_separator=args.cseparator,
-                     atom_separator=args.separator)
+                     atom_separator=args.separator,
+                     lowercase=args.lowercase)
 
     # Load exisiting model or create a new one
     if args.loadfile is not None:
@@ -1721,7 +1804,8 @@ Interactive use (read corpus from user):
     else:
         model = BaselineModel(forcesplit_list=args.forcesplit,
                               corpusweight=args.corpusweight,
-                              use_skips=args.skips)
+                              use_skips=args.skips,
+                              nosplit_re=args.nosplit)
 
     if args.loadsegfile is not None:
         model.load_segmentations(io.read_segmentation_file(args.loadsegfile))
@@ -1742,13 +1826,13 @@ Interactive use (read corpus from user):
 
     # Set frequency dampening function
     if args.dampening == 'none':
-        dampfunc = lambda x: x
+        dampfunc = None
     elif args.dampening == 'log':
         dampfunc = lambda x: int(round(math.log(x + 1, 2)))
     elif args.dampening == 'ones':
         dampfunc = lambda x: 1
     else:
-        parser.error("unknown dampening type '%s'" % args.dampening)
+        raise ArgumentException("unknown dampening type '%s'" % args.dampening)
 
     # Set algorithm parameters
     if args.algorithm == 'viterbi':
@@ -1769,7 +1853,8 @@ Interactive use (read corpus from user):
                                 "files. Use 'init+batch' or 'online' to "
                                 "add new compounds.")
             ts = time.time()
-            e, c = model.train_batch(args.algorithm, algparams, develannots)
+            e, c = model.train_batch(args.algorithm, algparams, develannots,
+                                     args.finish_threshold, args.maxepochs)
             te = time.time()
             _logger.info("Epochs: %s" % e)
             _logger.info("Final cost: %s" % c)
@@ -1777,38 +1862,39 @@ Interactive use (read corpus from user):
     elif len(args.trainfiles) > 0:
         ts = time.time()
         if args.trainmode == 'init':
-            for f in args.trainfiles:
-                if args.list:
-                    data = io.read_corpus_list_file(f)
-                else:
-                    data = io.read_corpus_file(f)
+            if args.list:
+                data = io.read_corpus_list_files(args.trainfiles)
+            else:
+                data = io.read_corpus_files(args.trainfiles)
             c = model.load_data(data, args.freqthreshold, dampfunc,
                                 args.splitprob)
         elif args.trainmode == 'init+batch':
-            for f in args.trainfiles:
-                if args.list:
-                    data = io.read_corpus_list_file(f)
-                else:
-                    data = io.read_corpus_file(f)
-                model.load_data(data, args.freqthreshold, dampfunc,
+            if args.list:
+                data = io.read_corpus_list_files(args.trainfiles)
+            else:
+                data = io.read_corpus_files(args.trainfiles)
+            c = model.load_data(data, args.freqthreshold, dampfunc,
                                 args.splitprob)
-            e, c = model.train_batch(args.algorithm, algparams, develannots)
+            e, c = model.train_batch(args.algorithm, algparams, develannots,
+                                     args.finish_threshold, args.maxepochs)
             _logger.info("Epochs: %s" % e)
         elif args.trainmode == 'online':
             data = io.read_corpus_files(args.trainfiles)
             e, c = model.train_online(data, dampfunc, args.epochinterval,
                                       args.algorithm, algparams,
-                                      args.splitprob)
+                                      args.splitprob, args.maxepochs)
             _logger.info("Epochs: %s" % e)
         elif args.trainmode == 'online+batch':
             data = io.read_corpus_files(args.trainfiles)
             e, c = model.train_online(data, dampfunc, args.epochinterval,
                                       args.algorithm, algparams,
-                                      args.splitprob)
-            e, c = model.train_batch(args.algorithm, algparams, develannots)
+                                      args.splitprob, args.maxepochs)
+            e, c = model.train_batch(args.algorithm, algparams, develannots,
+                                     args.finish_threshold, args.maxepochs - e)
             _logger.info("Epochs: %s" % e)
         else:
-            parser.error("unknown training mode '%s'" % args.trainmode)
+            raise ArgumentException("unknown training mode '%s'"
+                                    % args.trainmode)
         te = time.time()
         _logger.info("Final cost: %s" % c)
         _logger.info("Training time: %.3fs" % (te - ts))
@@ -1829,22 +1915,40 @@ Interactive use (read corpus from user):
     # Segment test data
     if len(args.testfiles) > 0:
         _logger.info("Segmenting test data...")
+        outformat = args.outputformat
+        csep = args.outputformatseparator
+        if not PY3:
+            outformat = unicode(outformat)
+            csep = unicode(csep)
+        outformat = outformat.replace(r"\n", "\n")
+        outformat = outformat.replace(r"\t", "\t")
         with io._open_text_file_write(args.outfile) as fobj:
             testdata = io.read_corpus_files(args.testfiles)
             i = 0
-            for _, _, compound in testdata:
+            for count, compound, atoms in testdata:
                 constructions, logp = model.viterbi_segment(
-                    compound, args.viterbismooth, args.viterbimaxlen)
-                fobj.write("%s\n" % ' '.join(constructions))
+                    atoms, args.viterbismooth, args.viterbimaxlen)
+                analysis = csep.join(constructions)
+                fobj.write(outformat.format(
+                           analysis=analysis, compound=compound,
+                           count=count, logprob=logp))
                 i += 1
                 if i % 10000 == 0:
                     sys.stderr.write(".")
             sys.stderr.write("\n")
         _logger.info("Done.")
 
+
+class ArgumentException(Exception):
+    pass
+
 if __name__ == "__main__":
+    parser = get_default_argparser()
     try:
-        main(sys.argv)
+        args = parser.parse_args(sys.argv[1:])
+        main(args)
+    except ArgumentException as e:
+        parser.error(e)
     except Exception as e:
-        _logger.error("Fatal Error %s %s" % (type(e), str(e)))
+        _logger.error("Fatal Error %s %s" % (type(e), e))
         raise

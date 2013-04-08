@@ -13,6 +13,7 @@ import collections
 import datetime
 import logging
 import math
+import sys
 import time
 
 import morfessor
@@ -21,6 +22,11 @@ _logger = logging.getLogger(__name__)
 _logger.level = logging.DEBUG   # FIXME development convenience
 
 LOGPROB_ZERO = 1000000
+
+# Progress bar for generators (length unknown):
+# Print a dot for every GENERATOR_DOT_FREQ:th dot.
+# Set to <= 0 to disable progress bar.
+GENERATOR_DOT_FREQ = 100
 
 
 class WordBoundary(object):
@@ -764,7 +770,7 @@ class CatmapModel(object):
         EpochNode = collections.namedtuple('EpochNode', ['cost',
                                                          'transform',
                                                          'targets'])
-        for experiment in transformation_generator:
+        for experiment in _generator_progress(transformation_generator):
             (transform_group, targets, temporaries) = experiment
             if len(transform_group) == 0:
                 continue
@@ -1931,3 +1937,25 @@ def _log_catprobs(probs):
     probabilities into one with log probabilities"""
 
     return ByCategory(*[_zlog(x) for x in probs])
+
+
+def _generator_progress(generator):
+    """Prints a progress bar for visualizing flow through a generator.
+    The length of a generator is not known in advance, so the bar has
+    no fixed length. GENERATOR_DOT_FREQ controls the frequency of dots.
+
+    This function wraps the argument generator, returning a new generator.
+    """
+
+    if GENERATOR_DOT_FREQ <= 0:
+        return generator
+
+    def _progress_wrapper(generator):
+        for (i, x) in enumerate(generator):
+            if i % GENERATOR_DOT_FREQ == 0:
+                sys.stderr.write('.')
+                sys.stderr.flush()
+            yield x
+        sys.stderr.write('\n')
+
+    return _progress_wrapper(generator)

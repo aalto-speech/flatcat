@@ -337,6 +337,7 @@ class TestModelConsistency(unittest.TestCase):
                     self.model, corpus_index=i)
                 self.model.segmentations[i] = new_analysis
             self.model._update_counts(transformation.change_counts, 1)
+            self.model._morph_usage.remove_zeros()
 
         for a, b in tmp:
             forward = simple_transformation(a, b)
@@ -521,7 +522,17 @@ def _exp_catprobs(probs):
 
 
 def _remove_zeros(d):
-    return {key: d[key] for key in d if d[key] != 0}
+    out = dict()
+    for key in d:
+        if d[key] == 0:
+            continue
+        try:
+            if sum(abs(x) for x in d[key]) == 0:
+                continue
+        except TypeError:
+            pass
+        out[key] = d[key]
+    return out
 
 if __name__ == '__main__':
     unittest.main()

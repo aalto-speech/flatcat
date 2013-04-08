@@ -300,12 +300,25 @@ class MorphUsageProperties(object):
             assert self._contexts[morph].count == 0, msg
             del self._contexts[morph]
 
+    def remove_zeros(self):
+        """Remove context information for all morphs contexts with zero
+        count. This can save a bit more memory than just removing estimated
+        temporary contexts. Estimated context will be used for the removed
+        morphs for the rest of the iteration."""
+        remove_list = []
+        for morph in self._contexts.keys():
+            if self._contexts[morph].count == 0:
+                remove_list.append(morph)
+        for morph in remove_list:
+            del self._contexts[morph]
+
     # The methods in this class below this line are helpers that will
     # probably not need to be modified if the categorization scheme changes
 
     def seen_morphs(self):
         """All morphs that have defined contexts."""
-        return self._contexts.keys()
+        return [morph for morph in self._contexts.keys()
+                if self._contexts[morph].count > 0]
 
     def __contains__(self, morph):
         return morph in self._contexts
@@ -354,8 +367,18 @@ class MorphUsageProperties(object):
 class InvalidCategoryError(Exception):
     def __init__(self, category):
         Exception.__init__(
+            self,
             u'This model does not recognize the category {}'.format(
                 category))
+
+
+class InvalidOperationError(Exception):
+    def __init__(self, operation, function_name):
+        Exception.__init__(
+            self,
+            (u'This model does not have a method ' +
+             u'{}, and therefore cannot perform operation "{}"'.format(
+                function_name, operation)))
 
 
 class CatmapIO(morfessor.MorfessorIO):
@@ -457,12 +480,14 @@ class CatmapModel(object):
         self._iteration_number = 0
         self._operation_number = 0
 
-        # The sequence of training operations. Must be transform generators
-        # suitable for passing to convergence_of_cost
-        self.training_operations = [self._split_generator,
-                                    self._join_generator,
-                                    self._split_generator,
-                                    self._resegment_generator]
+        # The sequence of training operations.
+        # Valid training operations are strings for which CatmapModel
+        # has a function named _op_X_generator, where X is the string
+        # which returns a transform generator suitable for
+        # passing to convergence_of_cost.
+        # This is done using strings indstead of bound methods,
+        # to enable pickling of the model object.
+        self.training_operations = ['split', 'join', 'split', 'resegment']
 
         # Callbacks for cleanup/bookkeeping after each operation.
         # Should take exactly one argument: the model.
@@ -545,7 +570,14 @@ class CatmapModel(object):
         of each operation in sequence.
         """
         while self._operation_number < len(self.training_operations):
-            operation = self.training_operations[self._operation_number]
+            operation_name = u'_op_{}_generator'.format(
+                self.training_operations[self._operation_number])
+            try:
+                operation = self.__getattribute__(operation_name)
+            except AttributeError:
+                raise InvalidOperationError(
+                    self.training_operations[self._operation_number],
+                    operation_name)
             max_cost_difference = self.training_params('max_cost_difference')
             max_iterations = self.training_params('max_iterations')
             must_reestimate = self.training_params('must_reestimate')
@@ -794,7 +826,7 @@ class CatmapModel(object):
                 (len(self.debug_costhistory),
                 self.get_cost()))
 
-    def _split_generator(self):
+    def _op_split_generator(self):
         """Generates splits of seen morphs into two submorphs.
         Use with _transformation_epoch
         """
@@ -827,7 +859,7 @@ class CatmapModel(object):
                                     CategorizedMorph(suffix, None))))
             yield (transforms, targets, temporaries)
 
-    def _join_generator(self):
+    def _op_join_generator(self):
         """Generates joins of consecutive morphs into a supermorph.
         Currently does not treat different contexts separately (FIXME).
         Use with _transformation_epoch
@@ -857,7 +889,7 @@ class CatmapModel(object):
             if len(targets) > 0:
                 yield([transform], targets, temporaries)
 
-    def _resegment_generator(self):
+    def _op_resegment_generator(self):
         for (i, word) in enumerate(self.segmentations):
             yield ([ViterbiResegmentTransformation(word, self)],
                    set([i]), set())

@@ -9,6 +9,7 @@ __version__ = '2.0.0prealpha1'
 __author__ = 'Stig-Arne Gronroos'
 __author_email__ = "morfessor@cis.hut.fi"
 
+import argparse
 import collections
 import datetime
 import logging
@@ -495,6 +496,11 @@ class CatmapModel(object):
         # to enable pickling of the model object.
         self.training_operations = ['split', 'join', 'split', 'resegment']
 
+        # Training sequence parameters.
+        self._max_cost_difference = 0.0
+        self._max_epochs_first = 1
+        self._max_epochs = 1
+
         # Callbacks for cleanup/bookkeeping after each operation.
         # Should take exactly one argument: the model.
         self.operation_callbacks = []
@@ -518,29 +524,6 @@ class CatmapModel(object):
         self._calculate_transition_counts()
         self._calculate_emission_counts()
 
-    def training_params(self, param_name):
-        """Parameters for the training operators
-        (calls to convergence_of_cost).
-        Can depend on the _iteration_number and _operation_number.
-        Customize this if you need more finegrained control of the training.
-        """
-
-        # FIXME: hard-coded magic numbers, make these into command line flags
-        if param_name == 'max_cost_difference':
-            return 5.0
-        if param_name == 'max_iterations':
-            if self._iteration_number == 1:
-                # Perform more epochs in the first iteration.
-                # 0 is pre-iteration, 1 is the first actual iteration.
-                return 5
-            # After that do just one of each operation.
-            return 1
-        # FIXME This is a bit of ugliness I hope to get rid of
-        if param_name == 'must_reestimate':
-            if self._operation_number == len(self.training_operations) - 1:
-                return True
-            return False
-
     def add_corpus_data(self, segmentations):
         """Adds the given segmentations (with counts) to the corpus data"""
         i = len(self.segmentations)
@@ -551,15 +534,21 @@ class CatmapModel(object):
                 self.morph_backlinks[morph].add(i)
             i += 1
 
-    def train(self):
+    def train(self, max_cost_difference=5.0, max_difference_proportion=0.005,
+              max_iterations=15, max_epochs_first=5, max_epochs=1):
         """Perform Cat-MAP training on the model.
         The model must have been initialized by loading a baseline.
         """
+        self._max_cost_difference = max_cost_difference
+        self._max_epochs_first = max_epochs_first
+        self._max_epochs = max_epochs
+
         if self._iteration_number == 0:
             # Zero:th pre-iteration: let transitions converge
             self.convergence_of_analysis(
                 self._calculate_transition_counts,
-                self.viterbi_tag_corpus)
+                self.viterbi_tag_corpus,
+                max_difference_proportion=max_difference_proportion)
 
             self._calculate_emission_counts()
             self._reestimate_probabilities()
@@ -569,7 +558,8 @@ class CatmapModel(object):
         self.convergence_of_analysis(
             self.train_iteration,
             self.viterbi_tag_corpus,
-            max_difference_proportion=0.005)    # FIXME magic number
+            max_iterations=max_iterations,
+            max_difference_proportion=max_difference_proportion)
 
     def train_iteration(self):
         """One iteration of training, which contains several epochs
@@ -584,13 +574,13 @@ class CatmapModel(object):
                 raise InvalidOperationError(
                     self.training_operations[self._operation_number],
                     operation_name)
-            max_cost_difference = self.training_params('max_cost_difference')
-            max_iterations = self.training_params('max_iterations')
-            must_reestimate = self.training_params('must_reestimate')
+            max_cost_difference = self._training_params('max_cost_difference')
+            max_epochs = self._training_params('max_epochs')
+            must_reestimate = self._training_params('must_reestimate')
             self.convergence_of_cost(
                 operation,
                 max_cost_difference=max_cost_difference,
-                max_iterations=max_iterations,
+                max_iterations=max_epochs,
                 must_reestimate=must_reestimate)
             self._reestimate_probabilities()
             self._operation_number += 1
@@ -598,6 +588,28 @@ class CatmapModel(object):
                 callback(self)
         self._operation_number = 0
         self._iteration_number += 1
+
+    def _training_params(self, param_name):
+        """Parameters for the training operators
+        (calls to convergence_of_cost).
+        Can depend on the _iteration_number and _operation_number.
+        Customize this if you need more finegrained control of the training.
+        """
+
+        if param_name == 'max_cost_difference':
+            return self._max_cost_difference
+        if param_name == 'max_epochs':
+            if self._iteration_number == 1:
+                # Perform more epochs in the first iteration.
+                # 0 is pre-iteration, 1 is the first actual iteration.
+                return self._max_epochs_first
+            # After that do just one of each operation.
+            return self._max_epochs
+        # FIXME This is a bit of ugliness I hope to get rid of
+        if param_name == 'must_reestimate':
+            if self._operation_number == len(self.training_operations) - 1:
+                return True
+            return False
 
     def _reestimate_probabilities(self):
         """Re-estimates model parameters from a segmented, tagged corpus.
@@ -1203,7 +1215,7 @@ class CatmapModel(object):
             cost_diff = cost - previous_cost
             if -cost_diff <= max_cost_difference:
                 _logger.info(u'Converged, with cost difference ' +
-                    u'{} in final iteration.'.format(cost_diff))
+                    u'{} in final epoch.'.format(cost_diff))
                 break
             else:
                 _logger.info(u'Cost difference: {}'.format(cost_diff))
@@ -1959,3 +1971,233 @@ def _generator_progress(generator):
         sys.stderr.write('\n')
 
     return _progress_wrapper(generator)
+
+
+def main(argv):
+    parser = argparse.ArgumentParser(
+        prog='catmap.py',
+        description="""
+Morfessor Categories-MAP {}
+
+Copyright (c) 2013, Stig-Arne Gronroos
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+1.  Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+2.  Redistributions in binary form must reproduce the above
+    copyright notice, this list of conditions and the following
+    disclaimer in the documentation and/or other materials provided
+    with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+Command-line arguments:
+""".format(__version__),
+        epilog="""
+Simple usage examples (training and testing):
+
+  %(prog)s FIXME
+  %(prog)s FIXME
+
+""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False)
+
+    # Options for input data files
+    add_arg = parser.add_argument_group('input data files').add_argument
+    add_arg('-l', '--load', dest="loadfile", default=None, metavar='<file>',
+            help="load existing model from file (pickled model object)")
+    add_arg('-L', '--load-segmentation', dest="loadsegfile", default=None,
+            metavar='<file>',
+            help='load existing model from segmentation ' +
+                 'file (Morfessor 1.0 format). ' +
+                 'Can be used together with --load, ' +
+                 'in which case the pickled model is extended with the ' +
+                 'loaded segmentation')
+    add_arg('-T', '--testdata', dest='testfiles', action='append',
+            default=[], metavar='<file>',
+            help="input corpus file(s) to analyze (text or gzipped text;  "
+                 "use '-' for standard input; add several times in order to "
+                 "append multiple files)")
+    add_arg('-o', '--output', dest="outfile", default='-', metavar='<file>',
+            help="output file for test data results (for standard output, "
+                 "use '-'; default '%(default)s')")
+
+    # Options for output data files
+    add_arg = parser.add_argument_group('output data files').add_argument
+    add_arg('-s', '--save', dest="savefile", default=None, metavar='<file>',
+            help="save final model to file (pickled model object)")
+    add_arg('-S', '--save-segmentation', dest="savesegfile", default=None,
+            metavar='<file>',
+            help="save model segmentations to file (Morfessor 1.0 format)")
+
+    # Options for data formats
+    add_arg = parser.add_argument_group(
+        'data format options').add_argument
+    add_arg('-e', '--encoding', dest='encoding', metavar='<encoding>',
+            help="encoding of input and output files (if none is given, "
+            "both the local encoding and UTF-8 are tried)")
+    add_arg('--atom-separator', dest="separator", type=str, default=None,
+            metavar='<regexp>',
+            help="atom separator regexp (default %(default)s)")
+    add_arg('--compound-separator', dest="cseparator", type=str, default='\s+',
+            metavar='<regexp>',
+            help="compound separator regexp (default '%(default)s')")
+    add_arg('--analysis-separator', dest='analysisseparator', type=str,
+            default=',', metavar='<regexp>',
+            help="separator for different analyses in an annotation file. Use"
+                 "  NONE for only allowing one analysis per line")
+    add_arg('--category-separator', dest='catseparator', type=str, default='/',
+            metavar='<regexp>',
+            help='separator for the category tag following a morph. ' +
+                 '(default %(default)s)')
+
+    # Options for training and segmentation
+    add_arg = parser.add_argument_group(
+        'training and segmentation options').add_argument
+    add_arg('--perplexity-treshold', dest='ppl_treshold', type=float,
+            default=100., metavar='<float>',
+            help='treshold value for sigmoid used to calculate ' +
+                 'probabilities from left and right perplexities. ' +
+                 '(default %(default)s)')
+    add_arg('--perplexity-slope', dest='ppl_slope', type=float, default=None,
+            metavar='<float>',
+            help='slope value for sigmoid used to calculate ' +
+                 'probabilities from left and right perplexities. ' +
+                 '(default 10 / perplexity-treshold)')
+    add_arg('--length-treshold', dest='length_treshold', type=float,
+            default=3., metavar='<float>',
+            help='treshold value for sigmoid used to calculate ' +
+                 'probabilities from length of morph. ' +
+                 '(default %(default)s)')
+    add_arg('--length-slope', dest='length_slope', type=float, default=2.,
+            metavar='<float>',
+            help='slope value for sigmoid used to calculate ' +
+                 'probabilities from length of morph. ' +
+                 '(default %(default)s)')
+    add_arg('--type-perplexity', dest='type_ppl', default=False,
+            action='store_true',
+            help='use word type -based perplexity instead of the default ' +
+                 'word token -based perplexity.')
+    add_arg('--min-perplexity-length', dest='min_ppl_length', type=int,
+            default=4, metavar='<int>',
+            help='morphs shorter than this length are ' +
+                 'ignored when calculating perplexity. ' +
+                 '(default %(default)s)')
+#     add_arg('-d', '--dampening', dest="dampening", type=str, default='none',
+#             metavar='<type>', choices=['none', 'log', 'ones'],
+#             help="frequency dampening for training data ('none', 'log', or "
+#                  "'ones'; default '%(default)s')")
+#    add_arg('-f', '--forcesplit', dest="forcesplit", type=list, default=['-'],
+#             metavar='<list>',
+#             help="force split on given atoms (default %(default)s)")
+#     add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
+#             metavar='<int>',
+#             help="compound frequency threshold (default %(default)s)")
+#     add_arg('--viterbi-smoothing', dest="viterbismooth", default=0,
+#             type=float, metavar='<float>',
+#             help="additive smoothing parameter for Viterbi "
+#             "segmentation (default %(default)s)")
+#     add_arg('--viterbi-maxlen', dest="viterbimaxlen", default=30,
+#             type=int, metavar='<int>',
+#             help="maximum construction length in Viterbi "
+#             "segmentation (default %(default)s)")
+
+    # Options for controlling training iteration sequence
+    add_arg = parser.add_argument_group(
+        'training iteration sequence options').add_argument
+    add_arg('--max-cost-difference', dest='max_cost_difference', type=float,
+            default=5.0, metavar='<float>',
+            help='Stop iterating if cost reduction between iterations ' +
+                 'is below this limit. ' +
+                 '(default %(default)s)')
+    add_arg('--max-difference-proportion', dest='max_diff_prop', type=float,
+            default=0.005, metavar='<float>',
+            help='Maximum proportion of words with changed segmentation ' +
+                 'or category tags in the final iteration. ' +
+                 '(default %(default)s)')
+    add_arg('--max-iterations', dest='max_iterations', type=int, default=15,
+            metavar='<int>',
+            help='Maximum number of iterations. (default %(default)s)')
+    add_arg('--max-epochs-first', dest='max_epochs_first', type=int, default=5,
+            metavar='<int>',
+            help='Maximum number of epochs of each operation in ' +
+                 'the first iteration. ' +
+                 '(default %(default)s)')
+    add_arg('--max-epochs', dest='max_epochs', type=int, default=1,
+            metavar='<int>',
+            help='Maximum number of epochs of each operation in ' +
+                 'the subsequent iterations. ' +
+                 '(default %(default)s)')
+    add_arg('--training-operations', dest='training_operations', type=list,
+            default=['split', 'join', 'split', 'resegment'], metavar='<list>',
+            help='The sequence of training operations. ' +
+                 'Valid training operations are strings for which ' +
+                 'CatmapModel has a function named _op_X_generator. ' +
+                 '(default %(default)s)')
+
+    # Options for semi-supervised model training
+#     add_arg = parser.add_argument_group(
+#         'semi-supervised training options').add_argument
+#     add_arg('-A', '--annotations', dest="annofile", default=None,
+#             metavar='<file>',
+#             help="load annotated data for semi-supervised learning")
+#     add_arg('-D', '--develset', dest="develfile", default=None,
+#             metavar='<file>',
+#            help="load annotated data for tuning the corpus weight parameter")
+#     add_arg('-w', '--corpusweight', dest="corpusweight", type=float,
+#             default=1.0, metavar='<float>',
+#             help="corpus weight parameter (default %(default)s); "
+#             "sets the initial value if --develset is used")
+#     add_arg('-W', '--annotationweight', dest="annotationweight",
+#             type=float, default=None, metavar='<float>',
+#             help="corpus weight parameter for annotated data (if unset, the "
+#                 "weight is set to balance the number of tokens in annotated "
+#                  "and unannotated data sets)")
+
+    # Options for logging
+    add_arg = parser.add_argument_group('logging options').add_argument
+    add_arg('-v', '--verbose', dest="verbose", type=int, default=1,
+            metavar='<int>',
+            help="verbose level; controls what is written to the standard "
+                 "error stream or log file (default %(default)s)")
+    add_arg('--logfile', dest='log_file', metavar='<file>',
+            help="write log messages to file in addition to standard "
+            "error stream")
+    add_arg('--progressbar', dest='progress', default=False,
+            action='store_true',
+            help="Force the progressbar to be displayed (possibly lowers the "
+                 "log level for the standard error stream)")
+
+    add_arg = parser.add_argument_group('other options').add_argument
+    add_arg('-h', '--help', action='help',
+            help="show this help message and exit")
+    add_arg('--version', action='version',
+            version='%(prog)s ' + __version__,
+            help="show version number and exit")
+
+    args = parser.parse_args(argv[1:])
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv)
+    except Exception as e:
+        _logger.error("Fatal Error %s %s" % (type(e), str(e)))
+        raise

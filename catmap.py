@@ -1854,11 +1854,12 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         if self.boundaries == 0:
             return 0.0
 
+        # transition_matrix_cost is a simplified expression containing
+        # all terms relating to the transition count matrix.
         # This can't be accumulated in log sum form, due to different total
         # number of transitions
         categories = CatmapModel.get_categories(wb=True)
-        logtransitionsum = 0.0
-        logcategorysum = 0.0
+        transition_matrix_cost = 0.0
         total = 0.0
         # FIXME: this can be optimized when getting rid of the assertions
         sum_transitions_from = collections.Counter()
@@ -1875,7 +1876,7 @@ class CatmapEncoding(morfessor.CorpusEncoding):
                 sum_transitions_to[next_cat] += count
                 total += count
                 if count > 0:
-                    logtransitionsum += math.log(count)
+                     transition_matrix_cost+= math.log(count)
         for cat in categories:
             # These hold, because for each incoming transition there is
             # exactly one outgoing transition (except for word boundary,
@@ -1884,16 +1885,19 @@ class CatmapEncoding(morfessor.CorpusEncoding):
             assert sum_transitions_to[cat] == self._cat_tagcount[cat]
 
             if self._cat_tagcount[cat] > 0:
-                logtransitionsum -= ((len(categories) - 1) *
+                # transitionsum itself should be normalized by the sum
+                # over all category pairs (which would be len(categories)
+                # times the cat_tagcount, but the -1 is for the numerator
+                # in the category sum, which has been simplified.
+                transition_matrix_cost -= ((len(categories) - 1) *
                                     math.log(self._cat_tagcount[cat]))
-        logcategorysum -= len(categories) * math.log(total)
+        transition_matrix_cost = -len(categories) * math.log(total)
 
         n = self.tokens + self.boundaries
         return  ((n * math.log(n)
                   - self.boundaries * math.log(self.boundaries)
                   - self.logtokensum
-                  + logtransitionsum
-                  + logcategorysum
+                  + transition_matrix_cost
                  ) * self.weight
                  #+ self.frequency_distribution_cost())
                 )

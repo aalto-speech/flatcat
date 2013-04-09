@@ -500,6 +500,7 @@ class CatmapModel(object):
         self._max_cost_difference = 0.0
         self._max_epochs_first = 1
         self._max_epochs = 1
+        self._max_resegment_epochs = 1
 
         # Callbacks for cleanup/bookkeeping after each operation.
         # Should take exactly one argument: the model.
@@ -535,13 +536,15 @@ class CatmapModel(object):
             i += 1
 
     def train(self, max_cost_difference=5.0, max_difference_proportion=0.005,
-              max_iterations=15, max_epochs_first=5, max_epochs=1):
+              max_iterations=15, max_epochs_first=5, max_epochs=1,
+              max_resegment_epochs=1):
         """Perform Cat-MAP training on the model.
         The model must have been initialized by loading a baseline.
         """
         self._max_cost_difference = max_cost_difference
         self._max_epochs_first = max_epochs_first
         self._max_epochs = max_epochs
+        self._max_resegment_epochs = max_resegment_epochs
 
         if self._iteration_number == 0:
             # Zero:th pre-iteration: let transitions converge
@@ -599,6 +602,9 @@ class CatmapModel(object):
         if param_name == 'max_cost_difference':
             return self._max_cost_difference
         if param_name == 'max_epochs':
+            if (self.training_operations[self._operation_number] ==
+                'resegment'):
+                return self._max_resegment_epochs
             if self._iteration_number == 1:
                 # Perform more epochs in the first iteration.
                 # 0 is pre-iteration, 1 is the first actual iteration.
@@ -607,9 +613,8 @@ class CatmapModel(object):
             return self._max_epochs
         # FIXME This is a bit of ugliness I hope to get rid of
         if param_name == 'must_reestimate':
-            if self._operation_number == len(self.training_operations) - 1:
-                return True
-            return False
+            return (self.training_operations[self._operation_number] ==
+                    'resegment')
 
     def _reestimate_probabilities(self):
         """Re-estimates model parameters from a segmented, tagged corpus.
@@ -2180,6 +2185,11 @@ Simple usage examples (training and testing):
             metavar='<int>',
             help='Maximum number of epochs of each operation in ' +
                  'the subsequent iterations. ' +
+                 '(default %(default)s)')
+    add_arg('--max-resegment-epochs', dest='max_resegment_epochs',
+            type=int, default=1, metavar='<int>',
+            help='Maximum number of epochs of resegmentation in ' +
+                 'all iterations. Resegmentation is the heaviest operation' +
                  '(default %(default)s)')
     add_arg('--training-operations', dest='training_operations', type=list,
             default=['split', 'join', 'split', 'resegment'], metavar='<list>',

@@ -555,11 +555,11 @@ class CatmapModel(object):
 
             self._iteration_number += 1
 
-        self.convergence_of_analysis(
+        self.convergence_of_cost(
             self.train_iteration,
             self.viterbi_tag_corpus,
             max_iterations=max_iterations,
-            max_difference_proportion=max_difference_proportion)
+            max_cost_difference=max_cost_difference)
 
     def train_iteration(self):
         """One iteration of training, which contains several epochs
@@ -1314,7 +1314,7 @@ class CatmapModel(object):
                 components.append(('emission   {} :: {}'.format(
                     suffix.category, suffix.morph), tmp))
         return (cost, segmentation, components)
-        
+
     def cost_comparison(self, segmentations):
         """(Re)tag the given segmentations, calculate their cost
         and return the sorted breakdowns of the costs.
@@ -1330,7 +1330,6 @@ class CatmapModel(object):
             seg = self.viterbi_tag(seg)
             tagged.append(self.cost_breakdown(seg))
         return sorted(tagged)
-
 
     @staticmethod
     def get_categories(wb=False):

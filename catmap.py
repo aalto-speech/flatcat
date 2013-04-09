@@ -1295,6 +1295,43 @@ class CatmapModel(object):
         self.debug_costhistory.append(cost)
         return cost
 
+    def cost_breakdown(self, segmentation):
+        """Return breakdown of costs for the given tagged segmentation."""
+        wb = CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)
+        segmentation = [wb] + list(segmentation) + [wb]
+        cost = 0.0
+        components = []
+        for (prefix, suffix) in ngrams(segmentation, n=2):
+            tmp = self._catmap_coding.log_transitionprob(prefix.category,
+                                                        suffix.category)
+            cost += tmp
+            components.append(('transition {} => {}'.format(
+                prefix.category, suffix.category), tmp))
+            if suffix.morph != WORD_BOUNDARY:
+                tmp = self._catmap_coding.log_emissionprob(
+                    suffix.category, suffix.morph)
+                cost += tmp
+                components.append(('emission   {} :: {}'.format(
+                    suffix.category, suffix.morph), tmp))
+        return (cost, segmentation, components)
+        
+    def cost_comparison(self, segmentations):
+        """(Re)tag the given segmentations, calculate their cost
+        and return the sorted breakdowns of the costs.
+        Can be used to analyse reasons for a segmentation choice.
+        """
+
+        if len(segmentations) == 0:
+            return
+        if all(isinstance(s, basestring) for s in segmentations):
+            segmentations = [segmentations]
+        tagged = []
+        for seg in segmentations:
+            seg = self.viterbi_tag(seg)
+            tagged.append(self.cost_breakdown(seg))
+        return sorted(tagged)
+
+
     @staticmethod
     def get_categories(wb=False):
         """The category tags supported by this model.

@@ -27,7 +27,7 @@ LOGPROB_ZERO = 1000000
 # Progress bar for generators (length unknown):
 # Print a dot for every GENERATOR_DOT_FREQ:th dot.
 # Set to <= 0 to disable progress bar.
-GENERATOR_DOT_FREQ = 100
+GENERATOR_DOT_FREQ = 500
 
 
 class WordBoundary(object):
@@ -526,7 +526,15 @@ class CatmapModel(object):
         self._calculate_emission_counts()
 
     def add_corpus_data(self, segmentations):
-        """Adds the given segmentations (with counts) to the corpus data"""
+        """Adds the given segmentations (with counts) to the corpus data.
+        The new data can be either untagged or tagged.
+    
+        If the added data is untagged, you must call viterbi_tag_corpus
+        to tag the new data.
+        
+        You should also call initialize_probabilities or
+        _reestimate_probabilities.
+        """
         i = len(self.segmentations)
         for segmentation in segmentations:
             segmentation = WordAnalysis(*segmentation)
@@ -539,7 +547,9 @@ class CatmapModel(object):
               max_iterations=15, max_epochs_first=5, max_epochs=1,
               max_resegment_epochs=1):
         """Perform Cat-MAP training on the model.
-        The model must have been initialized by loading a baseline.
+        The model must have been initialized, either by loading a baseline
+        segmentation or a pretrained catmap model from pickle or tagged
+        segmentation file.
         """
         self._max_cost_difference = max_cost_difference
         self._max_epochs_first = max_epochs_first
@@ -547,15 +557,8 @@ class CatmapModel(object):
         self._max_resegment_epochs = max_resegment_epochs
 
         if self._iteration_number == 0:
-            # Zero:th pre-iteration: let transitions converge
-            self.convergence_of_analysis(
-                self._calculate_transition_counts,
-                self.viterbi_tag_corpus,
-                max_difference_proportion=max_difference_proportion)
-
-            self._calculate_emission_counts()
-            self._reestimate_probabilities()
-
+            # Zero:th pre-iteration: let probabilities converge
+            self.initialize_probabilities(max_difference_proportion)
             self._iteration_number += 1
 
         self.convergence_of_cost(
@@ -563,6 +566,21 @@ class CatmapModel(object):
             self.viterbi_tag_corpus,
             max_iterations=max_iterations,
             max_cost_difference=max_cost_difference)
+    
+    def initialize_probabilities(self, max_difference_proportion):
+        """Initialize emission and transition probabilities without
+        changing the segmentation, using Viterbi EM.
+        """
+
+        def _reestimate_with_unchanged_segmentation():
+            self._calculate_transition_counts()
+            self._calculate_emission_counts()
+
+        self._calculate_usage_features()
+        self.convergence_of_analysis(
+            _reestimate_with_unchanged_segmentation,
+            self.viterbi_tag_corpus,
+            max_difference_proportion=max_difference_proportion)
 
     def train_iteration(self):
         """One iteration of training, which contains several epochs
@@ -1054,10 +1072,11 @@ class CatmapModel(object):
 
     def viterbi_segment(self, segments):
         """Simultaneously segment and tag a word using the learned model.
-        Can be used to segment unseen words
+        Can be used to segment unseen words.
 
         Arguments:
-            segments -- A list of morphs to tag.
+            segments -- A word (or a list of morphs which will be
+                        concatenated into a word) to resegment and tag.
         """
 
         if isinstance(segments, basestring):
@@ -2057,8 +2076,8 @@ Command-line arguments:
         epilog="""
 Simple usage examples (training and testing):
 
-  %(prog)s FIXME
-  %(prog)s FIXME
+  %(prog)s -B baseline_segmentation.txt -p 10 -s model.pickled
+  %(prog)s -l model.pickled -T test_corpus.txt -o test_corpus.segmented
 
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -2068,10 +2087,17 @@ Simple usage examples (training and testing):
     add_arg = parser.add_argument_group('input data files').add_argument
     add_arg('-l', '--load', dest="loadfile", default=None, metavar='<file>',
             help="load existing model from file (pickled model object)")
+    add_arg('-B', '--load-baseline', dest="baselinefile", default=None,
+            metavar='<file>',
+            help='load baseline segmentation from file ' +
+                 '(Morfessor 1.0 format). ' +
+                 'Can be used together with --load, ' +
+                 'in which case the pickled model is extended with the ' +
+                 'loaded segmentation')
     add_arg('-L', '--load-segmentation', dest="loadsegfile", default=None,
             metavar='<file>',
-            help='load existing model from segmentation ' +
-                 'file (Morfessor 1.0 format). ' +
+            help='load existing model from tagged segmentation ' +
+                 'file (Morfessor 2.0 Categories-MAP format). ' +
                  'Can be used together with --load, ' +
                  'in which case the pickled model is extended with the ' +
                  'loaded segmentation')
@@ -2080,12 +2106,12 @@ Simple usage examples (training and testing):
             help="input corpus file(s) to analyze (text or gzipped text;  "
                  "use '-' for standard input; add several times in order to "
                  "append multiple files)")
-    add_arg('-o', '--output', dest="outfile", default='-', metavar='<file>',
-            help="output file for test data results (for standard output, "
-                 "use '-'; default '%(default)s')")
 
     # Options for output data files
     add_arg = parser.add_argument_group('output data files').add_argument
+    add_arg('-o', '--output', dest="outfile", default='-', metavar='<file>',
+            help="output file for test data results (for standard output, "
+                 "use '-'; default '%(default)s')")
     add_arg('-s', '--save', dest="savefile", default=None, metavar='<file>',
             help="save final model to file (pickled model object)")
     add_arg('-S', '--save-segmentation', dest="savesegfile", default=None,
@@ -2112,11 +2138,18 @@ Simple usage examples (training and testing):
             metavar='<regexp>',
             help='separator for the category tag following a morph. ' +
                  '(default %(default)s)')
+    add_arg('--output-test-tags', dest='test_output_tags', default=False,
+            action='store_true',
+            help='output category tags in test data. ' +
+                 'Default is to output only the segmentation')
+    add_arg('--output-test-counts', dest='test_output_counts', default=False,
+            action='store_true',
+            help='output word counts in test data. ')
 
     # Options for training and segmentation
     add_arg = parser.add_argument_group(
         'training and segmentation options').add_argument
-    add_arg('--perplexity-treshold', dest='ppl_treshold', type=float,
+    add_arg('-p', '--perplexity-treshold', dest='ppl_treshold', type=float,
             default=100., metavar='<float>',
             help='treshold value for sigmoid used to calculate ' +
                  'probabilities from left and right perplexities. ' +

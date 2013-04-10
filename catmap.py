@@ -19,6 +19,8 @@ import time
 
 import morfessor
 
+PY3 = sys.version_info.major == 3
+
 _logger = logging.getLogger(__name__)
 _logger.level = logging.DEBUG   # FIXME development convenience
 
@@ -509,31 +511,21 @@ class CatmapModel(object):
         self.debug_costhistory = []
         self.debug_costhistory_chosen = []
 
-    def load_baseline(self, segmentations):
-        """Initialize the model using the segmentation produced by a morfessor
-        baseline model.
-
-        Arguments:
-            segmentations -- Segmentation of corpus using the baseline method.
-                             Format: (count, (morph1, morph2, ...))
-        """
-
-        self.add_corpus_data(segmentations)
-        self._calculate_usage_features()
-        self._unigram_transition_probs()
-        self.viterbi_tag_corpus()
-        self._calculate_transition_counts()
-        self._calculate_emission_counts()
-
     def add_corpus_data(self, segmentations):
         """Adds the given segmentations (with counts) to the corpus data.
         The new data can be either untagged or tagged.
-    
+
         If the added data is untagged, you must call viterbi_tag_corpus
         to tag the new data.
-        
+
         You should also call initialize_probabilities or
         _reestimate_probabilities.
+
+        Arguments:
+            segmentations -- Segmentations of format:
+                             (count, (morph1, morph2, ...))
+                             where the morphs can be either strings
+                             or CategorizedMorphs.
         """
         i = len(self.segmentations)
         for segmentation in segmentations:
@@ -559,14 +551,24 @@ class CatmapModel(object):
         if self._iteration_number == 0:
             # Zero:th pre-iteration: let probabilities converge
             self.initialize_probabilities(max_difference_proportion)
-            self._iteration_number += 1
 
         self.convergence_of_cost(
             self.train_iteration,
-            self.viterbi_tag_corpus,
             max_iterations=max_iterations,
             max_cost_difference=max_cost_difference)
-    
+
+    def initialize_baseline(self):
+        """Initialize the model using a previously added
+        (see add_corpus_data) segmentation produced by a morfessor
+        baseline model.
+        """
+
+        self._calculate_usage_features()
+        self._unigram_transition_probs()
+        self.viterbi_tag_corpus()
+        self._calculate_transition_counts()
+        self._calculate_emission_counts()
+
     def initialize_probabilities(self, max_difference_proportion):
         """Initialize emission and transition probabilities without
         changing the segmentation, using Viterbi EM.
@@ -576,11 +578,12 @@ class CatmapModel(object):
             self._calculate_transition_counts()
             self._calculate_emission_counts()
 
-        self._calculate_usage_features()
+        self._reestimate_probabilities()
         self.convergence_of_analysis(
             _reestimate_with_unchanged_segmentation,
             self.viterbi_tag_corpus,
             max_difference_proportion=max_difference_proportion)
+        self._iteration_number == 1
 
     def train_iteration(self):
         """One iteration of training, which contains several epochs
@@ -1077,6 +1080,9 @@ class CatmapModel(object):
         Arguments:
             segments -- A word (or a list of morphs which will be
                         concatenated into a word) to resegment and tag.
+        Returns:
+            best_analysis, -- The resegmented, retagged word
+            best_cost      -- The cost of the returned solution
         """
 
         if isinstance(segments, basestring):
@@ -1182,7 +1188,7 @@ class CatmapModel(object):
             bt_cat = backtrace.backpointer[0][1]
             result.insert(0, backtrace.backpointer[1])
             pos -= len(backtrace.backpointer[1])
-        return result
+        return result, best.cost
 
     def viterbi_resegment_corpus(self, corpus):
         """Convenience wrapper around viterbi_segment for a
@@ -1192,7 +1198,7 @@ class CatmapModel(object):
         for (count, word) in corpus:
             if isinstance(word, basestring):
                 word = (word,)
-            yield (count, self.viterbi_segment(word))
+            yield (count, self.viterbi_segment(word)[0])
 
     def convergence_of_cost(self, transform_generator, max_cost_difference=5.0,
                             max_iterations=5, must_reestimate=False):
@@ -1540,7 +1546,7 @@ class Transformation(object):
 class ViterbiResegmentTransformation(object):
     def __init__(self, word, model):
         self.rule = TransformationRule(tuple(word.analysis))
-        self.result = model.viterbi_segment(word.analysis)
+        self.result, _ = model.viterbi_segment(word.analysis)
         self.change_counts = ChangeCounts()
 
     def __repr__(self):
@@ -1895,7 +1901,7 @@ class CatmapEncoding(morfessor.CorpusEncoding):
                 sum_transitions_to[next_cat] += count
                 total += count
                 if count > 0:
-                     transition_matrix_cost+= math.log(count)
+                    transition_matrix_cost += math.log(count)
         for cat in categories:
             # These hold, because for each incoming transition there is
             # exactly one outgoing transition (except for word boundary,
@@ -2037,7 +2043,7 @@ def _generator_progress(generator):
     return _progress_wrapper(generator)
 
 
-def main(argv):
+def get_default_argparser():
     parser = argparse.ArgumentParser(
         prog='catmap.py',
         description="""
@@ -2086,65 +2092,77 @@ Simple usage examples (training and testing):
     # Options for input data files
     add_arg = parser.add_argument_group('input data files').add_argument
     add_arg('-l', '--load', dest="loadfile", default=None, metavar='<file>',
-            help="load existing model from file (pickled model object)")
-    add_arg('-B', '--load-baseline', dest="baselinefile", default=None,
-            metavar='<file>',
+            help="load existing model from file (pickled model object).")
+    add_arg('-B', '--load-baseline', dest="baselinefiles", default=[],
+            action='append', metavar='<file>',
             help='load baseline segmentation from file ' +
                  '(Morfessor 1.0 format). ' +
                  'Can be used together with --load, ' +
                  'in which case the pickled model is extended with the ' +
-                 'loaded segmentation')
-    add_arg('-L', '--load-segmentation', dest="loadsegfile", default=None,
-            metavar='<file>',
+                 'loaded segmentation.')
+    add_arg('-L', '--load-segmentation', dest="loadsegfiles", default=[],
+            action='append', metavar='<file>',
             help='load existing model from tagged segmentation ' +
                  'file (Morfessor 2.0 Categories-MAP format). ' +
+                 'The probabilities are not stored in the file, ' +
+                 'and must be re-estimated. ' +
                  'Can be used together with --load, ' +
                  'in which case the pickled model is extended with the ' +
-                 'loaded segmentation')
+                 'loaded segmentation.')
     add_arg('-T', '--testdata', dest='testfiles', action='append',
             default=[], metavar='<file>',
             help="input corpus file(s) to analyze (text or gzipped text;  "
                  "use '-' for standard input; add several times in order to "
-                 "append multiple files)")
+                 "append multiple files).")
 
     # Options for output data files
     add_arg = parser.add_argument_group('output data files').add_argument
     add_arg('-o', '--output', dest="outfile", default='-', metavar='<file>',
             help="output file for test data results (for standard output, "
-                 "use '-'; default '%(default)s')")
+                 "use '-'; default '%(default)s.')")
     add_arg('-s', '--save', dest="savefile", default=None, metavar='<file>',
-            help="save final model to file (pickled model object)")
+            help="save final model to file (pickled model object).")
     add_arg('-S', '--save-segmentation', dest="savesegfile", default=None,
             metavar='<file>',
-            help="save model segmentations to file (Morfessor 1.0 format)")
+            help="save model segmentations to file (Morfessor 1.0 format).")
 
     # Options for data formats
     add_arg = parser.add_argument_group(
         'data format options').add_argument
     add_arg('-e', '--encoding', dest='encoding', metavar='<encoding>',
             help="encoding of input and output files (if none is given, "
-            "both the local encoding and UTF-8 are tried)")
-    add_arg('--atom-separator', dest="separator", type=str, default=None,
-            metavar='<regexp>',
-            help="atom separator regexp (default %(default)s)")
+            "both the local encoding and UTF-8 are tried).")
+#    add_arg('--atom-separator', dest="separator", type=str, default=None,
+#            metavar='<regexp>',
+#            help="atom separator regexp (default %(default)s).")
     add_arg('--compound-separator', dest="cseparator", type=str, default='\s+',
             metavar='<regexp>',
-            help="compound separator regexp (default '%(default)s')")
+            help="compound separator regexp (default '%(default)s').")
     add_arg('--analysis-separator', dest='analysisseparator', type=str,
             default=',', metavar='<regexp>',
             help="separator for different analyses in an annotation file. Use"
-                 "  NONE for only allowing one analysis per line")
+                 "  NONE for only allowing one analysis per line.")
     add_arg('--category-separator', dest='catseparator', type=str, default='/',
             metavar='<regexp>',
             help='separator for the category tag following a morph. ' +
-                 '(default %(default)s)')
-    add_arg('--output-test-tags', dest='test_output_tags', default=False,
+                 '(default %(default)s).')
+    add_arg('--output-format', dest='outputformat', type=str,
+            default=r'{analysis}\n', metavar='<format>',
+            help="format string for --output file (default: '%(default)s'). "
+            "Valid keywords are: "
+            "{analysis} = constructions of the compound, "
+            "{compound} = compound string, "
+            "{count} = count of the compound (currently always 1), and "
+            "{logprob} = log-probability of the compound. Valid escape "
+            "sequences are '\\n' (newline) and '\\t' (tabular)")
+    add_arg('--output-format-separator', dest='outputformatseparator',
+            type=str, default=' ', metavar='<str>',
+            help="construction separator for analysis in --output file "
+            "(default: '%(default)s')")
+    add_arg('--output-tags', dest='test_output_tags', default=False,
             action='store_true',
             help='output category tags in test data. ' +
-                 'Default is to output only the segmentation')
-    add_arg('--output-test-counts', dest='test_output_counts', default=False,
-            action='store_true',
-            help='output word counts in test data. ')
+                 'Default is to output only the morphs')
 
     # Options for training and segmentation
     add_arg = parser.add_argument_group(
@@ -2153,22 +2171,22 @@ Simple usage examples (training and testing):
             default=100., metavar='<float>',
             help='treshold value for sigmoid used to calculate ' +
                  'probabilities from left and right perplexities. ' +
-                 '(default %(default)s)')
+                 '(default %(default)s).')
     add_arg('--perplexity-slope', dest='ppl_slope', type=float, default=None,
             metavar='<float>',
             help='slope value for sigmoid used to calculate ' +
                  'probabilities from left and right perplexities. ' +
-                 '(default 10 / perplexity-treshold)')
+                 '(default 10 / perplexity-treshold).')
     add_arg('--length-treshold', dest='length_treshold', type=float,
             default=3., metavar='<float>',
             help='treshold value for sigmoid used to calculate ' +
                  'probabilities from length of morph. ' +
-                 '(default %(default)s)')
+                 '(default %(default)s).')
     add_arg('--length-slope', dest='length_slope', type=float, default=2.,
             metavar='<float>',
             help='slope value for sigmoid used to calculate ' +
                  'probabilities from length of morph. ' +
-                 '(default %(default)s)')
+                 '(default %(default)s).')
     add_arg('--type-perplexity', dest='type_ppl', default=False,
             action='store_true',
             help='use word type -based perplexity instead of the default ' +
@@ -2177,25 +2195,25 @@ Simple usage examples (training and testing):
             default=4, metavar='<int>',
             help='morphs shorter than this length are ' +
                  'ignored when calculating perplexity. ' +
-                 '(default %(default)s)')
+                 '(default %(default)s).')
 #     add_arg('-d', '--dampening', dest="dampening", type=str, default='none',
 #             metavar='<type>', choices=['none', 'log', 'ones'],
 #             help="frequency dampening for training data ('none', 'log', or "
-#                  "'ones'; default '%(default)s')")
+#                  "'ones'; default '%(default)s').")
 #    add_arg('-f', '--forcesplit', dest="forcesplit", type=list, default=['-'],
 #             metavar='<list>',
-#             help="force split on given atoms (default %(default)s)")
+#             help="force split on given atoms (default %(default)s).")
 #     add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
 #             metavar='<int>',
-#             help="compound frequency threshold (default %(default)s)")
+#             help="compound frequency threshold (default %(default)s).")
 #     add_arg('--viterbi-smoothing', dest="viterbismooth", default=0,
 #             type=float, metavar='<float>',
 #             help="additive smoothing parameter for Viterbi "
-#             "segmentation (default %(default)s)")
+#             "segmentation (default %(default)s).")
 #     add_arg('--viterbi-maxlen', dest="viterbimaxlen", default=30,
 #             type=int, metavar='<int>',
 #             help="maximum construction length in Viterbi "
-#             "segmentation (default %(default)s)")
+#             "segmentation (default %(default)s).")
 
     # Options for controlling training iteration sequence
     add_arg = parser.add_argument_group(
@@ -2204,83 +2222,228 @@ Simple usage examples (training and testing):
             default=5.0, metavar='<float>',
             help='Stop iterating if cost reduction between iterations ' +
                  'is below this limit. ' +
-                 '(default %(default)s)')
+                 '(default %(default)s).')
     add_arg('--max-difference-proportion', dest='max_diff_prop', type=float,
             default=0.005, metavar='<float>',
             help='Maximum proportion of words with changed segmentation ' +
                  'or category tags in the final iteration. ' +
-                 '(default %(default)s)')
+                 '(default %(default)s).')
     add_arg('--max-iterations', dest='max_iterations', type=int, default=15,
             metavar='<int>',
-            help='Maximum number of iterations. (default %(default)s)')
+            help='Maximum number of iterations. (default %(default)s).')
     add_arg('--max-epochs-first', dest='max_epochs_first', type=int, default=5,
             metavar='<int>',
             help='Maximum number of epochs of each operation in ' +
                  'the first iteration. ' +
-                 '(default %(default)s)')
+                 '(default %(default)s).')
     add_arg('--max-epochs', dest='max_epochs', type=int, default=1,
             metavar='<int>',
             help='Maximum number of epochs of each operation in ' +
                  'the subsequent iterations. ' +
-                 '(default %(default)s)')
+                 '(default %(default)s).')
     add_arg('--max-resegment-epochs', dest='max_resegment_epochs',
             type=int, default=1, metavar='<int>',
             help='Maximum number of epochs of resegmentation in ' +
                  'all iterations. Resegmentation is the heaviest operation' +
-                 '(default %(default)s)')
+                 '(default %(default)s).')
     add_arg('--training-operations', dest='training_operations', type=list,
             default=['split', 'join', 'split', 'resegment'], metavar='<list>',
             help='The sequence of training operations. ' +
                  'Valid training operations are strings for which ' +
                  'CatmapModel has a function named _op_X_generator. ' +
-                 '(default %(default)s)')
+                 '(default %(default)s).')
 
     # Options for semi-supervised model training
 #     add_arg = parser.add_argument_group(
 #         'semi-supervised training options').add_argument
 #     add_arg('-A', '--annotations', dest="annofile", default=None,
 #             metavar='<file>',
-#             help="load annotated data for semi-supervised learning")
+#             help="load annotated data for semi-supervised learning.")
 #     add_arg('-D', '--develset', dest="develfile", default=None,
 #             metavar='<file>',
-#            help="load annotated data for tuning the corpus weight parameter")
+#           help="load annotated data for tuning the corpus weight parameter.")
 #     add_arg('-w', '--corpusweight', dest="corpusweight", type=float,
 #             default=1.0, metavar='<float>',
 #             help="corpus weight parameter (default %(default)s); "
-#             "sets the initial value if --develset is used")
+#             "sets the initial value if --develset is used.")
 #     add_arg('-W', '--annotationweight', dest="annotationweight",
 #             type=float, default=None, metavar='<float>',
 #             help="corpus weight parameter for annotated data (if unset, the "
 #                 "weight is set to balance the number of tokens in annotated "
-#                  "and unannotated data sets)")
+#                  "and unannotated data sets).")
 
     # Options for logging
     add_arg = parser.add_argument_group('logging options').add_argument
     add_arg('-v', '--verbose', dest="verbose", type=int, default=1,
             metavar='<int>',
             help="verbose level; controls what is written to the standard "
-                 "error stream or log file (default %(default)s)")
+                 "error stream or log file (default %(default)s).")
     add_arg('--logfile', dest='log_file', metavar='<file>',
             help="write log messages to file in addition to standard "
-            "error stream")
+            "error stream.")
     add_arg('--progressbar', dest='progress', default=False,
             action='store_true',
-            help="Force the progressbar to be displayed (possibly lowers the "
-                 "log level for the standard error stream)")
+            help='Force the progressbar to be displayed.')
 
     add_arg = parser.add_argument_group('other options').add_argument
     add_arg('-h', '--help', action='help',
-            help="show this help message and exit")
+            help="show this help message and exit.")
     add_arg('--version', action='version',
             version='%(prog)s ' + __version__,
-            help="show version number and exit")
+            help="show version number and exit.")
 
-    args = parser.parse_args(argv[1:])
+    return parser
+
+
+def main(args):
+    # FIXME contains lots of copy-pasta from morfessor.main (refactor)
+    if args.verbose >= 2:
+        loglevel = logging.DEBUG
+    elif args.verbose >= 1:
+        loglevel = logging.INFO
+    else:
+        loglevel = logging.WARNING
+
+    logging_format = '%(asctime)s - %(message)s'
+    date_format = '%Y-%m-%d %H:%M:%S'
+    default_formatter = logging.Formatter(logging_format, date_format)
+    plain_formatter = logging.Formatter('%(message)s')
+    logging.basicConfig(level=loglevel)
+    _logger.propagate = False  # do not forward messages to the root logger
+
+    # Basic settings for logging to the error stream
+    ch = logging.StreamHandler()
+    ch.setLevel(loglevel)
+    ch.setFormatter(plain_formatter)
+    _logger.addHandler(ch)
+
+    # Settings for when log_file is present
+    if args.log_file is not None:
+        fh = logging.FileHandler(args.log_file, 'w')
+        fh.setLevel(loglevel)
+        fh.setFormatter(default_formatter)
+        _logger.addHandler(fh)
+        # If logging to a file, make INFO the highest level for the
+        # error stream
+        ch.setLevel(max(loglevel, logging.INFO))
+
+    # If debug messages are printed to screen or if stderr is not a tty (but
+    # a pipe or a file), don't show the progressbar
+    global show_progress_bar
+    if (ch.level > logging.INFO or
+            (hasattr(sys.stderr, 'isatty') and not sys.stderr.isatty())):
+        show_progress_bar = False
+
+    if args.progress:
+        show_progress_bar = True
+        ch.setLevel(min(ch.level, logging.INFO))
+    # FIXME direct paste up to this point
+
+    if (args.loadfile is None and
+            len(args.baselinefiles) == 0 and
+            len(args.loadsegfiles) == 0):
+        raise morfessor.ArgumentException('either model file, '
+            'tagged segmentation or baseline segmentation must be defined.')
+
+    io = CatmapIO(encoding=args.encoding,
+                  compound_separator=args.cseparator,
+                  category_separator=args.catseparator)
+
+    # Load exisiting model or create a new one
+    if args.loadfile is not None:
+        model = io.read_binary_model_file(args.loadfile)
+
+    else:
+        m_usage = MorphUsageProperties(
+            ppl_treshold=args.ppl_treshold,
+            ppl_slope=args.ppl_slope,
+            length_treshold=args.length_treshold,
+            length_slope=args.length_slope,
+            use_word_tokens=not args.type_ppl,
+            min_perplexity_length=args.min_ppl_length)
+        model = CatmapModel(m_usage)
+
+    for f in args.baselinefiles + args.loadsegfiles:
+        model.add_corpus_data(io.read_segmentation_file(f))
+
+    do_train = False
+    if args.loadfile is None:
+        # Starting from segmentations instead of pickle,
+        model.training_operations = args.training_operations
+        # Need to (re)estimate the probabilities
+        if len(args.loadsegfiles) == 0:
+            # Starting from a baseline model
+            model.initialize_baseline()
+            do_train = True
+        model.initialize_probabilities(
+            max_difference_proportion=args.max_diff_prop)
+    elif len(args.baselinefiles) > 0 or len(args.loadsegfiles) > 0:
+        # Extending pickled model with new data
+        model.viterbi_tag_corpus()
+        model.initialize_probabilities(self,
+            max_difference_proportion=args.max_diff_prop)
+        model.viterbi_tag_corpus()
+        do_train = True
+
+    # Train model, if there is new data to train on
+    if do_train:
+        ts = time.time()
+        model.train(max_cost_difference=args.max_cost_difference,
+                    max_difference_proportion=args.max_diff_prop,
+                    max_iterations=args.max_iterations,
+                    max_epochs_first=args.max_epochs_first,
+                    max_epochs=args.max_epochs,
+                    max_resegment_epochs=args.max_resegment_epochs)
+        _logger.info('Final cost: {}'.format(model.get_cost()))
+        _logger.info('Training time: {:.3f}s'.format(te - ts))
+    else:
+        _logger.info('Using loaded model without training')
+
+    # Save model
+    if args.savefile is not None:
+        io.write_binary_model_file(args.savefile, model)
+
+    if args.savesegfile is not None:
+        io.write_segmentation_file(args.savesegfile, model.get_segmentations())
+
+    # Segment test data
+    if len(args.testfiles) > 0:
+        _logger.info("Segmenting test data...")
+        outformat = args.outputformat
+        csep = args.outputformatseparator
+        if not PY3:
+            outformat = unicode(outformat)
+            csep = unicode(csep)
+        outformat = outformat.replace(r"\n", "\n")
+        outformat = outformat.replace(r"\t", "\t")
+        with io._open_text_file_write(args.outfile) as fobj:
+            testdata = io.read_corpus_files(args.testfiles)
+            for count, compound, atoms in _generator_progress(testdata):
+                constructions, logp = model.viterbi_segment(atoms)
+                if args.test_output_tags:
+                    def _output_morph(cmorph):
+                        return u'{}{}{}'.format(cmorph.morph,
+                                                args.catseparator,
+                                                cmorph.category)
+                else:
+                    def _output_morph(cmorph):
+                        return cmorph.morph
+                constructions = [_output_morph(cmorph)
+                                 for cmorph in constructions]
+                analysis = csep.join(constructions)
+                fobj.write(outformat.format(
+                           analysis=analysis, compound=compound,
+                           count=count, logprob=logp))
+        _logger.info("Done.")
 
 
 if __name__ == "__main__":
+    parser = get_default_argparser()
     try:
-        main(sys.argv)
+        args = parser.parse_args(sys.argv[1:])
+        main(args)
+    except morfessor.ArgumentException as e:
+        parser.error(e)
     except Exception as e:
-        _logger.error("Fatal Error %s %s" % (type(e), str(e)))
+        _logger.error("Fatal Error %s %s" % (type(e), e))
         raise

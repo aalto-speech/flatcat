@@ -57,12 +57,12 @@ def _load_catmap(baseline_seg, no_emissions=False):
                                               length_slope=2,
                                               use_word_tokens=False)
         model = catmap.CatmapModel(m_usage)
+        model.add_corpus_data(baseline_seg)
         if no_emissions:
-            model.add_corpus_data(baseline_seg)
             model._calculate_usage_features()
             model._unigram_transition_probs()
         else:
-            model.load_baseline(baseline_seg)
+            model.initialize_baseline()
         return model
 
 

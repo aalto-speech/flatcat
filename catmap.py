@@ -358,6 +358,10 @@ class MorphUsageProperties(object):
 
     @classmethod
     def valid_transitions(cls):
+        """Returns (and caches) all valid transitions as pairs
+        (from_category, to_category). Any transitions not included
+        in the list are forbidden, and must have count 0 and probability 0.
+        """
         if cls._valid_transitions is None:
             cls._valid_transitions = []
             categories = CatmapModel.get_categories(wb=True)
@@ -557,13 +561,13 @@ class CatmapModel(object):
         changing the segmentation, using Viterbi EM.
         """
 
-        def _reestimate_with_unchanged_segmentation():
+        def reestimate_with_unchanged_segmentation():
             self._calculate_transition_counts()
             self._calculate_emission_counts()
 
         self._reestimate_probabilities()
         self.convergence_of_analysis(
-            _reestimate_with_unchanged_segmentation,
+            reestimate_with_unchanged_segmentation,
             self.viterbi_tag_corpus,
             max_difference_proportion=max_difference_proportion)
         self._reestimate_probabilities()
@@ -1066,6 +1070,10 @@ class CatmapModel(object):
                 yield([transform], targets, temporaries)
 
     def _op_resegment_generator(self):
+        """Generates special transformations that resegment and tag
+        all words in the corpus using viterbi_segment.
+        Use with _transformation_epoch
+        """
         for (i, word) in enumerate(self.segmentations):
             yield ([ViterbiResegmentTransformation(word, self)],
                    set([i]), set())
@@ -1076,7 +1084,7 @@ class CatmapModel(object):
         old_count = self._morph_usage.count(morph)
         new_count = old_count + diff_count
         self._morph_usage.set_count(morph, new_count)
-        self._catmap_coding._log_emissionprob_cache.clear()
+        self._catmap_coding.clear_emission_cache()
         if old_count == 0 and new_count > 0:
             self._lexicon_coding.add(morph)
         elif old_count > 0 and new_count == 0:
@@ -1284,7 +1292,6 @@ class CatmapModel(object):
                                     categories[next_cat],
                                     morph))
                             if cost <= best.cost:
-                                prev_start = prev_pos - prev_len
                                 best = ViterbiNode(cost, ((prev_len, prev_cat),
                                     CategorizedMorph(morph,
                                                      categories[next_cat])))
@@ -1299,7 +1306,6 @@ class CatmapModel(object):
                             categories[prev_cat],
                             WORD_BOUNDARY))
                 if cost <= best.cost:
-                    prev_start = len(word) - prev_len
                     best = ViterbiNode(cost, ((prev_len, prev_cat),
                         CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)))
 
@@ -1558,6 +1564,10 @@ class Transformation(object):
 
 
 class ViterbiResegmentTransformation(object):
+    """Special transformation that resegments and tags
+    words in the corpus using viterbi_segment.
+    """
+
     def __init__(self, word, model):
         self.rule = TransformationRule(tuple(word.analysis))
         self.result, _ = model.viterbi_segment(word.analysis)
@@ -1872,6 +1882,12 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         self._emission_counts.clear()
         self._log_emissionprob_cache.clear()
 
+    def clear_emission_cache(self):
+        """Clears the cache for emission probability values.
+        Use if an incremental change invalidates cached values."""
+        self._log_emissionprob_cache.clear()
+       
+
     # General methods
 
     def transit_emit_cost(self, prev_cat, next_cat, morph):
@@ -1950,7 +1966,7 @@ class Sparse(dict):
     Only supports immutable values, e.g. namedtuples.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *pargs, **kwargs):
         """Create a new Sparse datastructure.
         Keyword arguments:
             default -- Default value. Unlike defaultdict this should be a
@@ -1958,7 +1974,7 @@ class Sparse(dict):
         """
 
         self._default = kwargs.pop('default')
-        dict.__init__(self, *args, **kwargs)
+        dict.__init__(self, *pargs, **kwargs)
 
     def __getitem__(self, key):
         if key not in self:
@@ -2394,7 +2410,7 @@ def main(args):
     elif len(args.baselinefiles) > 0 or len(args.loadsegfiles) > 0:
         # Extending pickled model with new data
         model.viterbi_tag_corpus()
-        model.initialize_probabilities(self,
+        model.initialize_probabilities(
             max_difference_proportion=args.max_diff_prop)
         model.viterbi_tag_corpus()
         do_train = True
@@ -2419,7 +2435,7 @@ def main(args):
         io.write_binary_model_file(args.savefile, model)
 
     if args.savesegfile is not None:
-        io.write_segmentation_file(args.savesegfile, model.get_segmentations())
+        io.write_segmentation_file(args.savesegfile, model.segmentations)
 
     # Segment test data
     if len(args.testfiles) > 0:

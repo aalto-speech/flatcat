@@ -433,9 +433,14 @@ class CatmapIO(morfessor.MorfessorIO):
             count, analysis = line.split(' ', 1)
             cmorphs = []
             for morph_cat in analysis.split(self.construction_separator):
-                morph, category = morph_cat.split(self.category_separator)
-                if category not in CatmapModel.get_categories():
-                    raise InvalidCategoryError(category)
+                parts = morph_cat.rsplit(self.category_separator, 1)
+                morph = parts[0]
+                if len(parts) == 1:
+                    category = None
+                else:
+                    category = parts[1]
+                    if category not in CatmapModel.get_categories():
+                        raise InvalidCategoryError(category)
                 cmorphs.append(CategorizedMorph(morph, category))
             yield(int(count), tuple(cmorphs))
         _logger.info("Done.")
@@ -493,7 +498,7 @@ class CatmapModel(object):
         # Valid training operations are strings for which CatmapModel
         # has a function named _op_X_generator, where X is the string
         # which returns a transform generator suitable for
-        # passing to convergence_of_cost.
+        # passing to _transformation_epoch.
         # This is done using strings indstead of bound methods,
         # to enable pickling of the model object.
         self.training_operations = ['split', 'join', 'split', 'resegment']
@@ -531,31 +536,9 @@ class CatmapModel(object):
         for segmentation in segmentations:
             segmentation = WordAnalysis(*segmentation)
             self.segmentations.append(segmentation)
-            for morph in segmentation.analysis:
+            for morph in self.detag_word(segmentation.analysis):
                 self.morph_backlinks[morph].add(i)
             i += 1
-
-    def train(self, max_cost_difference=5.0, max_difference_proportion=0.005,
-              max_iterations=15, max_epochs_first=5, max_epochs=1,
-              max_resegment_epochs=1):
-        """Perform Cat-MAP training on the model.
-        The model must have been initialized, either by loading a baseline
-        segmentation or a pretrained catmap model from pickle or tagged
-        segmentation file.
-        """
-        self._max_cost_difference = max_cost_difference
-        self._max_epochs_first = max_epochs_first
-        self._max_epochs = max_epochs
-        self._max_resegment_epochs = max_resegment_epochs
-
-        if self._iteration_number == 0:
-            # Zero:th pre-iteration: let probabilities converge
-            self.initialize_probabilities(max_difference_proportion)
-
-        self.convergence_of_cost(
-            self.train_iteration,
-            max_iterations=max_iterations,
-            max_cost_difference=max_cost_difference)
 
     def initialize_baseline(self):
         """Initialize the model using a previously added
@@ -583,7 +566,31 @@ class CatmapModel(object):
             _reestimate_with_unchanged_segmentation,
             self.viterbi_tag_corpus,
             max_difference_proportion=max_difference_proportion)
-        self._iteration_number == 1
+        self._reestimate_probabilities()
+        self._iteration_number = 1
+
+    def train(self, max_cost_difference=5.0, max_difference_proportion=0.005,
+              max_iterations=15, max_epochs_first=5, max_epochs=1,
+              max_resegment_epochs=1):
+        """Perform Cat-MAP training on the model.
+        The model must have been initialized, either by loading a baseline
+        segmentation or a pretrained catmap model from pickle or tagged
+        segmentation file.
+        """
+        self._max_cost_difference = max_cost_difference
+        self._max_epochs_first = max_epochs_first
+        self._max_epochs = max_epochs
+        self._max_resegment_epochs = max_resegment_epochs
+
+        if self._iteration_number == 0:
+            # Zero:th pre-iteration: let probabilities converge
+            self.initialize_probabilities(max_difference_proportion)
+
+        self.convergence_of_cost(
+            self.train_iteration,
+            max_iterations=max_iterations,
+            max_cost_difference=max_cost_difference,
+            iteration_name='iteration')
 
     def train_iteration(self):
         """One iteration of training, which contains several epochs
@@ -601,17 +608,142 @@ class CatmapModel(object):
             max_cost_difference = self._training_params('max_cost_difference')
             max_epochs = self._training_params('max_epochs')
             must_reestimate = self._training_params('must_reestimate')
+            _logger.info(
+                u'Iteration {}, operation {} ({}), max {} epoch(s).'.format(
+                    self._iteration_number, self._operation_number,
+                    self.training_operations[self._operation_number],
+                    max_epochs))
             self.convergence_of_cost(
-                operation,
+                lambda: self._transformation_epoch(operation()),
                 max_cost_difference=max_cost_difference,
                 max_iterations=max_epochs,
-                must_reestimate=must_reestimate)
+                must_reestimate=must_reestimate,
+                iteration_name='epoch')
             self._reestimate_probabilities()
             self._operation_number += 1
             for callback in self.operation_callbacks:
                 callback(self)
         self._operation_number = 0
         self._iteration_number += 1
+
+    def convergence_of_cost(self, train_func, max_cost_difference=5.0,
+                            max_iterations=5, must_reestimate=False,
+                            iteration_name='iter'):
+        """Iterates the specified training function until the model cost
+        no longer improves enough or until maximum number of iterations
+        is reached.
+
+        On each iteration train_func is called without arguments.
+        The data used to train the model must therefore be completely
+        contained in the model itself. This can e.g. mean iterating over
+        the morphs already stored in the lexicon.
+
+        Arguments:
+            train_func -- A method of CatmapModel which causes some part of
+                          the model to be trained.
+            max_cost_difference -- Stop iterating if cost reduction between
+                                   iterations is below this limit. Default 5.0
+            max_iterations -- Maximum number of iterations (epochs). Default 5.
+            must_reestimate -- Call _reestimate_probabilities after each
+                               epoch. Only necessary if tranformation leaves
+                               the model inconsistent. Default: False.
+            iteration_name -- Name for the level of iteration,
+                              to get meaningful log messages.
+        """
+
+        previous_cost = self.get_cost()
+        for iteration in range(max_iterations):
+            _logger.info(
+                u'{} {}/{}.'.format(
+                    iteration_name, iteration + 1, max_iterations))
+            _logger.info(time.strftime("%a, %d.%m.%Y %H:%M:%S"))
+
+            # perform the optimization
+            train_func()
+
+            # only do full re-estimation of parameters if the
+            # tranformation leaves the model inconsistent
+            if must_reestimate:
+                self._reestimate_probabilities()
+
+            cost = self.get_cost()
+            cost_diff = cost - previous_cost
+            _logger.info(u'Cost now {}'.format(cost))
+            if -cost_diff <= max_cost_difference:
+                _logger.info(u'Converged, with cost difference ' +
+                    u'{} in final {}.'.format(cost_diff, iteration_name))
+                break
+            else:
+                _logger.info(u'Cost difference {} in {} {}/{}'.format(
+                    cost_diff, iteration_name, iteration + 1, max_iterations))
+            previous_cost = cost
+
+    def convergence_of_analysis(self, train_func, resegment_func,
+                                max_difference_proportion=0,
+                                max_cost_difference=-10000,  # FIXME
+                                max_iterations=15):
+        """Iterates the specified training function until the segmentations
+        produced by the model no longer changes more than
+        the specified treshold, until the model cost no longer improves
+        enough or until maximum number of iterations is reached.
+
+        On each iteration the current optimal analysis for the corpus is
+        produced by calling resegment_func.
+        This corresponds to:
+
+        Y(t) = arg min { L( theta(t-1), Y, D ) }
+
+        Then the train_func function is called, which corresponds to:
+
+        theta(t) = arg min { L( theta, Y(t), D ) }
+
+        Neither train_func nor resegment_func may require any arguments.
+
+        Arguments:
+            train_func -- A method of CatmapModel which causes some aspect
+                          of the model to be trained.
+            resegment_func -- A method of CatmapModel that resegments or
+                              retags the segmentations, to produce the
+                              results to compare. Should return the number
+                              of changed words.
+            max_difference_proportion -- Maximum proportion of words with
+                                         changed segmentation or category
+                                         tags in the final iteration.
+                                         Default 0.
+            max_cost_difference -- Stop iterating if cost reduction between
+                                   iterations is below this limit.
+            max_iterations -- Maximum number of iterations. Default 15.
+        """
+
+        previous_cost = self.get_cost()
+        for iteration in range(max_iterations):
+            _logger.info(
+                u'Iteration {} ({}). {}/{}'.format(
+                    self._iteration_number, train_func.__name__,
+                    iteration + 1, max_iterations))
+            _logger.info(time.strftime("%a, %d.%m.%Y %H:%M:%S"))
+
+            # perform the optimization
+            train_func()
+
+            cost = self.get_cost()
+            cost_diff = cost - previous_cost
+            if -cost_diff <= max_cost_difference:
+                _logger.info(u'Converged, with cost difference ' +
+                    u'{} in final iteration.'.format(cost_diff))
+                break
+
+            # perform the reanalysis
+            differences = resegment_func()
+
+            if differences <= (max_difference_proportion *
+                               len(self.segmentations)):
+                _logger.info(u'Converged, with ' +
+                    u'{} differences in final iteration.'.format(differences))
+                break
+            _logger.info(u'{} differences. Cost difference: {}'.format(
+                differences, cost_diff))
+            previous_cost = cost
 
     def _training_params(self, param_name):
         """Parameters for the training operators
@@ -1174,7 +1306,7 @@ class CatmapModel(object):
         if best.cost == LOGPROB_ZERO:
             _logger.warning(
                 u'No possible segmentation for word {}'.format(word))
-            return word
+            return [CategorizedMorph(word, None)], LOGPROB_ZERO
 
         # Backtrace for the best morph-category sequence
         result = []
@@ -1199,124 +1331,6 @@ class CatmapModel(object):
             if isinstance(word, basestring):
                 word = (word,)
             yield (count, self.viterbi_segment(word)[0])
-
-    def convergence_of_cost(self, transform_generator, max_cost_difference=5.0,
-                            max_iterations=5, must_reestimate=False):
-        """Iterates the specified training function until the model cost
-        no longer improves enough or until maximum number of iterations
-        is reached.
-
-        On each iteration train_func is called without arguments.
-        The data used to train the model must therefore be completely
-        contained in the model itself. This can e.g. mean iterating over
-        the morphs already stored in the lexicon.
-
-        Arguments:
-            transform_generator -- A function that returns a
-                                   transform generator,
-                                   which can be given as argument to
-                                   _transformation_epoch
-            max_cost_difference -- Stop iterating if cost reduction between
-                                   iterations is below this limit. Default 5.0
-            max_iterations -- Maximum number of iterations (epochs). Default 5.
-            must_reestimate -- Call _reestimate_probabilities after each
-                               epoch. Only necessary if tranformation leaves
-                               the model inconsistent. Default: False.
-        """
-
-        previous_cost = self.get_cost()
-        for iteration in range(max_iterations):
-            _logger.info(
-                u'Iteration {}, operation {} ({}), epoch {}/{}.'.format(
-                    self._iteration_number, self._operation_number,
-                    transform_generator.__name__,
-                    iteration + 1, max_iterations))
-            _logger.info(time.strftime("%a, %d.%m.%Y %H:%M:%S"))
-
-            # perform the optimization
-            self._transformation_epoch(transform_generator())
-
-            # only do full re-estimation of parameters if the
-            # tranformation leaves the model inconsistent
-            if must_reestimate:
-                self._reestimate_probabilities()
-
-            cost = self.get_cost()
-            cost_diff = cost - previous_cost
-            if -cost_diff <= max_cost_difference:
-                _logger.info(u'Converged, with cost difference ' +
-                    u'{} in final epoch.'.format(cost_diff))
-                break
-            else:
-                _logger.info(u'Cost difference: {}'.format(cost_diff))
-            previous_cost = cost
-
-    def convergence_of_analysis(self, train_func, resegment_func,
-                                max_difference_proportion=0,
-                                max_cost_difference=-10000,  # FIXME
-                                max_iterations=15):
-        """Iterates the specified training function until the segmentations
-        produced by the model no longer changes more than
-        the specified treshold, until the model cost no longer improves
-        enough or until maximum number of iterations is reached.
-
-        On each iteration the current optimal analysis for the corpus is
-        produced by calling resegment_func.
-        This corresponds to:
-
-        Y(t) = arg min { L( theta(t-1), Y, D ) }
-
-        Then the train_func function is called, which corresponds to:
-
-        theta(t) = arg min { L( theta, Y(t), D ) }
-
-        Neither train_func nor resegment_func may require any arguments.
-
-        Arguments:
-            train_func -- A method of CatmapModel which causes some aspect
-                          of the model to be trained.
-            resegment_func -- A method of CatmapModel that resegments or
-                              retags the segmentations, to produce the
-                              results to compare. Should return the number
-                              of changed words.
-            max_difference_proportion -- Maximum proportion of words with
-                                         changed segmentation or category
-                                         tags in the final iteration.
-                                         Default 0.
-            max_cost_difference -- Stop iterating if cost reduction between
-                                   iterations is below this limit.
-            max_iterations -- Maximum number of iterations. Default 15.
-        """
-
-        previous_cost = self.get_cost()
-        for iteration in range(max_iterations):
-            _logger.info(
-                u'Iteration {} ({}). {}/{}'.format(
-                    self._iteration_number, train_func.__name__,
-                    iteration + 1, max_iterations))
-            _logger.info(time.strftime("%a, %d.%m.%Y %H:%M:%S"))
-
-            # perform the optimization
-            train_func()
-
-            cost = self.get_cost()
-            cost_diff = cost - previous_cost
-            if -cost_diff <= max_cost_difference:
-                _logger.info(u'Converged, with cost difference ' +
-                    u'{} in final iteration.'.format(cost_diff))
-                break
-
-            # perform the reanalysis
-            differences = resegment_func()
-
-            if differences <= (max_difference_proportion *
-                               len(self.segmentations)):
-                _logger.info(u'Converged, with ' +
-                    u'{} differences in final iteration.'.format(differences))
-                break
-            _logger.info(u'{} differences. Cost difference: {}'.format(
-                differences, cost_diff))
-            previous_cost = cost
 
     def get_cost(self):
         """Return current model encoding cost."""
@@ -2395,6 +2409,7 @@ def main(args):
                     max_epochs=args.max_epochs,
                     max_resegment_epochs=args.max_resegment_epochs)
         _logger.info('Final cost: {}'.format(model.get_cost()))
+        te = time.time()
         _logger.info('Training time: {:.3f}s'.format(te - ts))
     else:
         _logger.info('Using loaded model without training')

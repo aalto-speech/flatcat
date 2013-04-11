@@ -1886,7 +1886,6 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         """Clears the cache for emission probability values.
         Use if an incremental change invalidates cached values."""
         self._log_emissionprob_cache.clear()
-       
 
     # General methods
 

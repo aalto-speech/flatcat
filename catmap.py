@@ -569,7 +569,7 @@ class CatmapModel(object):
         self._calculate_transition_counts()
         self._calculate_emission_counts()
 
-    def initialize_probabilities(self, max_difference_proportion):
+    def initialize_probabilities(self, max_difference_proportion=0.005):
         """Initialize emission and transition probabilities without
         changing the segmentation, using Viterbi EM.
         """

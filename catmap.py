@@ -1138,7 +1138,7 @@ class CatmapModel(object):
 
         def join_helper(prefix, suffix):
             joined = prefix.morph + suffix.morph
-            return (CategorizedMorph(joined, None),)
+            return ((CategorizedMorph(joined, None),),)
 
         return self._generic_bimorph_generator(join_helper)
 

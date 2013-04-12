@@ -3,7 +3,9 @@
 Morfessor 2.0 Categories-MAP variant.
 """
 
-__all__ = ['CatmapIO', 'CatmapModel']
+# Temporarily disabled to enable from catmap import * in interactive shell,
+# Which is a workaround for the pickle namespace problem
+#__all__ = ['CatmapIO', 'CatmapModel']
 
 __version__ = '2.0.0prealpha1'
 __author__ = 'Stig-Arne Gronroos'
@@ -38,6 +40,16 @@ class WordBoundary(object):
 
     def __len__(self):
         return 0
+
+    def __eq__(self, other):
+        # Word boundaries from different runs should be equal
+        if isinstance(other, WordBoundary):
+            return True
+        return False
+
+    def __hash__(self):
+        return hash(self.__class__.__name__)
+
 
 WORD_BOUNDARY = WordBoundary()
 

@@ -1084,11 +1084,16 @@ class CatmapModel(object):
                                     CategorizedMorph(suffix, None))))
             yield (transforms, targets, temporaries)
 
-    def _op_join_generator(self):
-        """Generates joins of consecutive morphs into a supermorph.
-        Can make different join decisions in different contexts.
-        Use with _transformation_epoch
+    def _generic_bimorph_generator(self, result_func):
+        """The common parts of operation generators that operate on
+        context-sensitive bimorphs. Don't call this directly.
+
+        Arguments:
+            result_func -- A function that takes the prefix an suffix
+                           as arguments, and returns all the proposed results
+                           as tuples of CategorizedMorphs.
         """
+
         # FIXME random shuffle or sort by bigram frequency?
         bigram_freqs = collections.Counter()
         wb = CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)
@@ -1110,16 +1115,59 @@ class CatmapModel(object):
             # Require both morphs, tags and context to match
             rule = TransformationRule((prefix, suffix),
                                       context_type=context_type)
-            joined = prefix.morph + suffix.morph
-            temporaries = set(self._morph_usage.estimate_contexts(
-                (prefix.morph, suffix.morph), joined))
-            transform = Transformation(rule, (CategorizedMorph(joined, None),))
+            temporaries = set()
+            transforms = []
+            results = result_func(prefix, suffix)
+            for result in results:
+                temporaries.update(self._morph_usage.estimate_contexts(
+                    (prefix.morph, suffix.morph),
+                    self.detag_word(result)))
+                transforms.append(Transformation(rule, result))
             # targets will be a subset of the intersection of the
             # occurences of both submorphs
             targets = set(self.morph_backlinks[prefix.morph])
             targets.intersection_update(self.morph_backlinks[suffix.morph])
             if len(targets) > 0:
-                yield([transform], targets, temporaries)
+                yield(transforms, targets, temporaries)
+
+    def _op_join_generator(self):
+        """Generates joins of consecutive morphs into a supermorph.
+        Can make different join decisions in different contexts.
+        Use with _transformation_epoch
+        """
+
+        def join_helper(prefix, suffix):
+            joined = prefix.morph + suffix.morph
+            return (CategorizedMorph(joined, None),)
+
+        return self._generic_bimorph_generator(join_helper)
+
+    def _op_shift_generator(self):
+        """Generates operations that shift the split point in a bigram.
+        Use with _transformation_epoch
+        """
+
+        def shift_helper(prefix, suffix):
+            results = []
+            for i in range(1, 2 + 1):    # FIXME magic number: max shift
+                # Move backward
+                if len(prefix) - i >= 2:
+                    # FIXME magic number: min remaining chars
+                    new_pre = prefix.morph[:-i]
+                    shifted = prefix.morph[-i:]
+                    new_suf = shifted + suffix.morph
+                    results.append((CategorizedMorph(new_pre, None),
+                                    CategorizedMorph(new_suf, None)))
+                # Move forward
+                if len(suffix) - i >= 2:
+                    new_suf = suffix.morph[i:]
+                    shifted = suffix.morph[:i]
+                    new_pre = prefix.morph + shifted
+                    results.append((CategorizedMorph(new_pre, None),
+                                    CategorizedMorph(new_suf, None)))
+            return results
+
+        return self._generic_bimorph_generator(shift_helper)
 
     def _op_resegment_generator(self):
         """Generates special transformations that resegment and tag

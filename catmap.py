@@ -76,6 +76,18 @@ MorphContext = collections.namedtuple('MorphContext',
                                        'right_perplexity'])
 
 
+# Context type flags, from which the context type is formed.
+# (Binary flags in integer format)
+CONTEXT_FLAG_INITIAL = 1
+CONTEXT_FLAG_FINAL = 2
+# The context type values
+CONTEXT_TYPE_INTERNAL = 0
+CONTEXT_TYPE_INITIAL = CONTEXT_TYPE_INTERNAL + CONTEXT_FLAG_INITIAL
+CONTEXT_TYPE_FINAL = CONTEXT_TYPE_INTERNAL + CONTEXT_FLAG_FINAL
+CONTEXT_TYPE_BOTH = (CONTEXT_TYPE_INTERNAL + CONTEXT_FLAG_INITIAL +
+                     CONTEXT_FLAG_FINAL)
+
+
 class MorphContextBuilder(object):
     """Temporary structure used when calculating the MorphContexts."""
     def __init__(self):
@@ -312,6 +324,22 @@ class MorphUsageProperties(object):
             temporaries.append(morph)
         return temporaries
 
+    @staticmethod
+    def context_type(prev_morph, next_morph, prev_cat, next_cat):
+        """Cluster certain types of context, to allow making context-dependant
+        joining decisions."""
+        # This categorization scheme ignores prev_morph, next_morph,
+        # and only uses the categories
+        ctype = CONTEXT_TYPE_INTERNAL
+        if prev_cat == WORD_BOUNDARY or prev_cat == 'PRE':
+            ctype += CONTEXT_FLAG_INITIAL
+        if next_cat == WORD_BOUNDARY or next_cat == 'SUF':
+            ctype += CONTEXT_FLAG_FINAL
+        return ctype
+
+    # The methods in this class below this line are helpers that will
+    # probably not need to be modified if the categorization scheme changes
+
     def remove_temporaries(self, temporaries):
         """Remove estimated temporary morph contexts when no longer needed."""
         for morph in temporaries:
@@ -332,9 +360,6 @@ class MorphUsageProperties(object):
                 remove_list.append(morph)
         for morph in remove_list:
             del self._contexts[morph]
-
-    # The methods in this class below this line are helpers that will
-    # probably not need to be modified if the categorization scheme changes
 
     def seen_morphs(self):
         """All morphs that have defined contexts."""
@@ -467,7 +492,7 @@ class CatmapModel(object):
 
     word_boundary = WORD_BOUNDARY
 
-    def __init__(self, morph_usage):
+    def __init__(self, morph_usage, forcesplit=None):
         """Initialize a new model instance.
 
         Arguments:
@@ -531,6 +556,14 @@ class CatmapModel(object):
 
         self.debug_costhistory = []
         self.debug_costhistory_chosen = []
+
+        # Force these atoms to be kept as separate morphs.
+        # Calling morfessor baseline with the same forcesplit value ensures
+        # that they are initially separate.
+        if forcesplit is None:
+            self.forcesplit = []
+        else:
+            self.forcesplit = tuple(forcesplit)
 
     def add_corpus_data(self, segmentations):
         """Adds the given segmentations (with counts) to the corpus data.
@@ -1053,23 +1086,30 @@ class CatmapModel(object):
 
     def _op_join_generator(self):
         """Generates joins of consecutive morphs into a supermorph.
-        Currently does not treat different contexts separately (FIXME).
+        Can make different join decisions in different contexts.
         Use with _transformation_epoch
         """
         # FIXME random shuffle or sort by bigram frequency?
         bigram_freqs = collections.Counter()
+        wb = CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)
         for (count, segments) in self.segmentations:
-#            segments = [WORD_BOUNDARY] + segments + [WORD_BOUNDARY]
-#            for quad in ngrams(segments, n=4):
-#                prev_morph, prefix, suffix, next_morph = quad
-#                # calculate context type, add to bigram
-            for bigram in ngrams(segments, n=2):
-                bigram_freqs[bigram] += count
+            segments = [wb] + segments + [wb]
+            for quad in ngrams(segments, n=4):
+                prev_morph, prefix, suffix, next_morph = quad
+                for morph in (prefix, suffix):
+                    if morph.morph in self.forcesplit:
+                        # don't propose to join morphs on forcesplit list
+                        continue
+                context_type = MorphUsageProperties.context_type(
+                    prev_morph.morph, next_morph.morph,
+                    prev_morph.category, next_morph.category)
+                bigram_freqs[(prefix, suffix, context_type)] += count
 
         for (bigram, count) in bigram_freqs.most_common():
-            # Require both morphs and tags to match
-            rule = TransformationRule(bigram)
-            (prefix, suffix) = bigram
+            prefix, suffix, context_type = bigram
+            # Require both morphs, tags and context to match
+            rule = TransformationRule((prefix, suffix),
+                                      context_type=context_type)
             joined = prefix.morph + suffix.morph
             temporaries = set(self._morph_usage.estimate_contexts(
                 (prefix.morph, suffix.morph), joined))
@@ -1608,10 +1648,11 @@ class TransformationRule(object):
     be replaced.
     """
 
-    def __init__(self, categorized_morphs):
+    def __init__(self, categorized_morphs, context_type=None):
         if isinstance(categorized_morphs, CategorizedMorph):
             categorized_morphs = (categorized_morphs,)
         self._rule = categorized_morphs
+        self._context_type = context_type
 
     def __len__(self):
         return len(self._rule)
@@ -1625,6 +1666,7 @@ class TransformationRule(object):
     def match_at(self, analysis, i):
         """Returns true if this rule matches the analysis
         at the given index."""
+        # Compare morphs and categories specified in rule
         for (j, cmorph) in enumerate(analysis[i:(i + len(self))]):
             if self._rule[j].category != CategorizedMorph.no_category:
                 # Rule requires category at this point to match
@@ -1634,6 +1676,26 @@ class TransformationRule(object):
                 # Rule requires morph at this point to match
                 if self._rule[j].morph != cmorph.morph:
                     return False
+        # Compare context type
+        if self._context_type is not None:
+            if i <= 0:
+                prev_morph = WORD_BOUNDARY
+                prev_category = WORD_BOUNDARY
+            else:
+                prev_morph = analysis[i - 1].morph
+                prev_category = analysis[i - 1].category
+            if (i + len(self)) >= len(analysis):
+                next_morph = WORD_BOUNDARY
+                next_category = WORD_BOUNDARY
+            else:
+                next_morph = analysis[i + len(self)].morph
+                next_category = analysis[i + len(self)].category
+            context_type = MorphUsageProperties.context_type(
+                                prev_morph, next_morph,
+                                prev_category, next_category)
+            if self._context_type != context_type:
+                return False
+
         # No comparison failed
         return True
 
@@ -2241,9 +2303,9 @@ Simple usage examples (training and testing):
 #             metavar='<type>', choices=['none', 'log', 'ones'],
 #             help="frequency dampening for training data ('none', 'log', or "
 #                  "'ones'; default '%(default)s').")
-#    add_arg('-f', '--forcesplit', dest="forcesplit", type=list, default=['-'],
-#             metavar='<list>',
-#             help="force split on given atoms (default %(default)s).")
+    add_arg('-f', '--forcesplit', dest="forcesplit", type=list, default=['-'],
+            metavar='<list>',
+            help="force split on given atoms (default %(default)s).")
 #     add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
 #             metavar='<int>',
 #             help="compound frequency threshold (default %(default)s).")
@@ -2402,7 +2464,7 @@ def main(args):
             length_slope=args.length_slope,
             use_word_tokens=not args.type_ppl,
             min_perplexity_length=args.min_ppl_length)
-        model = CatmapModel(m_usage)
+        model = CatmapModel(m_usage, forcesplit=args.forcesplit)
 
     for f in args.baselinefiles + args.loadsegfiles:
         model.add_corpus_data(io.read_segmentation_file(f))

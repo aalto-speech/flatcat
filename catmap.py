@@ -492,6 +492,8 @@ class CatmapModel(object):
 
     word_boundary = WORD_BOUNDARY
 
+    DEFAULT_TRAIN_OPS = ['split', 'join', 'split', 'shift', 'resegment']
+
     def __init__(self, morph_usage, forcesplit=None):
         """Initialize a new model instance.
 
@@ -542,7 +544,7 @@ class CatmapModel(object):
         # passing to _transformation_epoch.
         # This is done using strings indstead of bound methods,
         # to enable pickling of the model object.
-        self.training_operations = ['split', 'join', 'split', 'resegment']
+        self.training_operations = self.DEFAULT_TRAIN_OPS
 
         # Training sequence parameters.
         self._max_cost_difference = 0.0
@@ -1101,10 +1103,10 @@ class CatmapModel(object):
             segments = [wb] + segments + [wb]
             for quad in ngrams(segments, n=4):
                 prev_morph, prefix, suffix, next_morph = quad
-                for morph in (prefix, suffix):
-                    if morph.morph in self.forcesplit:
-                        # don't propose to join morphs on forcesplit list
-                        continue
+                if (prefix.morph in self.forcesplit or
+                    suffix.morph in self.forcesplit):
+                    # don't propose to join morphs on forcesplit list
+                    continue
                 context_type = MorphUsageProperties.context_type(
                     prev_morph.morph, next_morph.morph,
                     prev_morph.category, next_morph.category)
@@ -2398,7 +2400,7 @@ Simple usage examples (training and testing):
                  'all iterations. Resegmentation is the heaviest operation' +
                  '(default %(default)s).')
     add_arg('--training-operations', dest='training_operations', type=list,
-            default=['split', 'join', 'split', 'resegment'], metavar='<list>',
+            default=CatmapModel.DEFAULT_TRAIN_OPS, metavar='<list>',
             help='The sequence of training operations. ' +
                  'Valid training operations are strings for which ' +
                  'CatmapModel has a function named _op_X_generator. ' +

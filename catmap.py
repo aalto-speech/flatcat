@@ -19,6 +19,8 @@ import math
 import sys
 import time
 
+from matplotlib import pyplot as plt    # FIXME: can remove when files split
+
 import morfessor
 
 PY3 = sys.version_info.major == 3
@@ -718,6 +720,11 @@ class CatmapModel(object):
             cost = self.get_cost()
             cost_diff = cost - previous_cost
             _logger.info(u'Cost now {}'.format(cost))
+
+            if iteration_name == 'epoch':
+                for callback in self.epoch_callbacks:
+                    callback(self, iteration)
+
             if -cost_diff <= max_cost_difference:
                 _logger.info(u'Converged, with cost difference ' +
                     u'{} in final {}.'.format(cost_diff, iteration_name))
@@ -726,10 +733,6 @@ class CatmapModel(object):
                 _logger.info(u'Cost difference {} in {} {}/{}'.format(
                     cost_diff, iteration_name, iteration + 1, max_iterations))
             previous_cost = cost
-
-            if iteration_name == 'epoch':
-                for callback in self.epoch_callbacks:
-                    callback(self, iteration)
 
     def convergence_of_analysis(self, train_func, resegment_func,
                                 max_difference_proportion=0,
@@ -2199,7 +2202,7 @@ def _generator_progress(generator):
 
 
 class IterationStatistics(object):
-    def __init__():
+    def __init__(self, model=None, title=None):
         self.iteration_numbers = []
         self.operation_numbers = []
         self.epoch_numbers = []
@@ -2210,17 +2213,32 @@ class IterationStatistics(object):
         self.durations = [0]
 
         self.t_prev = None
+        self.word_tokens = 1.0
+        self.categories = None
+
+        if title is None:
+            self.title = 'Iteration statistics {}'.format(
+                time.strftime("%a, %d.%m.%Y %H:%M:%S"))
+        else:
+            self.title = title
+        if model is not None:
+            self.callback(model)
+            self.ops = model.training_operations
+        else:
+            self.ops = None
 
     def callback(self, model, epoch_number=0):
         t_cur = time.time()
-        
+
         self.iteration_numbers.append(model._iteration_number)
         self.operation_numbers.append(model._operation_number)
         self.epoch_numbers.append(epoch_number)
 
         self.costs.append(model.get_cost())
-        self.tag_counts.append(self._extract_tag_counts(model))
-        self.morph_tokens.append(morph_tokens)
+        tcounts = self._extract_tag_counts(model)
+        self.tag_counts.append(tcounts)
+        self.morph_tokens.append(sum(tcounts))
+        self.word_tokens = float(model.word_tokens)
         if self.t_prev is not None:
             self.durations.append(t_cur - self.t_prev)
 
@@ -2228,11 +2246,96 @@ class IterationStatistics(object):
 
     def _extract_tag_counts(self, model):
         out = []
-        categories = model.get_categories()
+        self.categories = model.get_categories()
         counter = model._catmap_coding._cat_tagcount
-        for cat in categories:
+        for cat in self.categories:
             out.append(counter[cat])
         return out
+
+    def plot_costs(self):
+        plt.plot(self.costs)
+        self._iteration_grid()
+        plt.xlabel('Epoch number')
+        plt.ylabel('Model cost')
+        plt.title(self.title)
+
+    def plot_tag_counts(self):
+        unzipped = zip(*self.tag_counts)
+        for (i, series) in enumerate(unzipped):
+            plt.plot(series, color=plt.cm.jet(float(i) /
+                                              float(len(self.categories))))
+        self._iteration_grid()
+        plt.xlabel('Epoch number')
+        plt.ylabel('Category occurence count')
+        plt.title(self.title)
+        if self.categories is not None:
+            plt.legend(self.categories)
+
+    def plot_avg_morphs(self):
+        normalized = [x / self.word_tokens for x in self.morph_tokens]
+        plt.plot(normalized)
+        self._iteration_grid()
+        plt.xlabel('Epoch number')
+        plt.ylabel('Avg number of morphs per word token')
+        plt.title(self.title)
+
+    def plot_durations(self):
+        by_iter = [0.0] * (max(self.iteration_numbers) + 1)
+        by_op = [0.0] * (max(self.operation_numbers) + 1)
+        by_epoch = [0.0] * (max(self.epoch_numbers) + 1)
+
+        for i in range(len(self.iteration_numbers)):
+            by_iter[self.iteration_numbers[i]] += self.durations[i]
+            by_op[self.operation_numbers[i]] += self.durations[i]
+            by_epoch[self.epoch_numbers[i]] += self.durations[i]
+
+        plt.subplot(2, 2, 1)
+        plt.plot(self.durations)
+        self._iteration_grid()
+        plt.xlabel('Epoch number')
+        plt.ylabel('Epoch duration [s]')
+        plt.title(self.title)
+
+        plt.subplot(2, 2, 2)
+        plt.bar(range(len(by_iter)), by_iter)
+        plt.ylabel('Total iteration duration [s]')
+        xls = range(len(by_iter))
+        xs = [x + 0.5 for x in xls]
+        plt.xticks(xs, xls)
+
+        plt.subplot(2, 2, 3)
+        plt.bar(range(len(by_op)), by_op)
+        plt.ylabel('Total operation duration [s]')
+        xls = range(len(by_op))
+        xs = [x + 0.5 for x in xls]
+        if self.ops is not None:
+            xls = self.ops
+        plt.xticks(xs, xls)
+
+        plt.subplot(2, 2, 4)
+        plt.bar(range(len(by_epoch)), by_epoch)
+        plt.ylabel('Total epoch duration [s]')
+        xls = range(len(by_epoch))
+        xs = [x + 0.5 for x in xls]
+        plt.xticks(xs, xls)
+
+    def plot_all(self):
+        plt.figure()
+        self.plot_costs()
+        plt.figure()
+        self.plot_tag_counts()
+        plt.figure()
+        self.plot_avg_morphs()
+        plt.figure()
+        self.plot_durations()
+        plt.show()
+
+    def _iteration_grid(self):
+        for i in range(len(self.iteration_numbers) - 1):
+            if self.iteration_numbers[i] != self.iteration_numbers[i + 1]:
+                plt.axvline(x=(i + 0.5), color=[.6, .6, .6])
+            if self.operation_numbers[i] < self.operation_numbers[i + 1]:
+                plt.axvline(x=(i + 0.5), color=[.6, .6, .6], linestyle=':')
 
 
 def get_default_argparser():
@@ -2561,11 +2664,6 @@ def main(args):
     for f in args.baselinefiles + args.loadsegfiles:
         model.add_corpus_data(io.read_segmentation_file(f))
 
-    # Set up statistics logging
-    if args.stats_file is not None:
-        stats = IterationStatistics()
-        model.epoch_callbacks.append(stats.callback)
-
     do_train = False
     if args.loadfile is None:
         # Starting from segmentations instead of pickle,
@@ -2584,6 +2682,11 @@ def main(args):
             max_difference_proportion=args.max_diff_prop)
         model.viterbi_tag_corpus()
         do_train = True
+
+    # Set up statistics logging
+    if args.stats_file is not None:
+        stats = IterationStatistics(model)
+        model.epoch_callbacks.append(stats.callback)
 
     # Train model, if there is new data to train on
     if do_train:

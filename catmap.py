@@ -555,9 +555,7 @@ class CatmapModel(object):
         # Callbacks for cleanup/bookkeeping after each operation.
         # Should take exactly one argument: the model.
         self.operation_callbacks = []
-
-        self.debug_costhistory = []
-        self.debug_costhistory_chosen = []
+        self.epoch_callbacks = []
 
         # Force these atoms to be kept as separate morphs.
         # Calling morfessor baseline with the same forcesplit value ensures
@@ -728,6 +726,10 @@ class CatmapModel(object):
                 _logger.info(u'Cost difference {} in {} {}/{}'.format(
                     cost_diff, iteration_name, iteration + 1, max_iterations))
             previous_cost = cost
+
+            if iteration_name == 'epoch':
+                for callback in self.epoch_callbacks:
+                    callback(self, iteration)
 
     def convergence_of_analysis(self, train_func, resegment_func,
                                 max_difference_proportion=0,
@@ -1049,9 +1051,6 @@ class CatmapModel(object):
                         self.detag_word(new_analysis.analysis))
                 self._update_counts(best.transform.change_counts, 1)
             self._morph_usage.remove_temporaries(temporaries)
-            self.debug_costhistory_chosen.append(       # FIXME debug
-                (len(self.debug_costhistory),
-                self.get_cost()))
 
     def _op_split_generator(self):
         """Generates splits of seen morphs into two submorphs.
@@ -1444,7 +1443,6 @@ class CatmapModel(object):
         """Return current model encoding cost."""
         # FIXME: annotation coding cost for supervised
         cost = self._catmap_coding.get_cost() + self._lexicon_coding.get_cost()
-        self.debug_costhistory.append(cost)
         return cost
 
     def cost_breakdown(self, segmentation):
@@ -1519,6 +1517,10 @@ class CatmapModel(object):
     @property
     def word_tokens(self):
         return self._catmap_coding.boundaries
+
+    @property
+    def morph_tokens(self):
+        return sum(self._morph_usage.category_token_count)
 
 
 class CategorizedMorph(object):
@@ -2196,6 +2198,43 @@ def _generator_progress(generator):
     return _progress_wrapper(generator)
 
 
+class IterationStatistics(object):
+    def __init__():
+        self.iteration_numbers = []
+        self.operation_numbers = []
+        self.epoch_numbers = []
+
+        self.costs = []
+        self.tag_counts = []
+        self.morph_tokens = []
+        self.durations = [0]
+
+        self.t_prev = None
+
+    def callback(self, model, epoch_number=0):
+        t_cur = time.time()
+        
+        self.iteration_numbers.append(model._iteration_number)
+        self.operation_numbers.append(model._operation_number)
+        self.epoch_numbers.append(epoch_number)
+
+        self.costs.append(model.get_cost())
+        self.tag_counts.append(self._extract_tag_counts(model))
+        self.morph_tokens.append(morph_tokens)
+        if self.t_prev is not None:
+            self.durations.append(t_cur - self.t_prev)
+
+        self.t_prev = t_cur
+
+    def _extract_tag_counts(self, model):
+        out = []
+        categories = model.get_categories()
+        counter = model._catmap_coding._cat_tagcount
+        for cat in categories:
+            out.append(counter[cat])
+        return out
+
+
 def get_default_argparser():
     parser = argparse.ArgumentParser(
         prog='catmap.py',
@@ -2437,6 +2476,9 @@ Simple usage examples (training and testing):
     add_arg('--progressbar', dest='progress', default=False,
             action='store_true',
             help='Force the progressbar to be displayed.')
+    add_arg('--statsfile', dest='stats_file', metavar='<file>',
+            help='Collect iteration statistics and pickle them ' +
+                 'into this file.')
 
     add_arg = parser.add_argument_group('other options').add_argument
     add_arg('-h', '--help', action='help',
@@ -2519,6 +2561,11 @@ def main(args):
     for f in args.baselinefiles + args.loadsegfiles:
         model.add_corpus_data(io.read_segmentation_file(f))
 
+    # Set up statistics logging
+    if args.stats_file is not None:
+        stats = IterationStatistics()
+        model.epoch_callbacks.append(stats.callback)
+
     do_train = False
     if args.loadfile is None:
         # Starting from segmentations instead of pickle,
@@ -2589,6 +2636,12 @@ def main(args):
                            analysis=analysis, compound=compound,
                            count=count, logprob=logp))
         _logger.info("Done.")
+
+    # Save statistics
+    if args.stats_file is not None:
+        _logger.info('Actually saving the statistics even if the next line ' +
+                     'claims that it is saving the model')  # FIXME ugly
+        io.write_binary_model_file(args.stats_file, stats)
 
 
 if __name__ == "__main__":

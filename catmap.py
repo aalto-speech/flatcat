@@ -19,7 +19,7 @@ import math
 import sys
 import time
 
-from matplotlib import pyplot as plt    # FIXME: can remove when files split
+#from matplotlib import pyplot as plt    # FIXME: can remove when files split
 
 import morfessor
 
@@ -1484,6 +1484,15 @@ class CatmapModel(object):
             tagged.append(self.cost_breakdown(seg))
         return sorted(tagged)
 
+    def clear_callbacks:
+        """Callbacks are not saved in the pickled model, because pickle is
+        unable to restore instance methods. If you need callbacks in a loaded
+        model, you have to readd them after loading.
+        """
+
+        self.operation_callbacks.clear()
+        self.epoch_callbacks.clear()
+
     @staticmethod
     def get_categories(wb=False):
         """The category tags supported by this model.
@@ -2705,6 +2714,7 @@ def main(args):
 
     # Save model
     if args.savefile is not None:
+        model.clear_callbacks()
         io.write_binary_model_file(args.savefile, model)
 
     if args.savesegfile is not None:

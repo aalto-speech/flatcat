@@ -2074,7 +2074,7 @@ class CatmapEncoding(morfessor.CorpusEncoding):
                 sum_transitions_to[next_cat] += count
                 total += count
                 if count > 0:
-                    transition_matrix_cost += math.log(count)
+                    transition_matrix_cost -= math.log(count)
         for cat in categories:
             # These hold, because for each incoming transition there is
             # exactly one outgoing transition (except for word boundary,
@@ -2087,9 +2087,9 @@ class CatmapEncoding(morfessor.CorpusEncoding):
                 # over all category pairs (which would be len(categories)
                 # times the cat_tagcount, but the -1 is for the numerator
                 # in the category sum, which has been simplified.
-                transition_matrix_cost -= ((len(categories) - 1) *
+                transition_matrix_cost += ((len(categories) - 1) *
                                     math.log(self._cat_tagcount[cat]))
-        transition_matrix_cost -= len(categories) * math.log(total)
+        transition_matrix_cost += len(categories) * math.log(total)
         assert(transition_matrix_cost >= 0)
 
         n = self.tokens + self.boundaries

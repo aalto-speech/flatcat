@@ -365,7 +365,7 @@ class TestModelConsistency(unittest.TestCase):
         def revert_update_counts():
             self.model._update_counts(cc, -1)
 
-        self._apply_revert(apply_update_counts, revert_update_counts, False)
+        self._apply_revert(apply_update_counts, revert_update_counts, None)
 
     def _apply_revert(self, apply_func, revert_func, is_remove):
         state_exact, state_approx = self.store_state()

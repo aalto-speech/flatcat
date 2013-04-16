@@ -549,7 +549,7 @@ class CatmapModel(object):
         self.training_operations = self.DEFAULT_TRAIN_OPS
 
         # Training sequence parameters.
-        self._max_cost_difference = 0.0
+        self._min_epoch_cost_gain = 0.0
         self._max_epochs_first = 1
         self._max_epochs = 1
         self._max_resegment_epochs = 1
@@ -603,7 +603,7 @@ class CatmapModel(object):
         self._calculate_transition_counts()
         self._calculate_emission_counts()
 
-    def initialize_probabilities(self, max_difference_proportion=0.005):
+    def initialize_probabilities(self, min_difference_proportion=0.005):
         """Initialize emission and transition probabilities without
         changing the segmentation, using Viterbi EM.
         """
@@ -616,11 +616,12 @@ class CatmapModel(object):
         self.convergence_of_analysis(
             reestimate_with_unchanged_segmentation,
             self.viterbi_tag_corpus,
-            max_difference_proportion=max_difference_proportion)
+            min_difference_proportion=min_difference_proportion)
         self._reestimate_probabilities()
         self._iteration_number = 1
 
-    def train(self, max_cost_difference=5.0, max_difference_proportion=0.005,
+    def train(self, min_epoch_cost_gain=5.0, min_iter_cost_gain=20.0,
+              min_difference_proportion=0.005,
               max_iterations=15, max_epochs_first=5, max_epochs=1,
               max_resegment_epochs=1):
         """Perform Cat-MAP training on the model.
@@ -628,19 +629,20 @@ class CatmapModel(object):
         segmentation or a pretrained catmap model from pickle or tagged
         segmentation file.
         """
-        self._max_cost_difference = max_cost_difference
+        self._min_epoch_cost_gain = min_epoch_cost_gain
+        self._min_iter_cost_gain = min_iter_cost_gain
         self._max_epochs_first = max_epochs_first
         self._max_epochs = max_epochs
         self._max_resegment_epochs = max_resegment_epochs
 
         if self._iteration_number == 0:
             # Zero:th pre-iteration: let probabilities converge
-            self.initialize_probabilities(max_difference_proportion)
+            self.initialize_probabilities(min_difference_proportion)
 
         self.convergence_of_cost(
             self.train_iteration,
             max_iterations=max_iterations,
-            max_cost_difference=max_cost_difference,
+            min_cost_gain=min_iter_cost_gain,
             iteration_name='iteration')
 
     def train_iteration(self):
@@ -656,7 +658,7 @@ class CatmapModel(object):
                 raise InvalidOperationError(
                     self.training_operations[self._operation_number],
                     operation_name)
-            max_cost_difference = self._training_params('max_cost_difference')
+            min_epoch_cost_gain = self._training_params('min_epoch_cost_gain')
             max_epochs = self._training_params('max_epochs')
             must_reestimate = self._training_params('must_reestimate')
             _logger.info(
@@ -666,7 +668,7 @@ class CatmapModel(object):
                     max_epochs))
             self.convergence_of_cost(
                 lambda: self._transformation_epoch(operation()),
-                max_cost_difference=max_cost_difference,
+                min_cost_gain=min_epoch_cost_gain,
                 max_iterations=max_epochs,
                 must_reestimate=must_reestimate,
                 iteration_name='epoch')
@@ -677,7 +679,7 @@ class CatmapModel(object):
         self._operation_number = 0
         self._iteration_number += 1
 
-    def convergence_of_cost(self, train_func, max_cost_difference=5.0,
+    def convergence_of_cost(self, train_func, min_cost_gain=5.0,
                             max_iterations=5, must_reestimate=False,
                             iteration_name='iter'):
         """Iterates the specified training function until the model cost
@@ -692,7 +694,7 @@ class CatmapModel(object):
         Arguments:
             train_func -- A method of CatmapModel which causes some part of
                           the model to be trained.
-            max_cost_difference -- Stop iterating if cost reduction between
+            min_epoch_cost_gain -- Stop iterating if cost reduction between
                                    iterations is below this limit. Default 5.0
             max_iterations -- Maximum number of iterations (epochs). Default 5.
             must_reestimate -- Call _reestimate_probabilities after each
@@ -725,7 +727,7 @@ class CatmapModel(object):
                 for callback in self.epoch_callbacks:
                     callback(self, iteration)
 
-            if -cost_diff <= max_cost_difference:
+            if -cost_diff <= min_cost_gain:
                 _logger.info(u'Converged, with cost difference ' +
                     u'{} in final {}.'.format(cost_diff, iteration_name))
                 break
@@ -735,8 +737,8 @@ class CatmapModel(object):
             previous_cost = cost
 
     def convergence_of_analysis(self, train_func, resegment_func,
-                                max_difference_proportion=0,
-                                max_cost_difference=-10000,  # FIXME
+                                min_difference_proportion=0,
+                                min_epoch_cost_gain=-10000,  # FIXME
                                 max_iterations=15):
         """Iterates the specified training function until the segmentations
         produced by the model no longer changes more than
@@ -762,11 +764,11 @@ class CatmapModel(object):
                               retags the segmentations, to produce the
                               results to compare. Should return the number
                               of changed words.
-            max_difference_proportion -- Maximum proportion of words with
+            min_difference_proportion -- Maximum proportion of words with
                                          changed segmentation or category
                                          tags in the final iteration.
                                          Default 0.
-            max_cost_difference -- Stop iterating if cost reduction between
+            min_epoch_cost_gain -- Stop iterating if cost reduction between
                                    iterations is below this limit.
             max_iterations -- Maximum number of iterations. Default 15.
         """
@@ -784,7 +786,7 @@ class CatmapModel(object):
 
             cost = self.get_cost()
             cost_diff = cost - previous_cost
-            if -cost_diff <= max_cost_difference:
+            if -cost_diff <= min_epoch_cost_gain:
                 _logger.info(u'Converged, with cost difference ' +
                     u'{} in final iteration.'.format(cost_diff))
                 break
@@ -792,7 +794,7 @@ class CatmapModel(object):
             # perform the reanalysis
             differences = resegment_func()
 
-            if differences <= (max_difference_proportion *
+            if differences <= (min_difference_proportion *
                                len(self.segmentations)):
                 _logger.info(u'Converged, with ' +
                     u'{} differences in final iteration.'.format(differences))
@@ -808,8 +810,10 @@ class CatmapModel(object):
         Customize this if you need more finegrained control of the training.
         """
 
-        if param_name == 'max_cost_difference':
-            return self._max_cost_difference
+        if param_name == 'min_epoch_cost_gain':
+            return self._min_epoch_cost_gain
+        if param_name == 'min_iter_cost_gain':
+            return self._min_iter_cost_gain
         if param_name == 'max_epochs':
             if (self.training_operations[self._operation_number] ==
                 'resegment'):
@@ -1484,14 +1488,14 @@ class CatmapModel(object):
             tagged.append(self.cost_breakdown(seg))
         return sorted(tagged)
 
-    def clear_callbacks:
+    def clear_callbacks(self):
         """Callbacks are not saved in the pickled model, because pickle is
         unable to restore instance methods. If you need callbacks in a loaded
         model, you have to readd them after loading.
         """
 
-        self.operation_callbacks.clear()
-        self.epoch_callbacks.clear()
+        self.operation_callbacks = []
+        self.epoch_callbacks = []
 
     @staticmethod
     def get_categories(wb=False):
@@ -2522,15 +2526,20 @@ Simple usage examples (training and testing):
     # Options for controlling training iteration sequence
     add_arg = parser.add_argument_group(
         'training iteration sequence options').add_argument
-    add_arg('--max-cost-difference', dest='max_cost_difference', type=float,
+    add_arg('--min-epoch-cost-gain', dest='min_epoch_cost_gain', type=float,
+            default=5.0, metavar='<float>',
+            help='Stop iterating if cost reduction between epochs ' +
+                 'is below this limit. ' +
+                 '(default %(default)s).')
+    add_arg('--min-iteration-cost-gain', dest='min_iter_cost_gain', type=float,
             default=5.0, metavar='<float>',
             help='Stop iterating if cost reduction between iterations ' +
                  'is below this limit. ' +
                  '(default %(default)s).')
-    add_arg('--max-difference-proportion', dest='max_diff_prop', type=float,
+    add_arg('--min-difference-proportion', dest='min_diff_prop', type=float,
             default=0.005, metavar='<float>',
-            help='Maximum proportion of words with changed segmentation ' +
-                 'or category tags in the final iteration. ' +
+            help='Stop iterating if proportion of words with changed ' +
+                 'segmentation or category tags is below this limit. ' +
                  '(default %(default)s).')
     add_arg('--max-iterations', dest='max_iterations', type=int, default=15,
             metavar='<int>',
@@ -2683,12 +2692,12 @@ def main(args):
             model.initialize_baseline()
             do_train = True
         model.initialize_probabilities(
-            max_difference_proportion=args.max_diff_prop)
+            min_difference_proportion=args.min_diff_prop)
     elif len(args.baselinefiles) > 0 or len(args.loadsegfiles) > 0:
         # Extending pickled model with new data
         model.viterbi_tag_corpus()
         model.initialize_probabilities(
-            max_difference_proportion=args.max_diff_prop)
+            min_difference_proportion=args.min_diff_prop)
         model.viterbi_tag_corpus()
         do_train = True
 
@@ -2700,8 +2709,9 @@ def main(args):
     # Train model, if there is new data to train on
     if do_train:
         ts = time.time()
-        model.train(max_cost_difference=args.max_cost_difference,
-                    max_difference_proportion=args.max_diff_prop,
+        model.train(min_epoch_cost_gain=args.min_epoch_cost_gain,
+                    min_iter_cost_gain=args.min_iter_cost_gain,
+                    min_difference_proportion=args.min_diff_prop,
                     max_iterations=args.max_iterations,
                     max_epochs_first=args.max_epochs_first,
                     max_epochs=args.max_epochs,

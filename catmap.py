@@ -168,7 +168,7 @@ class MorphUsageProperties(object):
         self._context_builders = collections.defaultdict(MorphContextBuilder)
 
         # Cache for memoized feature-based conditional class probabilities
-        self._condprob_cache = collections.defaultdict(int)
+        self._condprob_cache = collections.defaultdict(float)
         self._marginalizer = None
 
     def clear(self):
@@ -946,7 +946,7 @@ class CatmapModel(object):
     def _find_in_corpus(self, rule, targets=None):
         """Returns the indices of words in the corpus segmentation
         matching the given rule, and the total number of matches, which
-        can be larger than the length of matched_targets, if there
+        can be larger than the sum of counts of matched_targets, if there
         are several matches in some word(s).
 
         Arguments:
@@ -2006,11 +2006,13 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         self._emission_counts[morph] = new_counts
         new_total = sum(new_counts)
 
-        if old_total > 1:
-            self.logtokensum -= old_total * math.log(old_total)
+        if old_total > 0:
+            if old_total > 1:
+                self.logtokensum -= old_total * math.log(old_total)
             self.tokens -= old_total
-        if new_total > 1:
-            self.logtokensum += new_total * math.log(new_total)
+        if new_total > 0:
+            if new_total > 1:
+                self.logtokensum += new_total * math.log(new_total)
             self.tokens += new_total
 
         # invalidate cache
@@ -2087,7 +2089,8 @@ class CatmapEncoding(morfessor.CorpusEncoding):
                 # in the category sum, which has been simplified.
                 transition_matrix_cost -= ((len(categories) - 1) *
                                     math.log(self._cat_tagcount[cat]))
-        transition_matrix_cost = -len(categories) * math.log(total)
+        transition_matrix_cost -= len(categories) * math.log(total)
+        assert(transition_matrix_cost >= 0)
 
         n = self.tokens + self.boundaries
         return  ((n * math.log(n)

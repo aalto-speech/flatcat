@@ -519,11 +519,6 @@ class CatmapModel(object):
         # Catmap encoding also stores the HMM parameters
         self._catmap_coding = CatmapEncoding(morph_usage, self._lexicon_coding)
 
-        # Log probabilities of single letters, for alphabetization cost
-        # FIXME: no longer needed? assume identical distribution?
-        # FIXME: lexicon logtokens? viterbi analysis of new words?
-        self._log_letterprobs = dict()
-
         # Counters for the current iteration and operation within
         # that iteration. These describe the stage of training
         # to allow resuming training of a pickled model.
@@ -871,14 +866,6 @@ class CatmapModel(object):
 
         for morph in self._morph_usage.seen_morphs():
             self._lexicon_coding.add(morph)
-
-        # Calculate letter log probabilities
-        total_letter_tokens = sum(num_letter_tokens.values())
-        log_tlt = math.log(total_letter_tokens)
-        self._log_letterprobs = dict()
-        for letter in num_letter_tokens:
-            self._log_letterprobs[letter] = (log_tlt -
-                math.log(num_letter_tokens[letter]))
 
     def _unigram_transition_probs(self):
         """Initial transition probabilities based on unigram distribution.
@@ -1523,12 +1510,6 @@ class CatmapModel(object):
         """Removes category tags from a segmented corpus."""
         for rcount, segments in segmentations:
             yield ((rcount, [CatmapModel._detag_morph(x) for x in segments]))
-
-    @property
-    def _log_unknownletterprob(self):
-        """The probability of an unknown letter is defined to be the squared
-        probability of the rarest known letter"""
-        return 2 * max(self._log_letterprobs.values())
 
     @property
     def word_tokens(self):

@@ -615,8 +615,13 @@ class CatmapModel(object):
         self.convergence_of_analysis(
             reestimate_with_unchanged_segmentation,
             self.viterbi_tag_corpus,
-            min_difference_proportion=min_difference_proportion)
+            min_difference_proportion=min_difference_proportion,
+            min_cost_gain=-1000.0)     # Cost gain will be ~zero.
         self._reestimate_probabilities()
+
+        for callback in self.epoch_callbacks:
+            callback(self)
+
         self._iteration_number = 1
 
     def train(self, min_epoch_cost_gain=5.0, min_iter_cost_gain=20.0,
@@ -641,9 +646,6 @@ class CatmapModel(object):
         if self._iteration_number == 0:
             # Zero:th pre-iteration: let probabilities converge
             self.initialize_probabilities(min_difference_proportion)
-
-        for callback in self.operation_callbacks:
-            callback(self)
 
         self.convergence_of_cost(
             self.train_iteration,
@@ -2210,7 +2212,7 @@ def _generator_progress(generator):
 
 
 class IterationStatistics(object):
-    def __init__(self, model=None, title=None):
+    def __init__(self, title=None):
         self.iteration_numbers = []
         self.operation_numbers = []
         self.epoch_numbers = []
@@ -2229,11 +2231,11 @@ class IterationStatistics(object):
                 time.strftime("%a, %d.%m.%Y %H:%M:%S"))
         else:
             self.title = title
-        if model is not None:
-            self.callback(model)
-            self.ops = model.training_operations
-        else:
-            self.ops = None
+        self.ops = None
+
+    def set_names(self, model, training_operations):
+        self.ops = training_operations
+        self.categories = model.get_categories()
 
     def callback(self, model, epoch_number=0):
         t_cur = time.time()
@@ -2254,7 +2256,6 @@ class IterationStatistics(object):
 
     def _extract_tag_counts(self, model):
         out = []
-        self.categories = model.get_categories()
         counter = model._catmap_coding._cat_tagcount
         for cat in self.categories:
             out.append(counter[cat])
@@ -2673,7 +2674,6 @@ def main(args):
     # Load exisiting model or create a new one
     if args.loadfile is not None:
         model = io.read_binary_model_file(args.loadfile)
-
     else:
         m_usage = MorphUsageProperties(
             ppl_treshold=args.ppl_treshold,
@@ -2686,6 +2686,13 @@ def main(args):
 
     for f in args.baselinefiles + args.loadsegfiles:
         model.add_corpus_data(io.read_segmentation_file(f))
+
+    # Set up statistics logging
+    stats = None
+    if args.stats_file is not None:
+        stats = IterationStatistics()
+        model.epoch_callbacks.append(stats.callback)
+        stats.set_names(model, args.training_operations)
 
     do_train = False
     if args.loadfile is None:
@@ -2705,11 +2712,6 @@ def main(args):
             min_difference_proportion=args.min_diff_prop)
         model.viterbi_tag_corpus()
         do_train = True
-
-    # Set up statistics logging
-    if args.stats_file is not None:
-        stats = IterationStatistics(model)
-        model.epoch_callbacks.append(stats.callback)
 
     # Train model, if there is new data to train on
     if do_train:

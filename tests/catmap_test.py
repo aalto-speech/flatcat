@@ -52,8 +52,8 @@ def _load_catmap(baseline_seg, no_emissions=False):
                             (Default: False)
         """
 
-        m_usage = catmap.MorphUsageProperties(ppl_treshold=10, ppl_slope=1,
-                                              length_treshold=3,
+        m_usage = catmap.MorphUsageProperties(ppl_threshold=10, ppl_slope=1,
+                                              length_threshold=3,
                                               length_slope=2,
                                               use_word_tokens=False)
         model = catmap.CatmapModel(m_usage)
@@ -190,7 +190,7 @@ class TestProbabilityEstimation(unittest.TestCase):
             for (i, category) in enumerate(self.model.get_categories()):
                 try:
                     observed = _zexp(
-                        self.model._catmap_coding.log_emissionprob(category,
+                        self.model._corpus_coding.log_emissionprob(category,
                                                                    morph))
                 except KeyError:
                     raise KeyError('%s not in observed morphs' % (morph,))
@@ -206,7 +206,7 @@ class TestProbabilityEstimation(unittest.TestCase):
         for cat1 in categories:
             for cat2 in categories:
                 pair = (cat1, cat2)
-                obsval = _zexp(self.model._catmap_coding.log_transitionprob(
+                obsval = _zexp(self.model._corpus_coding.log_transitionprob(
                                                                     *pair))
                 self.assertAlmostEqual(obsval, reference[pair][0], places=9,
                                        msg=msg % (cat1, cat2,
@@ -446,10 +446,10 @@ class TestModelConsistency(unittest.TestCase):
             'lexicon_tokens': int(self.model._lexicon_coding.tokens),
             'segmentations': tuple(self.model.segmentations),
             'emission_counts': _remove_zeros(
-                self.model._catmap_coding._emission_counts),
+                self.model._corpus_coding._emission_counts),
             'transition_counts': _remove_zeros(
-                self.model._catmap_coding._transition_counts),
-            'cat_tagcount': dict(self.model._catmap_coding._cat_tagcount)}
+                self.model._corpus_coding._transition_counts),
+            'cat_tagcount': dict(self.model._corpus_coding._cat_tagcount)}
         state_approx = {
             'lexicon_logtokensum': float(
                 self.model._lexicon_coding.logtokensum),
@@ -472,8 +472,8 @@ class TestModelConsistency(unittest.TestCase):
     def general_consistency_asserts(self):
         """ These values should be internally consistent at all times."""
         self.assertAlmostEqual(
-            sum(self.model._catmap_coding._transition_counts.values()),
-            sum(self.model._catmap_coding._cat_tagcount.values()),
+            sum(self.model._corpus_coding._transition_counts.values()),
+            sum(self.model._corpus_coding._cat_tagcount.values()),
             places=4)
 
         sum_transitions_from = collections.Counter()
@@ -482,7 +482,7 @@ class TestModelConsistency(unittest.TestCase):
         forbidden = catmap.MorphUsageProperties.zero_transitions
         for prev_cat in categories:
             for next_cat in categories:
-                count = self.model._catmap_coding._transition_counts[
+                count = self.model._corpus_coding._transition_counts[
                     (prev_cat, next_cat)]
                 if count == 0:
                     continue
@@ -499,13 +499,13 @@ class TestModelConsistency(unittest.TestCase):
             msg = ('Transition counts were not symmetrical. ' +
                    u'category {}: {}, {}, {}'.format(cat,
                     sum_transitions_from[cat], sum_transitions_to[cat],
-                    self.model._catmap_coding._cat_tagcount[cat]))
+                    self.model._corpus_coding._cat_tagcount[cat]))
 
             self.assertEqual(sum_transitions_from[cat],
                              sum_transitions_to[cat],
                              msg)
             self.assertEqual(sum_transitions_to[cat],
-                             self.model._catmap_coding._cat_tagcount[cat],
+                             self.model._corpus_coding._cat_tagcount[cat],
                              msg)
 
 

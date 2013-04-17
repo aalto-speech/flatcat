@@ -133,17 +133,17 @@ class MorphUsageProperties(object):
     # Cache for memoized valid transitions
     _valid_transitions = None
 
-    def __init__(self, ppl_treshold=100, ppl_slope=None, length_treshold=3,
+    def __init__(self, ppl_threshold=100, ppl_slope=None, length_threshold=3,
                  length_slope=2, use_word_tokens=True,
                  min_perplexity_length=4):
         """Initialize the model parameters describing morph usage.
 
         Arguments:
-            ppl_treshold -- Treshold value for sigmoid used to calculate
+            ppl_threshold -- threshold value for sigmoid used to calculate
                             probabilities from left and right perplexities.
             ppl_slope -- Slope value for sigmoid used to calculate
                          probabilities from left and right perplexities.
-            length_treshold -- Treshold value for sigmoid used to calculate
+            length_threshold -- threshold value for sigmoid used to calculate
                                probabilities from length of morph.
             length_slope -- Slope value for sigmoid used to calculate
                             probabilities from length of morph.
@@ -153,15 +153,15 @@ class MorphUsageProperties(object):
                                      ignored when calculating perplexity.
         """
 
-        self._ppl_treshold = float(ppl_treshold)
-        self._length_treshold = float(length_treshold)
+        self._ppl_threshold = float(ppl_threshold)
+        self._length_threshold = float(length_threshold)
         self._length_slope = float(length_slope)
         self.use_word_tokens = bool(use_word_tokens)
         self._min_perplexity_length = int(min_perplexity_length)
         if ppl_slope is not None:
             self._ppl_slope = float(ppl_slope)
         else:
-            self._ppl_slope = 10.0 / self._ppl_treshold
+            self._ppl_slope = 10.0 / self._ppl_threshold
 
         # Counts of different contexts in which a morph occurs
         self._contexts = Sparse(default=MorphContext(0, 1.0, 1.0))
@@ -187,7 +187,7 @@ class MorphUsageProperties(object):
             neighbour = WORD_BOUNDARY
         else:
             neighbour = segments[i - 1]
-            # Contexts shorter than treshold don't affect perplexity
+            # Contexts shorter than threshold don't affect perplexity
             if len(neighbour) < self._min_perplexity_length:
                 neighbour = None
         if neighbour is not None:
@@ -225,11 +225,11 @@ class MorphUsageProperties(object):
         if morph not in self._condprob_cache:
             context = self._contexts[morph]
 
-            prelike = sigmoid(context.right_perplexity, self._ppl_treshold,
+            prelike = sigmoid(context.right_perplexity, self._ppl_threshold,
                             self._ppl_slope)
-            suflike = sigmoid(context.left_perplexity, self._ppl_treshold,
+            suflike = sigmoid(context.left_perplexity, self._ppl_threshold,
                             self._ppl_slope)
-            stmlike = sigmoid(len(morph), self._length_treshold,
+            stmlike = sigmoid(len(morph), self._length_threshold,
                             self._length_slope)
 
             p_nonmorpheme = (1. - prelike) * (1. - suflike) * (1. - stmlike)
@@ -513,6 +513,9 @@ class CatmapModel(object):
         # The analyzed (segmented and tagged) corpus
         self.segmentations = []
 
+        # The development annotations used to optimize corpus weight
+        self.corpus_weight_updater = None
+
         # Morph occurence backlinks
         # A dict of sets. Keys are morphs, set contents are indices to
         # self.segmentations for words in which the morph occurs
@@ -521,7 +524,7 @@ class CatmapModel(object):
         # Cost variables
         self._lexicon_coding = CatmapLexiconEncoding(morph_usage)
         # Catmap encoding also stores the HMM parameters
-        self._catmap_coding = CatmapEncoding(morph_usage, self._lexicon_coding)
+        self._corpus_coding = CatmapEncoding(morph_usage, self._lexicon_coding)
 
         # Counters for the current iteration and operation within
         # that iteration. These describe the stage of training
@@ -566,7 +569,8 @@ class CatmapModel(object):
         else:
             self.forcesplit = tuple(forcesplit)
 
-    def add_corpus_data(self, segmentations):
+    def add_corpus_data(self, segmentations, freqthreshold=1,
+                        count_modifier=None):
         """Adds the given segmentations (with counts) to the corpus data.
         The new data can be either untagged or tagged.
 
@@ -581,10 +585,20 @@ class CatmapModel(object):
                              (count, (morph1, morph2, ...))
                              where the morphs can be either strings
                              or CategorizedMorphs.
+            freqthreshold -- discard compounds that occur less than
+                             given times in the corpus (default 1).
+            count_modifier -- function for adjusting the counts of each
+                              compound.
         """
+        assert isinstance(freqthreshold, (int, float))
         i = len(self.segmentations)
-        for segmentation in segmentations:
-            segmentation = WordAnalysis(*segmentation)
+        for row in segmentations:
+            count, analysis = row
+            if count < freqthreshold:
+                continue
+            if count_modifier != None:
+                count = count_modifier(count)
+            segmentation = WordAnalysis(count, analysis)
             self.segmentations.append(segmentation)
             for morph in self.detag_word(segmentation.analysis):
                 self.morph_backlinks[morph].add(i)
@@ -624,6 +638,10 @@ class CatmapModel(object):
 
         self._iteration_number = 1
 
+    def set_development_annotations(self, annotations):
+        self.corpus_weight_updater = morfessor.AnnotationsModelUpdate(
+            annotations, self)
+
     def train(self, min_epoch_cost_gain=5.0, min_iter_cost_gain=20.0,
               min_difference_proportion=0.005,
               max_iterations=15, max_epochs_first=5, max_epochs=1,
@@ -637,6 +655,7 @@ class CatmapModel(object):
         """
         self._min_epoch_cost_gain = min_epoch_cost_gain
         self._min_iter_cost_gain = min_iter_cost_gain
+        self._max_iterations = max_iterations
         self._max_epochs_first = max_epochs_first
         self._max_epochs = max_epochs
         self._max_resegment_epochs = max_resegment_epochs
@@ -684,8 +703,17 @@ class CatmapModel(object):
             self._operation_number += 1
             for callback in self.operation_callbacks:
                 callback(self)
+
+        force_another = False
+        if self.corpus_weight_updater is not None:
+            if self.corpus_weight_updater.update_model(self._iteration_number):
+                self._reestimate_probabilities()
+                if self._iteration_number < self._max_iterations:
+                    force_another = True
+
         self._operation_number = 0
         self._iteration_number += 1
+        return force_another
 
     def convergence_of_cost(self, train_func, min_cost_gain=5.0,
                             max_iterations=5, must_reestimate=False,
@@ -701,7 +729,8 @@ class CatmapModel(object):
 
         Arguments:
             train_func -- A method of CatmapModel which causes some part of
-                          the model to be trained.
+                          the model to be trained. If the return value is
+                          True, at least one more iteration is forced.
             min_epoch_cost_gain -- Stop iterating if cost reduction between
                                    iterations is below this limit. Default 5.0
             max_iterations -- Maximum number of iterations (epochs). Default 5.
@@ -720,7 +749,7 @@ class CatmapModel(object):
             _logger.info(time.strftime("%a, %d.%m.%Y %H:%M:%S"))
 
             # perform the optimization
-            train_func()
+            force_another = train_func()
 
             # only do full re-estimation of parameters if the
             # tranformation leaves the model inconsistent
@@ -735,7 +764,7 @@ class CatmapModel(object):
                 for callback in self.epoch_callbacks:
                     callback(self, iteration)
 
-            if -cost_diff <= min_cost_gain:
+            if (not force_another) and -cost_diff <= min_cost_gain:
                 _logger.info(u'Converged, with cost difference ' +
                     u'{} in final {}.'.format(cost_diff, iteration_name))
                 break
@@ -749,7 +778,7 @@ class CatmapModel(object):
                                 min_cost_gain=0, max_iterations=15):
         """Iterates the specified training function until the segmentations
         produced by the model no longer changes more than
-        the specified treshold, until the model cost no longer improves
+        the specified threshold, until the model cost no longer improves
         enough or until maximum number of iterations is reached.
 
         On each iteration the current optimal analysis for the corpus is
@@ -850,12 +879,12 @@ class CatmapModel(object):
         """
 
         num_letter_tokens = collections.Counter()
-        self._catmap_coding.boundaries = 0
+        self._corpus_coding.boundaries = 0
         self._lexicon_coding.clear()
         self._morph_usage.clear()
 
         for rcount, segments in self.segmentations:
-            self._catmap_coding.boundaries += rcount
+            self._corpus_coding.boundaries += rcount
             # Category tags are not needed for these calculations
             segments = CatmapModel.detag_word(segments)
 
@@ -902,12 +931,16 @@ class CatmapModel(object):
             num_tokens_tagged += nclass[cat2]
             transitions[(cat1, cat2)] = nclass[cat2]
 
+        if num_tokens_tagged == 0:
+            _logger.warning('Tried to train without data')
+            return
+
         for pair in MorphUsageProperties.zero_transitions:
             transitions[pair] = 0.0
 
         normalization = (sum(nclass.values()) / num_tokens_tagged)
         for (prev_cat, next_cat) in transitions:
-            self._catmap_coding.update_transition_count(
+            self._corpus_coding.update_transition_count(
                 prev_cat, next_cat,
                 transitions[(prev_cat, next_cat)] * normalization)
 
@@ -917,7 +950,7 @@ class CatmapModel(object):
         a category-tagged segmented corpus.
         """
 
-        self._catmap_coding.clear_transition_counts()
+        self._corpus_coding.clear_transition_counts()
         for rcount, segments in self.segmentations:
             # Only the categories matter, not the morphs themselves
             categories = [x.category for x in segments]
@@ -929,16 +962,16 @@ class CatmapModel(object):
                 if pair in MorphUsageProperties.zero_transitions:
                     _logger.warning(u'Impossible transition ' +
                                     u'{!r} -> {!r}'.format(*pair))
-                self._catmap_coding.update_transition_count(prev_cat,
+                self._corpus_coding.update_transition_count(prev_cat,
                                                             next_cat,
                                                             rcount)
 
     def _calculate_emission_counts(self):
         """Recalculates the emission counts from a retagged segmentation."""
-        self._catmap_coding.clear_emission_counts()
+        self._corpus_coding.clear_emission_counts()
         for (count, analysis) in self.segmentations:
             for morph in analysis:
-                self._catmap_coding.update_emission_count(morph.category,
+                self._corpus_coding.update_emission_count(morph.category,
                                                           morph.morph,
                                                           count)
 
@@ -1190,7 +1223,7 @@ class CatmapModel(object):
         old_count = self._morph_usage.count(morph)
         new_count = old_count + diff_count
         self._morph_usage.set_count(morph, new_count)
-        self._catmap_coding.clear_emission_cache()
+        self._corpus_coding.clear_emission_cache()
         if old_count == 0 and new_count > 0:
             self._lexicon_coding.add(morph)
         elif old_count > 0 and new_count == 0:
@@ -1205,13 +1238,13 @@ class CatmapModel(object):
             multiplier -- +1 to apply the change, -1 to revert it.
         """
         for cmorph in change_counts.emissions:
-            self._catmap_coding.update_emission_count(
+            self._corpus_coding.update_emission_count(
                 cmorph.category,
                 cmorph.morph,
                 change_counts.emissions[cmorph] * multiplier)
 
         for (prev_cat, next_cat) in change_counts.transitions:
-            self._catmap_coding.update_transition_count(
+            self._corpus_coding.update_transition_count(
                 prev_cat, next_cat,
                 change_counts.transitions[(prev_cat, next_cat)] * multiplier)
 
@@ -1283,7 +1316,7 @@ class CatmapModel(object):
                     # Cost of selecting prev_cat as previous state
                     # if now at next_cat
                     cost.append(grid[i][prev_cat].cost +
-                                self._catmap_coding.transit_emit_cost(
+                                self._corpus_coding.transit_emit_cost(
                                     categories[prev_cat],
                                     categories[next_cat], morph))
                 best.append(ViterbiNode(*_minargmin(cost)))
@@ -1296,7 +1329,7 @@ class CatmapModel(object):
         for prev_cat in range(len(categories)):
             pair = (categories[prev_cat], WORD_BOUNDARY)
             cost = (grid[-1][prev_cat].cost +
-                    self._catmap_coding.log_transitionprob(*pair))
+                    self._corpus_coding.log_transitionprob(*pair))
             best.append(cost)
         backtrace = ViterbiNode(*_minargmin(best))
 
@@ -1386,7 +1419,7 @@ class CatmapModel(object):
                     best = ViterbiNode(extrazero, None)
                     if prev_pos == 0:
                         # First morph in word
-                        cost = self._catmap_coding.transit_emit_cost(
+                        cost = self._corpus_coding.transit_emit_cost(
                             WORD_BOUNDARY, categories[next_cat], morph)
                         if cost <= best.cost:
                             best = ViterbiNode(cost, ((0, wb),
@@ -1396,7 +1429,7 @@ class CatmapModel(object):
                         for prev_cat in categories_nowb:
                             cost = (
                                 grid[prev_pos][prev_len - 1][prev_cat].cost +
-                                self._catmap_coding.transit_emit_cost(
+                                self._corpus_coding.transit_emit_cost(
                                     categories[prev_cat],
                                     categories[next_cat],
                                     morph))
@@ -1411,7 +1444,7 @@ class CatmapModel(object):
         for prev_len in range(1, len(word) + 1):
             for prev_cat in categories_nowb:
                 cost = (grid[-1][prev_len - 1][prev_cat].cost +
-                        self._catmap_coding.log_transitionprob(
+                        self._corpus_coding.log_transitionprob(
                             categories[prev_cat],
                             WORD_BOUNDARY))
                 if cost <= best.cost:
@@ -1450,7 +1483,7 @@ class CatmapModel(object):
     def get_cost(self):
         """Return current model encoding cost."""
         # FIXME: annotation coding cost for supervised
-        cost = self._catmap_coding.get_cost() + self._lexicon_coding.get_cost()
+        cost = self._corpus_coding.get_cost() + self._lexicon_coding.get_cost()
         return cost
 
     def cost_breakdown(self, segmentation):
@@ -1460,13 +1493,13 @@ class CatmapModel(object):
         cost = 0.0
         components = []
         for (prefix, suffix) in ngrams(segmentation, n=2):
-            tmp = self._catmap_coding.log_transitionprob(prefix.category,
+            tmp = self._corpus_coding.log_transitionprob(prefix.category,
                                                         suffix.category)
             cost += tmp
             components.append(('transition {} => {}'.format(
                 prefix.category, suffix.category), tmp))
             if suffix.morph != WORD_BOUNDARY:
-                tmp = self._catmap_coding.log_emissionprob(
+                tmp = self._corpus_coding.log_emissionprob(
                     suffix.category, suffix.morph)
                 cost += tmp
                 components.append(('emission   {} :: {}'.format(
@@ -1527,7 +1560,7 @@ class CatmapModel(object):
 
     @property
     def word_tokens(self):
-        return self._catmap_coding.boundaries
+        return self._corpus_coding.boundaries
 
     @property
     def morph_tokens(self):
@@ -2128,8 +2161,8 @@ class Sparse(dict):
             dict.__setitem__(self, key, value)
 
 
-def sigmoid(value, treshold, slope):
-    return 1.0 / (1.0 + math.exp(-slope * (value - treshold)))
+def sigmoid(value, threshold, slope):
+    return 1.0 / (1.0 + math.exp(-slope * (value - threshold)))
 
 
 _LOG_C = math.log(2.865)
@@ -2256,7 +2289,7 @@ class IterationStatistics(object):
 
     def _extract_tag_counts(self, model):
         out = []
-        counter = model._catmap_coding._cat_tagcount
+        counter = model._corpus_coding._cat_tagcount
         for cat in self.categories:
             out.append(counter[cat])
         return out
@@ -2471,19 +2504,19 @@ Simple usage examples (training and testing):
     # Options for training and segmentation
     add_arg = parser.add_argument_group(
         'training and segmentation options').add_argument
-    add_arg('-p', '--perplexity-treshold', dest='ppl_treshold', type=float,
+    add_arg('-p', '--perplexity-threshold', dest='ppl_threshold', type=float,
             default=100., metavar='<float>',
-            help='treshold value for sigmoid used to calculate ' +
+            help='threshold value for sigmoid used to calculate ' +
                  'probabilities from left and right perplexities. ' +
                  '(default %(default)s).')
     add_arg('--perplexity-slope', dest='ppl_slope', type=float, default=None,
             metavar='<float>',
             help='slope value for sigmoid used to calculate ' +
                  'probabilities from left and right perplexities. ' +
-                 '(default 10 / perplexity-treshold).')
-    add_arg('--length-treshold', dest='length_treshold', type=float,
+                 '(default 10 / perplexity-threshold).')
+    add_arg('--length-threshold', dest='length_threshold', type=float,
             default=3., metavar='<float>',
-            help='treshold value for sigmoid used to calculate ' +
+            help='threshold value for sigmoid used to calculate ' +
                  'probabilities from length of morph. ' +
                  '(default %(default)s).')
     add_arg('--length-slope', dest='length_slope', type=float, default=2.,
@@ -2500,10 +2533,10 @@ Simple usage examples (training and testing):
             help='morphs shorter than this length are ' +
                  'ignored when calculating perplexity. ' +
                  '(default %(default)s).')
-#     add_arg('-d', '--dampening', dest="dampening", type=str, default='none',
-#             metavar='<type>', choices=['none', 'log', 'ones'],
-#             help="frequency dampening for training data ('none', 'log', or "
-#                  "'ones'; default '%(default)s').")
+    add_arg('-d', '--dampening', dest="dampening", type=str, default='none',
+            metavar='<type>', choices=['none', 'log', 'ones'],
+            help="frequency dampening for training data ('none', 'log', or "
+                 "'ones'; default '%(default)s').")
     add_arg('-f', '--forcesplit', dest="forcesplit", type=list, default=['-'],
             metavar='<list>',
             help="force split on given atoms (default %(default)s).")
@@ -2578,9 +2611,9 @@ Simple usage examples (training and testing):
 #     add_arg('-A', '--annotations', dest="annofile", default=None,
 #             metavar='<file>',
 #             help="load annotated data for semi-supervised learning.")
-#     add_arg('-D', '--develset', dest="develfile", default=None,
-#             metavar='<file>',
-#           help="load annotated data for tuning the corpus weight parameter.")
+    add_arg('-D', '--develset', dest="develfile", default=None,
+            metavar='<file>',
+            help="load annotated data for tuning the corpus weight parameter.")
 #     add_arg('-w', '--corpusweight', dest="corpusweight", type=float,
 #             default=1.0, metavar='<float>',
 #             help="corpus weight parameter (default %(default)s); "
@@ -2659,7 +2692,17 @@ def main(args):
     if args.progress:
         show_progress_bar = True
         ch.setLevel(min(ch.level, logging.INFO))
-    # FIXME direct paste up to this point
+
+    # Set frequency dampening function
+    if args.dampening == 'none':
+        dampfunc = None
+    elif args.dampening == 'log':
+        dampfunc = lambda x: int(round(math.log(x + 1, 2)))
+    elif args.dampening == 'ones':
+        dampfunc = lambda x: 1
+    else:
+        raise ArgumentException("unknown dampening type '%s'" % args.dampening)
+    # FIXME everything directly pasted up to this point
 
     if (args.loadfile is None and
             len(args.baselinefiles) == 0 and
@@ -2676,16 +2719,23 @@ def main(args):
         model = io.read_binary_model_file(args.loadfile)
     else:
         m_usage = MorphUsageProperties(
-            ppl_treshold=args.ppl_treshold,
+            ppl_threshold=args.ppl_threshold,
             ppl_slope=args.ppl_slope,
-            length_treshold=args.length_treshold,
+            length_threshold=args.length_threshold,
             length_slope=args.length_slope,
             use_word_tokens=not args.type_ppl,
             min_perplexity_length=args.min_ppl_length)
         model = CatmapModel(m_usage, forcesplit=args.forcesplit)
 
     for f in args.baselinefiles + args.loadsegfiles:
-        model.add_corpus_data(io.read_segmentation_file(f))
+        model.add_corpus_data(io.read_segmentation_file(f),
+                              count_modifier=dampfunc)
+
+    if args.develfile is not None:
+        develannots = io.read_annotations_file(args.develfile,
+            analysis_sep=args.analysisseparator)
+    else:
+        develannots = None
 
     # Set up statistics logging
     stats = None
@@ -2715,6 +2765,9 @@ def main(args):
 
     # Train model, if there is new data to train on
     if do_train:
+        if develannots is not None:
+            model.set_development_annotations(develannots)
+
         ts = time.time()
         model.train(min_epoch_cost_gain=args.min_epoch_cost_gain,
                     min_iter_cost_gain=args.min_iter_cost_gain,

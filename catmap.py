@@ -350,6 +350,8 @@ class MorphUsageProperties(object):
             msg = u'{}: {}'.format(morph, self._contexts[morph].count)
             assert self._contexts[morph].count == 0, msg
             del self._contexts[morph]
+            if morph in self._condprob_cache:
+                del self._condprob_cache[morph]
 
     def remove_zeros(self):
         """Remove context information for all morphs contexts with zero
@@ -362,6 +364,8 @@ class MorphUsageProperties(object):
                 remove_list.append(morph)
         for morph in remove_list:
             del self._contexts[morph]
+            if morph in self._condprob_cache:
+                del self._condprob_cache[morph]
 
     def seen_morphs(self):
         """All morphs that have defined contexts."""
@@ -637,6 +641,9 @@ class CatmapModel(object):
         if self._iteration_number == 0:
             # Zero:th pre-iteration: let probabilities converge
             self.initialize_probabilities(min_difference_proportion)
+
+        for callback in self.operation_callbacks:
+            callback(self)
 
         self.convergence_of_cost(
             self.train_iteration,
@@ -1910,7 +1917,6 @@ class CatmapEncoding(morfessor.CorpusEncoding):
             diff_count -- The change in the number of transitions.
         """
 
-        diff_count = float(diff_count)
         msg = 'update_transition_count needs category names, not indices'
         assert not isinstance(prev_cat, int), msg
         assert not isinstance(next_cat, int), msg
@@ -2149,7 +2155,7 @@ def ngrams(sequence, n=2):
             yield(tuple(window))
 
 
-def _nt_zeros(constructor, zero=0.0):
+def _nt_zeros(constructor, zero=0):
     """Convenience function to return a namedtuple initialized to zeros,
     without needing to know the number of fields."""
     zeros = [zero] * len(constructor._fields)

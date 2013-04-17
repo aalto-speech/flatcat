@@ -618,7 +618,9 @@ class CatmapModel(object):
     def train(self, min_epoch_cost_gain=5.0, min_iter_cost_gain=20.0,
               min_difference_proportion=0.005,
               max_iterations=15, max_epochs_first=5, max_epochs=1,
-              max_resegment_epochs=1):
+              max_resegment_epochs=1,
+              max_shift_distance=2,
+              min_shift_remainder=2):
         """Perform Cat-MAP training on the model.
         The model must have been initialized, either by loading a baseline
         segmentation or a pretrained catmap model from pickle or tagged
@@ -629,6 +631,8 @@ class CatmapModel(object):
         self._max_epochs_first = max_epochs_first
         self._max_epochs = max_epochs
         self._max_resegment_epochs = max_resegment_epochs
+        self._max_shift = max_shift_distance
+        self._min_shift_remainder = min_shift_remainder
 
         if self._iteration_number == 0:
             # Zero:th pre-iteration: let probabilities converge
@@ -733,8 +737,7 @@ class CatmapModel(object):
 
     def convergence_of_analysis(self, train_func, resegment_func,
                                 min_difference_proportion=0,
-                                min_epoch_cost_gain=-10000,  # FIXME
-                                max_iterations=15):
+                                min_cost_gain=0, max_iterations=15):
         """Iterates the specified training function until the segmentations
         produced by the model no longer changes more than
         the specified treshold, until the model cost no longer improves
@@ -763,7 +766,7 @@ class CatmapModel(object):
                                          changed segmentation or category
                                          tags in the final iteration.
                                          Default 0.
-            min_epoch_cost_gain -- Stop iterating if cost reduction between
+            min_cost_gain -- Stop iterating if cost reduction between
                                    iterations is below this limit.
             max_iterations -- Maximum number of iterations. Default 15.
         """
@@ -781,7 +784,7 @@ class CatmapModel(object):
 
             cost = self.get_cost()
             cost_diff = cost - previous_cost
-            if -cost_diff <= min_epoch_cost_gain:
+            if -cost_diff <= min_cost_gain:
                 _logger.info(u'Converged, with cost difference ' +
                     u'{} in final iteration.'.format(cost_diff))
                 break
@@ -1144,17 +1147,16 @@ class CatmapModel(object):
 
         def shift_helper(prefix, suffix):
             results = []
-            for i in range(1, 2 + 1):    # FIXME magic number: max shift
+            for i in range(1, self._max_shift + 1):
                 # Move backward
-                if len(prefix) - i >= 2:
-                    # FIXME magic number: min remaining chars
+                if len(prefix) - i >= self._min_shift_remainder:
                     new_pre = prefix.morph[:-i]
                     shifted = prefix.morph[-i:]
                     new_suf = shifted + suffix.morph
                     results.append((CategorizedMorph(new_pre, None),
                                     CategorizedMorph(new_suf, None)))
                 # Move forward
-                if len(suffix) - i >= 2:
+                if len(suffix) - i >= self._min_shift_remainder:
                     new_suf = suffix.morph[i:]
                     shifted = suffix.morph[:i]
                     new_pre = prefix.morph + shifted
@@ -1328,6 +1330,10 @@ class CatmapModel(object):
             # Merge potential segments
             word = ''.join(segments)
 
+        # To make sure that internally impossible states are penalized
+        # even more than impossible states caused by zero parameters.
+        extrazero = LOGPROB_ZERO ** 2
+
         # This function uses internally indices of categories,
         # instead of names and the word boundary object,
         # to remove the need to look them up constantly.
@@ -1344,7 +1350,7 @@ class CatmapModel(object):
         #      [MORPHLEN_OF_MORPH_ENDING_AT_POSITION - 1]
         #      [TAGINDEX_OF_MORPH_ENDING_AT_POSITION]
         # Initialized to pseudo-zero for all states
-        zeros = [ViterbiNode(LOGPROB_ZERO, None)] * len(categories)
+        zeros = [ViterbiNode(extrazero, None)] * len(categories)
         grid = [[zeros]]
         # Except probability one that first state is a word boundary
         grid[0][0][wb] = ViterbiNode(0, None)
@@ -1352,7 +1358,7 @@ class CatmapModel(object):
         # Temporaries
         # Cumulative costs for each category at current time step
         cost = None
-        best = ViterbiNode(LOGPROB_ZERO, None)
+        best = ViterbiNode(extrazero, None)
 
         for pos in range(1, len(word) + 1):
             grid.append([])
@@ -1364,12 +1370,11 @@ class CatmapModel(object):
                 if morph not in self._morph_usage:
                     # The morph corresponding to this substring has not
                     # been encountered: zero probability for this solution
-                    # FIXME: alphabetize instead?
                     grid[pos][next_len - 1] = zeros
                     continue
 
                 for next_cat in categories_nowb:
-                    best = ViterbiNode(LOGPROB_ZERO, None)
+                    best = ViterbiNode(extrazero, None)
                     if prev_pos == 0:
                         # First morph in word
                         cost = self._catmap_coding.transit_emit_cost(
@@ -1393,7 +1398,7 @@ class CatmapModel(object):
                     grid[pos][next_len - 1][next_cat] = best
 
         # Last transition must be to word boundary
-        best = ViterbiNode(LOGPROB_ZERO, None)
+        best = ViterbiNode(extrazero, None)
         for prev_len in range(1, len(word) + 1):
             for prev_cat in categories_nowb:
                 cost = (grid[-1][prev_len - 1][prev_cat].cost +
@@ -1404,7 +1409,7 @@ class CatmapModel(object):
                     best = ViterbiNode(cost, ((prev_len, prev_cat),
                         CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)))
 
-        if best.cost == LOGPROB_ZERO:
+        if best.cost >= LOGPROB_ZERO:
             _logger.warning(
                 u'No possible segmentation for word {}'.format(word))
             return [CategorizedMorph(word, None)], LOGPROB_ZERO
@@ -1802,8 +1807,6 @@ class CatmapLexiconEncoding(morfessor.LexiconEncoding):
     """Extends LexiconEncoding to include the coding costs of the
     encoding cost of morph usage (context) features.
     """
-    # FIXME, should this be renamed CatmapParameterEncoding?
-    # i.e., is it P(lexicon) or P(theta) = P(lexicon) + P(grammar)?
 
     def __init__(self, morph_usage):
         super(CatmapLexiconEncoding, self).__init__()
@@ -2041,6 +2044,8 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         transition_matrix_cost = 0.0
         total = 0.0
         # FIXME: this can be optimized when getting rid of the assertions
+        # except if implementing hierarchy: then the incoming == outgoing
+        # assumption doesn't hold anymore
         sum_transitions_from = collections.Counter()
         sum_transitions_to = collections.Counter()
         forbidden = MorphUsageProperties.zero_transitions
@@ -2549,6 +2554,16 @@ Simple usage examples (training and testing):
                  'Valid training operations are strings for which ' +
                  'CatmapModel has a function named _op_X_generator. ' +
                  '(default %(default)s).')
+    add_arg('--max-shift-distance', dest='max_shift_distance',
+            type=int, default=2, metavar='<int>',
+            help='Maximum number of letters that the break between morphs ' +
+                 'can move in the shift operation. ' +
+                 '(default %(default)s).')
+    add_arg('--min-shift-remainder', dest='min_shift_remainder',
+            type=int, default=2, metavar='<int>',
+            help='Minimum number of letters remaining in the shorter morph ' +
+                 'after a shift operation. ' +
+                 '(default %(default)s).')
 
     # Options for semi-supervised model training
 #     add_arg = parser.add_argument_group(
@@ -2699,7 +2714,9 @@ def main(args):
                     max_iterations=args.max_iterations,
                     max_epochs_first=args.max_epochs_first,
                     max_epochs=args.max_epochs,
-                    max_resegment_epochs=args.max_resegment_epochs)
+                    max_resegment_epochs=args.max_resegment_epochs,
+                    max_shift_distance=args.max_shift_distance,
+                    min_shift_remainder=args.min_shift_remainder)
         _logger.info('Final cost: {}'.format(model.get_cost()))
         te = time.time()
         _logger.info('Training time: {:.3f}s'.format(te - ts))

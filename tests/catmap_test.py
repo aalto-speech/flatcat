@@ -300,7 +300,6 @@ class TestModelConsistency(unittest.TestCase):
         segmentation is consistent."""
         self.presplit()
         self.initial_state_asserts()
-#test_modify_morph_count
 
     def test_transforms(self):
         self.model.add_corpus_data(
@@ -367,6 +366,40 @@ class TestModelConsistency(unittest.TestCase):
 
         self._apply_revert(apply_update_counts, revert_update_counts, None)
 
+    def test_initial_backlinks(self):
+        self.model.add_corpus_data(
+            TestModelConsistency.one_split_segmentation)
+        self.presplit()
+        self._backlinks()
+
+    def test_trained_backlinks(self):
+        self.model.add_corpus_data(
+            TestModelConsistency.one_split_segmentation)
+        self.model.initialize_baseline()
+        self.model.train(min_difference_proportion=0.9, max_iterations=1,
+                         max_epochs_first=1, max_epochs=1,
+                         max_resegment_epochs=1)
+        self._backlinks()
+
+    def _backlinks(self):
+        self.model._morph_usage.remove_zeros()
+        backlink_keys = sorted(self.model.morph_backlinks.keys())
+        seen_morphs = sorted(self.model._morph_usage.seen_morphs())
+        self.assertEqual(backlink_keys, seen_morphs,
+                         msg='Seen morphs didnt match backlink keys')
+        # Remove all backlinked morphs from the segmentation
+        for morph in backlink_keys:
+            for i in self.model.morph_backlinks[morph]:
+                count, segmentation = self.model.segmentations[i]
+                segmentation = [x for x in segmentation if x.morph != morph]
+                self.model.segmentations[i] = catmap.WordAnalysis(count,
+                                                                  segmentation)
+        # Segmentation should now be empty,
+        # otherwise some morph was missing a backlink
+        for seg in self.model.segmentations:
+            self.assertEqual(seg.analysis, [],
+                msg=u'Morphs with missing backlinks: {}'.format(seg))
+
     def _apply_revert(self, apply_func, revert_func, is_remove):
         state_exact, state_approx = self.store_state()
         old_cost = self.model.get_cost()
@@ -376,7 +409,7 @@ class TestModelConsistency(unittest.TestCase):
 
         revert_func()
         new_cost = self.model.get_cost()
-    
+
         msg = (u'_apply_revert with {} and {} did not return to same cost. ' +
                u'old: {}, new: {}')
         msg = msg.format(apply_func.__name__, revert_func.__name__,

@@ -1092,6 +1092,12 @@ class CatmapModel(object):
                         self.detag_word(new_analysis.analysis))
                 self._update_counts(best.transform.change_counts, 1)
             self._morph_usage.remove_temporaries(temporaries)
+        backlinks_rm = []
+        for morph in self.morph_backlinks:
+            if len(self.morph_backlinks[morph]) == 0:
+                backlinks_rm.append(morph)
+        for morph in backlinks_rm:
+            del self.morph_backlinks[morph]
 
     def _op_split_generator(self):
         """Generates splits of seen morphs into two submorphs.

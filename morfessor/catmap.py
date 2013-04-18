@@ -19,433 +19,35 @@ import math
 import sys
 import time
 
-#from matplotlib import pyplot as plt    # FIXME: can remove when files split
-
-import morfessor
+from . import baseline
+from .categorizationscheme import ByCategory, MorphUsageProperties
+from .categorizationscheme import WORD_BOUNDARY, get_categories
+from .diagnostics import IterationStatistics
+from .exception import ArgumentException, InvalidCategoryError
+from .exception import InvalidOperationError
+from .io import MorfessorIO
+from .utils import Sparse, LOGPROB_ZERO, ngrams, minargmin, zlog
+from .utils import _generator_progress
 
 PY3 = sys.version_info.major == 3
 
 _logger = logging.getLogger(__name__)
 _logger.level = logging.DEBUG   # FIXME development convenience
 
-LOGPROB_ZERO = 1000000
-
-# Progress bar for generators (length unknown):
-# Print a dot for every GENERATOR_DOT_FREQ:th dot.
-# Set to <= 0 to disable progress bar.
-GENERATOR_DOT_FREQ = 500
-
-
-class WordBoundary(object):
-    def __repr__(self):
-        return '#'
-
-    def __len__(self):
-        return 0
-
-    def __eq__(self, other):
-        # Word boundaries from different runs should be equal
-        if isinstance(other, WordBoundary):
-            return True
-        return False
-
-    def __hash__(self):
-        # This is called a lot. Using constant for minor optimization.
-        #return hash(self.__class__.__name__)
-        return 8364886854198508766
-
-
-WORD_BOUNDARY = WordBoundary()
 
 # Grid node for viterbi algorithm
 ViterbiNode = collections.namedtuple('ViterbiNode', ['cost', 'backpointer'])
 
 WordAnalysis = collections.namedtuple('WordAnalysis', ['count', 'analysis'])
 
-##################################
-### Categorization-dependent code:
-### to change the categories, only code in this section needs to be changed.
 
-
-# A data structure with one value for each category.
-# This also defines the set of possible categories
-ByCategory = collections.namedtuple('ByCategory',
-                                    ['PRE', 'STM', 'SUF', 'ZZZ'])
-
-
-# The morph usage/context features used to calculate the probability of a
-# morph belonging to a category.
-MorphContext = collections.namedtuple('MorphContext',
-                                      ['count', 'left_perplexity',
-                                       'right_perplexity'])
-
-
-# Context type flags, from which the context type is formed.
-# (Binary flags in integer format)
-CONTEXT_FLAG_INITIAL = 1
-CONTEXT_FLAG_FINAL = 2
-# The context type values
-CONTEXT_TYPE_INTERNAL = 0
-CONTEXT_TYPE_INITIAL = CONTEXT_TYPE_INTERNAL + CONTEXT_FLAG_INITIAL
-CONTEXT_TYPE_FINAL = CONTEXT_TYPE_INTERNAL + CONTEXT_FLAG_FINAL
-CONTEXT_TYPE_BOTH = (CONTEXT_TYPE_INTERNAL + CONTEXT_FLAG_INITIAL +
-                     CONTEXT_FLAG_FINAL)
-
-
-class MorphContextBuilder(object):
-    """Temporary structure used when calculating the MorphContexts."""
-    def __init__(self):
-        self.count = 0
-        self.left = collections.Counter()
-        self.right = collections.Counter()
-
-    @property
-    def left_perplexity(self):
-        return MorphContextBuilder._perplexity(self.left)
-
-    @property
-    def right_perplexity(self):
-        return MorphContextBuilder._perplexity(self.right)
-
-    @staticmethod
-    def _perplexity(contexts):
-        entropy = 0
-        total_tokens = float(sum(contexts.values()))
-        for c in contexts:
-            p = float(contexts[c]) / total_tokens
-            entropy -= p * math.log(p)
-        return math.exp(entropy)
-
-
-class MorphUsageProperties(object):
-    """This class describes how the prior probabilities are calculated
-    from the usage of morphs.
-    """
-
-    # These transitions are impossible
-    zero_transitions = ((WORD_BOUNDARY, WORD_BOUNDARY),
-                        ('PRE', WORD_BOUNDARY),
-                        ('PRE', 'SUF'),
-                        (WORD_BOUNDARY, 'SUF'))
-    # These transitions are additionally not considered for splitting a morph
-    invalid_split_transitions = (('SUF', 'PRE'),
-                                 ('SUF', 'STM'),
-                                 ('STM', 'PRE'))
-
-    # Cache for memoized valid transitions
-    _valid_transitions = None
-
-    def __init__(self, ppl_threshold=100, ppl_slope=None, length_threshold=3,
-                 length_slope=2, use_word_tokens=True,
-                 min_perplexity_length=4):
-        """Initialize the model parameters describing morph usage.
-
-        Arguments:
-            ppl_threshold -- threshold value for sigmoid used to calculate
-                            probabilities from left and right perplexities.
-            ppl_slope -- Slope value for sigmoid used to calculate
-                         probabilities from left and right perplexities.
-            length_threshold -- threshold value for sigmoid used to calculate
-                               probabilities from length of morph.
-            length_slope -- Slope value for sigmoid used to calculate
-                            probabilities from length of morph.
-            use_word_tokens -- If true, perplexity is based on word tokens.
-                               If false, perplexity is based on word types.
-            min_perplexity_length -- Morphs shorter than this length are
-                                     ignored when calculating perplexity.
-        """
-
-        self._ppl_threshold = float(ppl_threshold)
-        self._length_threshold = float(length_threshold)
-        self._length_slope = float(length_slope)
-        self.use_word_tokens = bool(use_word_tokens)
-        self._min_perplexity_length = int(min_perplexity_length)
-        if ppl_slope is not None:
-            self._ppl_slope = float(ppl_slope)
-        else:
-            self._ppl_slope = 10.0 / self._ppl_threshold
-
-        # Counts of different contexts in which a morph occurs
-        self._contexts = Sparse(default=MorphContext(0, 1.0, 1.0))
-        self._context_builders = collections.defaultdict(MorphContextBuilder)
-
-        # Cache for memoized feature-based conditional class probabilities
-        self._condprob_cache = collections.defaultdict(float)
-        self._marginalizer = None
-
-    def clear(self):
-        """Resets the context variables.
-        Use before fully reprocessing a segmented corpus."""
-        self._contexts.clear()
-        self._context_builders.clear()
-        self._condprob_cache.clear()
-        self._marginalizer = None
-
-    def add_to_context(self, morph, pcount, rcount, i, segments):
-        """Collect information about the contexts in which the morph occurs"""
-        # Previous morph.
-        if i == 0:
-            # Word boundaries are counted as separate contexts
-            neighbour = WORD_BOUNDARY
-        else:
-            neighbour = segments[i - 1]
-            # Contexts shorter than threshold don't affect perplexity
-            if len(neighbour) < self._min_perplexity_length:
-                neighbour = None
-        if neighbour is not None:
-            self._context_builders[morph].left[neighbour] += pcount
-
-        # Next morph.
-        if i == len(segments) - 1:
-            neighbour = WORD_BOUNDARY
-        else:
-            neighbour = segments[i + 1]
-            if len(neighbour) < self._min_perplexity_length:
-                neighbour = None
-        if neighbour is not None:
-            self._context_builders[morph].right[neighbour] += pcount
-
-        self._context_builders[morph].count += rcount
-
-    def compress_contexts(self):
-        """Calculate compact features from the context data collected into
-        _context_builders. This is done to save memory."""
-        for morph in self._context_builders:
-            tmp = self._context_builders[morph]
-            self._contexts[morph] = MorphContext(tmp.count,
-                                                 tmp.left_perplexity,
-                                                 tmp.right_perplexity)
-        self._context_builders.clear()
-
-    def condprobs(self, morph):
-        """Calculate feature-based conditional probabilities P(Category|Morph)
-        from the contexts in which the morphs occur.
-
-        Arguments:
-            morph -- A string representation of the morph type.
-        """
-        if morph not in self._condprob_cache:
-            context = self._contexts[morph]
-
-            prelike = sigmoid(context.right_perplexity, self._ppl_threshold,
-                            self._ppl_slope)
-            suflike = sigmoid(context.left_perplexity, self._ppl_threshold,
-                            self._ppl_slope)
-            stmlike = sigmoid(len(morph), self._length_threshold,
-                            self._length_slope)
-
-            p_nonmorpheme = (1. - prelike) * (1. - suflike) * (1. - stmlike)
-
-            if p_nonmorpheme == 1:
-                p_pre = 0.0
-                p_suf = 0.0
-                p_stm = 0.0
-            else:
-                if p_nonmorpheme < 0.001:
-                    p_nonmorpheme = 0.001
-
-                normcoeff = ((1.0 - p_nonmorpheme) /
-                            ((prelike ** 2) + (suflike ** 2) + (stmlike ** 2)))
-                p_pre = (prelike ** 2) * normcoeff
-                p_suf = (suflike ** 2) * normcoeff
-                p_stm = 1.0 - p_pre - p_suf - p_nonmorpheme
-
-            self._condprob_cache[morph] = ByCategory(p_pre, p_stm, p_suf,
-                                                     p_nonmorpheme)
-        return self._condprob_cache[morph]
-
-    @property
-    def marginal_class_probs(self):
-        """True distribution of class probabilities,
-        calculated by marginalizing over the feature based conditional
-        probabilities over all observed morphs.
-        This will not give the same result as the observed count based
-        calculation.
-        """
-        return self._get_marginalizer().normalized()
-
-    @property
-    def category_token_count(self):
-        """Un-normalized distribution of class probabilities,
-        the sum of which is the number of observed morphs.
-        See marginal_class_probs for the normalized version.
-        """
-        return self._get_marginalizer().category_token_count
-
-    def _get_marginalizer(self):
-        if self._marginalizer is None:
-            self._marginalizer = Marginalizer()
-            for morph in self.seen_morphs():
-                self._marginalizer.add(self.count(morph),
-                                       self.condprobs(morph))
-        return self._marginalizer
-
-    def feature_cost(self, morph):
-        """The cost of encoding the necessary features along with a morph.
-
-        The length in characters of the morph is also a feature, but it does
-        not need to be encoded as it is available from the surface form.
-        """
-        context = self._contexts[morph]
-        return (universalprior(context.right_perplexity) +
-                universalprior(context.left_perplexity))
-
-    def estimate_contexts(self, old_morphs, new_morphs):
-        """Estimates context features for new unseen morphs.
-
-        Arguments:
-            old_morphs -- A sequence of morphs being replaced. The existing
-                          context of these morphs can be used in the
-                          estimation.
-            new_morphs -- A sequence of morphs that replaces the old ones.
-                          Any previously unseen morphs in this sequence
-                          will get context features estimated from their
-                          surface form and/or from the contexts of the
-                          old morphs they replace.
-        Returns:
-            A list of temporary morph contexts that have been estimated.
-            These should be removed by the caller if no longer necessary.
-            The removal is done using MorphContext.remove_temporaries.
-        """
-        temporaries = []
-        for (i, morph) in enumerate(new_morphs):
-            if morph in self:
-                # The morph already has real context: no need to estimate
-                continue
-            if i == 0:
-                # Prefix inherits left perplexity of leftmost parent
-                l_ppl = self._contexts[old_morphs[0]].left_perplexity
-            else:
-                # Otherwise assume that the morph doesn't appear in any
-                # other contexts, which gives perplexity 1.0
-                l_ppl = 1.0
-            if i == len(new_morphs) - 1:
-                r_ppl = self._contexts[old_morphs[-1]].right_perplexity
-            else:
-                r_ppl = 1.0
-            count = 0   # estimating does not add instances of the morph
-            self._contexts[morph] = MorphContext(count, l_ppl, r_ppl)
-            temporaries.append(morph)
-        return temporaries
-
-    @staticmethod
-    def context_type(prev_morph, next_morph, prev_cat, next_cat):
-        """Cluster certain types of context, to allow making context-dependant
-        joining decisions."""
-        # This categorization scheme ignores prev_morph, next_morph,
-        # and only uses the categories
-        ctype = CONTEXT_TYPE_INTERNAL
-        if prev_cat == WORD_BOUNDARY or prev_cat == 'PRE':
-            ctype += CONTEXT_FLAG_INITIAL
-        if next_cat == WORD_BOUNDARY or next_cat == 'SUF':
-            ctype += CONTEXT_FLAG_FINAL
-        return ctype
-
-    # The methods in this class below this line are helpers that will
-    # probably not need to be modified if the categorization scheme changes
-
-    def remove_temporaries(self, temporaries):
-        """Remove estimated temporary morph contexts when no longer needed."""
-        for morph in temporaries:
-            if morph not in self:
-                continue
-            msg = u'{}: {}'.format(morph, self._contexts[morph].count)
-            assert self._contexts[morph].count == 0, msg
-            del self._contexts[morph]
-            if morph in self._condprob_cache:
-                del self._condprob_cache[morph]
-
-    def remove_zeros(self):
-        """Remove context information for all morphs contexts with zero
-        count. This can save a bit more memory than just removing estimated
-        temporary contexts. Estimated context will be used for the removed
-        morphs for the rest of the iteration."""
-        remove_list = []
-        for morph in self._contexts.keys():
-            if self._contexts[morph].count == 0:
-                remove_list.append(morph)
-        for morph in remove_list:
-            del self._contexts[morph]
-            if morph in self._condprob_cache:
-                del self._condprob_cache[morph]
-
-    def seen_morphs(self):
-        """All morphs that have defined contexts."""
-        return [morph for morph in self._contexts.keys()
-                if self._contexts[morph].count > 0]
-
-    def __contains__(self, morph):
-        return morph in self._contexts
-
-    def get(self, morph):
-        """Returns the context features of a seen morph."""
-        return self._contexts[morph]
-
-    def count(self, morph):
-        """The counts in the corpus of morphs with contexts."""
-        if morph not in self._contexts:
-            return 0
-        return self._contexts[morph].count
-
-    def set_count(self, morph, new_count):
-        """Set the number of observed occurences of a morph.
-        Also updates the true category distribution.
-        """
-
-        if self._marginalizer is not None and self.count(morph) > 0:
-            self._marginalizer.add(-self.count(morph),
-                                   self.condprobs(morph))
-        self._contexts[morph] = self._contexts[morph]._replace(count=new_count)
-        assert self.count(morph) >= 0
-        if self._marginalizer is not None and self.count(morph) > 0:
-            self._marginalizer.add(self.count(morph),
-                                   self.condprobs(morph))
-
-    @classmethod
-    def valid_transitions(cls):
-        """Returns (and caches) all valid transitions as pairs
-        (from_category, to_category). Any transitions not included
-        in the list are forbidden, and must have count 0 and probability 0.
-        """
-        if cls._valid_transitions is None:
-            cls._valid_transitions = []
-            categories = CatmapModel.get_categories(wb=True)
-            for cat1 in categories:
-                for cat2 in categories:
-                    if (cat1, cat2) in cls.zero_transitions:
-                        continue
-                    cls._valid_transitions.append((cat1, cat2))
-            cls._valid_transitions = tuple(cls._valid_transitions)
-        return cls._valid_transitions
-
-### End of categorization-dependent code
-########################################
-
-
-class InvalidCategoryError(Exception):
-    def __init__(self, category):
-        Exception.__init__(
-            self,
-            u'This model does not recognize the category {}'.format(
-                category))
-
-
-class InvalidOperationError(Exception):
-    def __init__(self, operation, function_name):
-        Exception.__init__(
-            self,
-            (u'This model does not have a method ' +
-             u'{}, and therefore cannot perform operation "{}"'.format(
-                function_name, operation)))
-
-
-class CatmapIO(morfessor.MorfessorIO):
+class CatmapIO(MorfessorIO):
     """Extends data file formats to include category tags."""
 
     def __init__(self, encoding=None, construction_separator=' + ',
                  comment_start='#', compound_separator='\s+',
                  category_separator='/'):
-        morfessor.MorfessorIO.__init__(
+        MorfessorIO.__init__(
             self, encoding=encoding,
             construction_separator=construction_separator,
             comment_start=comment_start, compound_separator=compound_separator,
@@ -488,7 +90,7 @@ class CatmapIO(morfessor.MorfessorIO):
                     category = None
                 else:
                     category = parts[1]
-                    if category not in CatmapModel.get_categories():
+                    if category not in get_categories():
                         raise InvalidCategoryError(category)
                 cmorphs.append(CategorizedMorph(morph, category))
             yield(int(count), tuple(cmorphs))
@@ -641,7 +243,7 @@ class CatmapModel(object):
         self._iteration_number = 1
 
     def set_development_annotations(self, annotations):
-        self.corpus_weight_updater = morfessor.AnnotationsModelUpdate(
+        self.corpus_weight_updater = baseline.AnnotationsModelUpdate(
             annotations, self)
 
     def train(self, min_epoch_cost_gain=5.0, min_iter_cost_gain=20.0,
@@ -1321,7 +923,7 @@ class CatmapModel(object):
                                 self._corpus_coding.transit_emit_cost(
                                     categories[prev_cat],
                                     categories[next_cat], morph))
-                best.append(ViterbiNode(*_minargmin(cost)))
+                best.append(ViterbiNode(*minargmin(cost)))
                 cost = []
             # Update grid to prepare for next iteration
             grid.append(best)
@@ -1333,7 +935,7 @@ class CatmapModel(object):
             cost = (grid[-1][prev_cat].cost +
                     self._corpus_coding.log_transitionprob(*pair))
             best.append(cost)
-        backtrace = ViterbiNode(*_minargmin(best))
+        backtrace = ViterbiNode(*minargmin(best))
 
         # Backtrace for the best category sequence
         result = [CategorizedMorph(segments[-1],
@@ -1539,10 +1141,7 @@ class CatmapModel(object):
         Argumments:
             wb -- If True, the word boundary will be included. Default: False.
         """
-        categories = list(ByCategory._fields)
-        if wb:
-            categories.append(WORD_BOUNDARY)
-        return categories
+        return get_categories(wb)
 
     @staticmethod
     def _detag_morph(morph):
@@ -1811,43 +1410,7 @@ class TransformationRule(object):
         return matches
 
 
-class Marginalizer(object):
-    """An accumulator for marginalizing the class probabilities
-    P(Category) from all the individual conditional probabilities
-    P(Category|Morph) and observed morph probabilities P(Morph).
-
-    First the unnormalized distribution is obtained by summing over
-    #(Morph) * P(Category|Morph) over each morph, separately for each
-    category. P(Category) is then obtained by normalizing the
-    distribution.
-    """
-
-    def __init__(self):
-        self._counts = [0.0] * len(ByCategory._fields)
-
-    def add(self, rcount, condprobs):
-        """Add the products #(Morph) * P(Category|Morph)
-        for one observed morph."""
-        for i, x in enumerate(condprobs):
-            self._counts[i] += float(rcount) * float(x)
-
-    def normalized(self):
-        """Returns the marginal probabilities for all categories."""
-        total = self.total_token_count
-        return ByCategory(*[x / total for x in self._counts])
-
-    @property
-    def total_token_count(self):
-        """Total number of tokens seen."""
-        return sum(self._counts)
-
-    @property
-    def category_token_count(self):
-        """Tokens seen per category."""
-        return ByCategory(*self._counts)
-
-
-class CatmapLexiconEncoding(morfessor.LexiconEncoding):
+class CatmapLexiconEncoding(baseline.LexiconEncoding):
     """Extends LexiconEncoding to include the coding costs of the
     encoding cost of morph usage (context) features.
     """
@@ -1894,7 +1457,7 @@ class CatmapLexiconEncoding(morfessor.LexiconEncoding):
         return cost
 
 
-class CatmapEncoding(morfessor.CorpusEncoding):
+class CatmapEncoding(baseline.CorpusEncoding):
     """Class for calculating the encoding costs of the grammar and the
     corpus. Also stores the HMM parameters.
 
@@ -1938,8 +1501,8 @@ class CatmapEncoding(morfessor.CorpusEncoding):
                 self._log_transitionprob_cache[pair] = LOGPROB_ZERO
             else:
                 self._log_transitionprob_cache[pair] = (
-                    _zlog(self._transition_counts[(prev_cat, next_cat)]) -
-                    _zlog(self._cat_tagcount[prev_cat]))
+                    zlog(self._transition_counts[(prev_cat, next_cat)]) -
+                    zlog(self._cat_tagcount[prev_cat]))
         return self._log_transitionprob_cache[pair]
 
     def update_transition_count(self, prev_cat, next_cat, diff_count):
@@ -1990,14 +1553,14 @@ class CatmapEncoding(morfessor.CorpusEncoding):
         if pair not in self._log_emissionprob_cache:
             cat_index = CatmapModel.get_categories().index(category)
             # Not equal to what you get by:
-            # _zlog(self._emission_counts[morph][cat_index]) +
+            # zlog(self._emission_counts[morph][cat_index]) +
             if self._cat_tagcount[category] == 0:
                 self._log_emissionprob_cache[pair] = LOGPROB_ZERO
             else:
                 self._log_emissionprob_cache[pair] = (
-                    _zlog(self._morph_usage.count(morph)) +
-                    _zlog(self._morph_usage.condprobs(morph)[cat_index]) -
-                    _zlog(self._morph_usage.category_token_count[cat_index]))
+                    zlog(self._morph_usage.count(morph)) +
+                    zlog(self._morph_usage.condprobs(morph)[cat_index]) -
+                    zlog(self._morph_usage.category_token_count[cat_index]))
         msg = u'emission {} -> {} has probability > 1'.format(category, morph)
         assert self._log_emissionprob_cache[pair] >= 0, msg
         return self._log_emissionprob_cache[pair]
@@ -2131,68 +1694,6 @@ class CatmapEncoding(morfessor.CorpusEncoding):
                 )
 
 
-class Sparse(dict):
-    """A defaultdict-like data structure, which tries to remain as sparse
-    as possible. If a value becomes equal to the default value, it (and the
-    key associated with it) are transparently removed.
-
-    Only supports immutable values, e.g. namedtuples.
-    """
-
-    def __init__(self, *pargs, **kwargs):
-        """Create a new Sparse datastructure.
-        Keyword arguments:
-            default -- Default value. Unlike defaultdict this should be a
-                       prototype immutable, not a factory.
-        """
-
-        self._default = kwargs.pop('default')
-        dict.__init__(self, *pargs, **kwargs)
-
-    def __getitem__(self, key):
-        try:
-            return dict.__getitem__(self, key)
-        except KeyError:
-            return self._default
-
-    def __setitem__(self, key, value):
-        # attribute check is necessary for unpickling
-        if '_default' in self and value == self._default:
-            if key in self:
-                del self[key]
-        else:
-            dict.__setitem__(self, key, value)
-
-
-def sigmoid(value, threshold, slope):
-    return 1.0 / (1.0 + math.exp(-slope * (value - threshold)))
-
-
-_LOG_C = math.log(2.865)
-def universalprior(positive_number):
-    """Compute the number of nats that are necessary for coding
-    a positive integer according to Rissanen's universal prior.
-    """
-
-    return _LOG_C + math.log(positive_number)
-
-
-def ngrams(sequence, n=2):
-    """Returns all ngram tokens in an input sequence, for a specified n.
-    E.g. ngrams(['A', 'B', 'A', 'B', 'D'], n=2) yields
-    ('A', 'B'), ('B', 'A'), ('A', 'B'), ('B', 'D')
-    """
-
-    window = []
-    for item in sequence:
-        window.append(item)
-        if len(window) > n:
-            # trim back to size
-            window = window[-n:]
-        if len(window) == n:
-            yield(tuple(window))
-
-
 def _nt_zeros(constructor, zero=0):
     """Convenience function to return a namedtuple initialized to zeros,
     without needing to know the number of fields."""
@@ -2200,187 +1701,11 @@ def _nt_zeros(constructor, zero=0):
     return constructor(*zeros)
 
 
-def _minargmin(sequence):
-    """Returns the minimum value and the first index at which it can be
-    found in the input sequence."""
-    best = (None, None)
-    for (i, value) in enumerate(sequence):
-        if best[0] is None or value < best[0]:
-            best = (value, i)
-    return best
-
-
-def _zlog(x):
-    """Logarithm which uses constant value for log(0) instead of -inf"""
-    assert x >= 0.0
-    if x == 0:
-        return LOGPROB_ZERO
-    return -math.log(x)
-
-
 def _log_catprobs(probs):
     """Convenience function to convert a ByCategory object containing actual
     probabilities into one with log probabilities"""
 
-    return ByCategory(*[_zlog(x) for x in probs])
-
-
-def _generator_progress(generator):
-    """Prints a progress bar for visualizing flow through a generator.
-    The length of a generator is not known in advance, so the bar has
-    no fixed length. GENERATOR_DOT_FREQ controls the frequency of dots.
-
-    This function wraps the argument generator, returning a new generator.
-    """
-
-    if GENERATOR_DOT_FREQ <= 0:
-        return generator
-
-    def _progress_wrapper(generator):
-        for (i, x) in enumerate(generator):
-            if i % GENERATOR_DOT_FREQ == 0:
-                sys.stderr.write('.')
-                sys.stderr.flush()
-            yield x
-        sys.stderr.write('\n')
-
-    return _progress_wrapper(generator)
-
-
-class IterationStatistics(object):
-    def __init__(self, title=None):
-        self.iteration_numbers = []
-        self.operation_numbers = []
-        self.epoch_numbers = []
-
-        self.costs = []
-        self.tag_counts = []
-        self.morph_tokens = []
-        self.durations = [0]
-
-        self.t_prev = None
-        self.word_tokens = 1.0
-        self.categories = None
-
-        if title is None:
-            self.title = 'Iteration statistics {}'.format(
-                time.strftime("%a, %d.%m.%Y %H:%M:%S"))
-        else:
-            self.title = title
-        self.ops = None
-
-    def set_names(self, model, training_operations):
-        self.ops = training_operations
-        self.categories = model.get_categories()
-
-    def callback(self, model, epoch_number=0):
-        t_cur = time.time()
-
-        self.iteration_numbers.append(model._iteration_number)
-        self.operation_numbers.append(model._operation_number)
-        self.epoch_numbers.append(epoch_number)
-
-        self.costs.append(model.get_cost())
-        tcounts = self._extract_tag_counts(model)
-        self.tag_counts.append(tcounts)
-        self.morph_tokens.append(sum(tcounts))
-        self.word_tokens = float(model.word_tokens)
-        if self.t_prev is not None:
-            self.durations.append(t_cur - self.t_prev)
-
-        self.t_prev = t_cur
-
-    def _extract_tag_counts(self, model):
-        out = []
-        counter = model._corpus_coding._cat_tagcount
-        for cat in self.categories:
-            out.append(counter[cat])
-        return out
-
-    def plot_costs(self):
-        plt.plot(self.costs)
-        self._iteration_grid()
-        plt.xlabel('Epoch number')
-        plt.ylabel('Model cost')
-        plt.title(self.title)
-
-    def plot_tag_counts(self):
-        unzipped = zip(*self.tag_counts)
-        for (i, series) in enumerate(unzipped):
-            plt.plot(series, color=plt.cm.jet(float(i) /
-                                              float(len(self.categories))))
-        self._iteration_grid()
-        plt.xlabel('Epoch number')
-        plt.ylabel('Category occurence count')
-        plt.title(self.title)
-        if self.categories is not None:
-            plt.legend(self.categories)
-
-    def plot_avg_morphs(self):
-        normalized = [x / self.word_tokens for x in self.morph_tokens]
-        plt.plot(normalized)
-        self._iteration_grid()
-        plt.xlabel('Epoch number')
-        plt.ylabel('Avg number of morphs per word token')
-        plt.title(self.title)
-
-    def plot_durations(self):
-        by_iter = [0.0] * (max(self.iteration_numbers) + 1)
-        by_op = [0.0] * (max(self.operation_numbers) + 1)
-        by_epoch = [0.0] * (max(self.epoch_numbers) + 1)
-
-        for i in range(len(self.iteration_numbers)):
-            by_iter[self.iteration_numbers[i]] += self.durations[i]
-            by_op[self.operation_numbers[i]] += self.durations[i]
-            by_epoch[self.epoch_numbers[i]] += self.durations[i]
-
-        plt.subplot(2, 2, 1)
-        plt.plot(self.durations)
-        self._iteration_grid()
-        plt.xlabel('Epoch number')
-        plt.ylabel('Epoch duration [s]')
-        plt.title(self.title)
-
-        plt.subplot(2, 2, 2)
-        plt.bar(range(len(by_iter)), by_iter)
-        plt.ylabel('Total iteration duration [s]')
-        xls = range(len(by_iter))
-        xs = [x + 0.5 for x in xls]
-        plt.xticks(xs, xls)
-
-        plt.subplot(2, 2, 3)
-        plt.bar(range(len(by_op)), by_op)
-        plt.ylabel('Total operation duration [s]')
-        xls = range(len(by_op))
-        xs = [x + 0.5 for x in xls]
-        if self.ops is not None:
-            xls = self.ops
-        plt.xticks(xs, xls)
-
-        plt.subplot(2, 2, 4)
-        plt.bar(range(len(by_epoch)), by_epoch)
-        plt.ylabel('Total epoch duration [s]')
-        xls = range(len(by_epoch))
-        xs = [x + 0.5 for x in xls]
-        plt.xticks(xs, xls)
-
-    def plot_all(self):
-        plt.figure()
-        self.plot_costs()
-        plt.figure()
-        self.plot_tag_counts()
-        plt.figure()
-        self.plot_avg_morphs()
-        plt.figure()
-        self.plot_durations()
-        plt.show()
-
-    def _iteration_grid(self):
-        for i in range(len(self.iteration_numbers) - 1):
-            if self.iteration_numbers[i] != self.iteration_numbers[i + 1]:
-                plt.axvline(x=(i + 0.5), color=[.6, .6, .6])
-            if self.operation_numbers[i] < self.operation_numbers[i + 1]:
-                plt.axvline(x=(i + 0.5), color=[.6, .6, .6], linestyle=':')
+    return ByCategory(*[zlog(x) for x in probs])
 
 
 def get_default_argparser():
@@ -2710,7 +2035,7 @@ def main(args):
     if (args.loadfile is None and
             len(args.baselinefiles) == 0 and
             len(args.loadsegfiles) == 0):
-        raise morfessor.ArgumentException('either model file, '
+        raise ArgumentException('either model file, '
             'tagged segmentation or baseline segmentation must be defined.')
 
     io = CatmapIO(encoding=args.encoding,
@@ -2837,7 +2162,7 @@ if __name__ == "__main__":
     try:
         args = parser.parse_args(sys.argv[1:])
         main(args)
-    except morfessor.ArgumentException as e:
+    except ArgumentException as e:
         parser.error(e)
     except Exception as e:
         _logger.error("Fatal Error %s %s" % (type(e), e))

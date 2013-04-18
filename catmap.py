@@ -50,7 +50,9 @@ class WordBoundary(object):
         return False
 
     def __hash__(self):
-        return hash(self.__class__.__name__)
+        # This is called a lot. Using constant for minor optimization.
+        #return hash(self.__class__.__name__)
+        return 8364886854198508766
 
 
 WORD_BOUNDARY = WordBoundary()
@@ -1586,7 +1588,7 @@ class CategorizedMorph(object):
     def __repr__(self):
         if self.category == CategorizedMorph.no_category:
             return unicode(self.morph)
-        return u'{}/{}'.format(self.morph, self.category)
+        return self.morph + u'/' + self.category
 
     def __eq__(self, other):
         if not isinstance(other, CategorizedMorph):
@@ -1595,7 +1597,7 @@ class CategorizedMorph(object):
                 self.category == other.category)
 
     def __hash__(self):
-        return hash(self.__repr__())
+        return hash((self.morph, self.category))
 
     def __len__(self):
         return len(self.morph)
@@ -2148,9 +2150,10 @@ class Sparse(dict):
         dict.__init__(self, *pargs, **kwargs)
 
     def __getitem__(self, key):
-        if key not in self:
+        try:
+            return dict.__getitem__(self, key)
+        except KeyError:
             return self._default
-        return dict.__getitem__(self, key)
 
     def __setitem__(self, key, value):
         # attribute check is necessary for unpickling

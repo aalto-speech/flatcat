@@ -4,7 +4,7 @@ import math
 import random
 import re
 
-from . import _progress
+from .utils import _progress
 from .exception import MorfessorException
 
 _logger = logging.getLogger(__name__)

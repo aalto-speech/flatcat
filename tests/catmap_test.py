@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+from __future__ import unicode_literals
 """
 Tests for Morfessor 2.0 Categories-MAP variant.
 """
@@ -260,7 +261,7 @@ class TestBaselineSegmentation(unittest.TestCase):
         for (reference, tagless) in zip(self.references, self.detagged):
             observed = self.model.viterbi_tag(tagless)
             # causes UnicodeEncodeError, so sadly you don't get the details
-            # u'"%s" does not match "%s"' % (observed, reference)
+            # '"%s" does not match "%s"' % (observed, reference)
             msg = 'FIXME'
             for (r, o) in zip(reference, observed):
                 self.assertEqual(r, o, msg=msg)
@@ -379,8 +380,8 @@ class TestModelConsistency(unittest.TestCase):
         revert_func()
         new_cost = self.model.get_cost()
 
-        msg = (u'_apply_revert with {} and {} did not return to same cost. ' +
-               u'old: {}, new: {}')
+        msg = ('_apply_revert with {} and {} did not return to same cost. ' +
+               'old: {}, new: {}')
         msg = msg.format(apply_func.__name__, revert_func.__name__,
                          old_cost, new_cost)
         self.assertAlmostEqual(old_cost, new_cost, places=4, msg=msg)
@@ -458,18 +459,18 @@ class TestModelConsistency(unittest.TestCase):
             'logfeaturesum': float(self.model._lexicon_coding.logfeaturesum)}
         for (i, tmp) in enumerate(
                 self.model._morph_usage.category_token_count):
-            state_approx[u'category_token_count_{}'.format(i)] = float(tmp)
+            state_approx['category_token_count_{}'.format(i)] = float(tmp)
         return (state_exact, state_approx)
 
     def compare_to_stored_state(self, state_exact, state_approx):
         current_exact, current_approx = self.store_state()
         for key in state_exact:
             self.assertEqual(state_exact[key], current_exact[key],
-                u'Reverting did not return to same state: {}'.format(key))
+                'Reverting did not return to same state: {}'.format(key))
         for key in state_approx:
             self.assertAlmostEqual(state_approx[key], current_approx[key],
                 places=3,
-                msg=u'Reverting did not return to same state: {}'.format(key))
+                msg='Reverting did not return to same state: {}'.format(key))
 
     def general_consistency_asserts(self):
         """ These values should be internally consistent at all times."""
@@ -491,7 +492,7 @@ class TestModelConsistency(unittest.TestCase):
                 if (prev_cat, next_cat) in forbidden:
                     # FIXME, make it an assert once the cause is fixed
                     print('Nonzero count for forbidden transition ' +
-                        u'{} -> {}'.format(prev_cat, next_cat))
+                        '{} -> {}'.format(prev_cat, next_cat))
                 sum_transitions_from[prev_cat] += count
                 sum_transitions_to[next_cat] += count
         for cat in categories:
@@ -499,7 +500,7 @@ class TestModelConsistency(unittest.TestCase):
             # exactly one outgoing transition (except for word boundary,
             # of which there are one of each in every word)
             msg = ('Transition counts were not symmetrical. ' +
-                   u'category {}: {}, {}, {}'.format(cat,
+                   'category {}: {}, {}, {}'.format(cat,
                     sum_transitions_from[cat], sum_transitions_to[cat],
                     self.model._corpus_coding._cat_tagcount[cat]))
 

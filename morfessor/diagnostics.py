@@ -1,14 +1,18 @@
 import logging
 import time
+import sys
 
 _logger = logging.getLogger(__name__)
 
+PY3 = sys.version_info.major == 3
+
 NO_PLOTTING = True
-try:
-    from matplotlib import pyplot as plt
-    NO_PLOTTING = False
-except ImportError:
-    _logger.info('Unable to import matplotlib.pyplot: plotting disabled')
+if not PY3:     # my version of matplotlib doesn't support python 3
+    try:
+        from matplotlib import pyplot as plt
+        NO_PLOTTING = False
+    except ImportError:
+        _logger.info('Unable to import matplotlib.pyplot: plotting disabled')
 
 from .exception import UnsupportedConfigurationError
 

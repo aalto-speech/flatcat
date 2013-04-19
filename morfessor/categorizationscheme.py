@@ -1,3 +1,4 @@
+from __future__ import unicode_literals
 import collections
 import math
 
@@ -317,7 +318,7 @@ class MorphUsageProperties(object):
         for morph in temporaries:
             if morph not in self:
                 continue
-            msg = u'{}: {}'.format(morph, self._contexts[morph].count)
+            msg = '{}: {}'.format(morph, self._contexts[morph].count)
             assert self._contexts[morph].count == 0, msg
             del self._contexts[morph]
             if morph in self._condprob_cache:

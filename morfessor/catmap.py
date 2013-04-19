@@ -2,6 +2,7 @@
 """
 Morfessor 2.0 Categories-MAP variant.
 """
+from __future__ import unicode_literals
 
 # Temporarily disabled to enable from catmap import * in interactive shell,
 # Which is a workaround for the pickle namespace problem
@@ -69,10 +70,10 @@ class CatmapIO(MorfessorIO):
                 __version__, d))
             for count, morphs in segmentations:
                 s = self.construction_separator.join(
-                    [u'{}{}{}'.format(m.morph, self.category_separator,
+                    ['{}{}{}'.format(m.morph, self.category_separator,
                                       m.category)
                      for m in morphs])
-                file_obj.write(u'{} {}\n'.format(count, s))
+                file_obj.write('{} {}\n'.format(count, s))
         _logger.info("Done.")
 
     def read_segmentation_file(self, file_name, **kwargs):
@@ -285,7 +286,7 @@ class CatmapModel(object):
         of each operation in sequence.
         """
         while self._operation_number < len(self.training_operations):
-            operation_name = u'_op_{}_generator'.format(
+            operation_name = '_op_{}_generator'.format(
                 self.training_operations[self._operation_number])
             try:
                 operation = self.__getattribute__(operation_name)
@@ -297,7 +298,7 @@ class CatmapModel(object):
             max_epochs = self._training_params('max_epochs')
             must_reestimate = self._training_params('must_reestimate')
             _logger.info(
-                u'Iteration {}, operation {} ({}), max {} epoch(s).'.format(
+                'Iteration {}, operation {} ({}), max {} epoch(s).'.format(
                     self._iteration_number, self._operation_number,
                     self.training_operations[self._operation_number],
                     max_epochs))
@@ -352,7 +353,7 @@ class CatmapModel(object):
         previous_cost = self.get_cost()
         for iteration in range(max_iterations):
             _logger.info(
-                u'{} {}/{}.'.format(
+                '{} {}/{}.'.format(
                     iteration_name, iteration + 1, max_iterations))
             _logger.info(time.strftime("%a, %d.%m.%Y %H:%M:%S"))
 
@@ -366,18 +367,18 @@ class CatmapModel(object):
 
             cost = self.get_cost()
             cost_diff = cost - previous_cost
-            _logger.info(u'Cost now {}'.format(cost))
+            _logger.info('Cost now {}'.format(cost))
 
             if iteration_name == 'epoch':
                 for callback in self.epoch_callbacks:
                     callback(self, iteration)
 
             if (not force_another) and -cost_diff <= min_cost_gain:
-                _logger.info(u'Converged, with cost difference ' +
-                    u'{} in final {}.'.format(cost_diff, iteration_name))
+                _logger.info('Converged, with cost difference ' +
+                    '{} in final {}.'.format(cost_diff, iteration_name))
                 break
             else:
-                _logger.info(u'Cost difference {} in {} {}/{}'.format(
+                _logger.info('Cost difference {} in {} {}/{}'.format(
                     cost_diff, iteration_name, iteration + 1, max_iterations))
             previous_cost = cost
 
@@ -420,7 +421,7 @@ class CatmapModel(object):
         previous_cost = self.get_cost()
         for iteration in range(max_iterations):
             _logger.info(
-                u'Iteration {} ({}). {}/{}'.format(
+                'Iteration {} ({}). {}/{}'.format(
                     self._iteration_number, train_func.__name__,
                     iteration + 1, max_iterations))
             _logger.info(time.strftime("%a, %d.%m.%Y %H:%M:%S"))
@@ -431,8 +432,8 @@ class CatmapModel(object):
             cost = self.get_cost()
             cost_diff = cost - previous_cost
             if -cost_diff <= min_cost_gain:
-                _logger.info(u'Converged, with cost difference ' +
-                    u'{} in final iteration.'.format(cost_diff))
+                _logger.info('Converged, with cost difference ' +
+                    '{} in final iteration.'.format(cost_diff))
                 break
 
             # perform the reanalysis
@@ -440,10 +441,10 @@ class CatmapModel(object):
 
             if differences <= (min_difference_proportion *
                                len(self.segmentations)):
-                _logger.info(u'Converged, with ' +
-                    u'{} differences in final iteration.'.format(differences))
+                _logger.info('Converged, with ' +
+                    '{} differences in final iteration.'.format(differences))
                 break
-            _logger.info(u'{} differences. Cost difference: {}'.format(
+            _logger.info('{} differences. Cost difference: {}'.format(
                 differences, cost_diff))
             previous_cost = cost
 
@@ -568,8 +569,8 @@ class CatmapModel(object):
             for (prev_cat, next_cat) in ngrams(categories, 2):
                 pair = (prev_cat, next_cat)
                 if pair in MorphUsageProperties.zero_transitions:
-                    _logger.warning(u'Impossible transition ' +
-                                    u'{!r} -> {!r}'.format(*pair))
+                    _logger.warning('Impossible transition ' +
+                                    '{!r} -> {!r}'.format(*pair))
                 self._corpus_coding.update_transition_count(prev_cat,
                                                             next_cat,
                                                             rcount)
@@ -1061,7 +1062,7 @@ class CatmapModel(object):
 
         if best.cost >= LOGPROB_ZERO:
             _logger.warning(
-                u'No possible segmentation for word {}'.format(word))
+                'No possible segmentation for word {}'.format(word))
             return [CategorizedMorph(word, None)], LOGPROB_ZERO
 
         # Backtrace for the best morph-category sequence
@@ -1191,7 +1192,7 @@ class CategorizedMorph(object):
     def __repr__(self):
         if self.category == CategorizedMorph.no_category:
             return unicode(self.morph)
-        return self.morph + u'/' + self.category
+        return self.morph + '/' + self.category
 
     def __eq__(self, other):
         if not isinstance(other, CategorizedMorph):
@@ -1362,7 +1363,7 @@ class TransformationRule(object):
         return iter(self._rule)
 
     def __repr__(self):
-        return u'{}({})'.format(self.__class__.__name__, self._rule)
+        return '{}({})'.format(self.__class__.__name__, self._rule)
 
     def match_at(self, analysis, i):
         """Returns true if this rule matches the analysis
@@ -1565,7 +1566,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
                     zlog(self._morph_usage.count(morph)) +
                     zlog(self._morph_usage.condprobs(morph)[cat_index]) -
                     zlog(self._morph_usage.category_token_count[cat_index]))
-        msg = u'emission {} -> {} has probability > 1'.format(category, morph)
+        msg = 'emission {} -> {} has probability > 1'.format(category, morph)
         assert self._log_emissionprob_cache[pair] >= 0, msg
         return self._log_emissionprob_cache[pair]
 
@@ -2140,7 +2141,7 @@ def main(args):
                 constructions, logp = model.viterbi_segment(atoms)
                 if args.test_output_tags:
                     def _output_morph(cmorph):
-                        return u'{}{}{}'.format(cmorph.morph,
+                        return '{}{}{}'.format(cmorph.morph,
                                                 args.catseparator,
                                                 cmorph.category)
                 else:

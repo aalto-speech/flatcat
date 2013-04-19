@@ -9,8 +9,9 @@ try:
     NO_PLOTTING = False
 except ImportError:
     _logger.info('Unable to import matplotlib.pyplot: plotting disabled')
-    
+
 from .exception import UnsupportedConfigurationError
+
 
 class IterationStatistics(object):
     def __init__(self, title=None):
@@ -61,6 +62,7 @@ class IterationStatistics(object):
         for cat in self.categories:
             out.append(counter[cat])
         return out
+
 
 class IterationStatisticsPlotter(object):
     def __init__(self, stats):

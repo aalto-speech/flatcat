@@ -10,7 +10,9 @@ import re
 import unittest
 
 import morfessor
-import catmap
+from morfessor import catmap
+from morfessor import categorizationscheme as scheme
+from morfessor.utils import LOGPROB_ZERO
 
 
 # Directory for reference input and output files
@@ -376,7 +378,7 @@ class TestModelConsistency(unittest.TestCase):
 
         revert_func()
         new_cost = self.model.get_cost()
-    
+
         msg = (u'_apply_revert with {} and {} did not return to same cost. ' +
                u'old: {}, new: {}')
         msg = msg.format(apply_func.__name__, revert_func.__name__,
@@ -424,15 +426,15 @@ class TestModelConsistency(unittest.TestCase):
         self.assertEqual(self.model._morph_usage.seen_morphs(),
                          ['AA', 'BBBBB'])
         self.assertEqual(self.model._morph_usage._contexts,
-                         {'AA': catmap.MorphContext(1, 1.0, 1.0),
-                          'BBBBB': catmap.MorphContext(1, 1.0, 1.0)})
+                         {'AA': scheme.MorphContext(1, 1.0, 1.0),
+                          'BBBBB': scheme.MorphContext(1, 1.0, 1.0)})
 
         # lexicon coding
         self.assertEqual(self.model._lexicon_coding.tokens,
                          len('AA') + len('BBBBB'))
         self.assertEqual(self.model._lexicon_coding.boundaries, 2)
         self.assertAlmostEqual(self.model._lexicon_coding.logfeaturesum,
-            4.0 * catmap.universalprior(1.0), places=9)
+            4.0 * scheme.universalprior(1.0), places=9)
         self.assertAlmostEqual(self.model._lexicon_coding.logtokensum,
             (2.0 * math.log(2.0)) + (5.0 * math.log(5.0)), places=9)
 
@@ -479,7 +481,7 @@ class TestModelConsistency(unittest.TestCase):
         sum_transitions_from = collections.Counter()
         sum_transitions_to = collections.Counter()
         categories = self.model.get_categories(wb=True)
-        forbidden = catmap.MorphUsageProperties.zero_transitions
+        forbidden = scheme.MorphUsageProperties.zero_transitions
         for prev_cat in categories:
             for next_cat in categories:
                 count = self.model._corpus_coding._transition_counts[
@@ -510,7 +512,7 @@ class TestModelConsistency(unittest.TestCase):
 
 
 def _zexp(x):
-    if x >= catmap.LOGPROB_ZERO:
+    if x >= LOGPROB_ZERO:
         return 0.0
     return math.exp(-x)
 
@@ -518,7 +520,7 @@ def _zexp(x):
 def _exp_catprobs(probs):
     """Convenience function to convert a ByCategory object containing log
     probabilities into one with actual probabilities"""
-    return catmap.ByCategory(*[_zexp(x) for x in probs])
+    return scheme.ByCategory(*[_zexp(x) for x in probs])
 
 
 def _remove_zeros(d):

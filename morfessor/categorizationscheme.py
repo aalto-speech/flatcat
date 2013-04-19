@@ -3,6 +3,29 @@ import math
 
 from .utils import Sparse
 
+
+class WordBoundary(object):
+    def __repr__(self):
+        return '#'
+
+    def __len__(self):
+        return 0
+
+    def __eq__(self, other):
+        # Word boundaries from different runs should be equal
+        if isinstance(other, WordBoundary):
+            return True
+        return False
+
+    def __hash__(self):
+        # This is called a lot. Using constant for minor optimization.
+        #return hash(self.__class__.__name__)
+        return 8364886854198508766
+
+
+WORD_BOUNDARY = WordBoundary()
+
+
 ##################################
 ### Categorization-dependent code:
 ### to change the categories, only code in this module
@@ -283,14 +306,12 @@ class MorphUsageProperties(object):
             ctype += CONTEXT_FLAG_FINAL
         return ctype
 
-
     ### End of categorization-dependent code
     ########################################
-
     # But not the end of the class:
     # The methods in this class below this line are helpers that will
     # probably not need to be modified if the categorization scheme changes
-
+    #
     def remove_temporaries(self, temporaries):
         """Remove estimated temporary morph contexts when no longer needed."""
         for morph in temporaries:
@@ -377,28 +398,6 @@ def get_categories(wb=False):
     return categories
 
 
-class WordBoundary(object):
-    def __repr__(self):
-        return '#'
-
-    def __len__(self):
-        return 0
-
-    def __eq__(self, other):
-        # Word boundaries from different runs should be equal
-        if isinstance(other, WordBoundary):
-            return True
-        return False
-
-    def __hash__(self):
-        # This is called a lot. Using constant for minor optimization.
-        #return hash(self.__class__.__name__)
-        return 8364886854198508766
-
-
-WORD_BOUNDARY = WordBoundary()
-
-
 def sigmoid(value, threshold, slope):
     return 1.0 / (1.0 + math.exp(-slope * (value - threshold)))
 
@@ -448,4 +447,3 @@ class Marginalizer(object):
     def category_token_count(self):
         """Tokens seen per category."""
         return ByCategory(*self._counts)
-

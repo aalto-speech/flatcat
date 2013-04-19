@@ -155,10 +155,14 @@ class CatmapModel(object):
         self.training_operations = self.DEFAULT_TRAIN_OPS
 
         # Training sequence parameters.
+        self._max_iterations = 10
+        self._min_iter_cost_gain = 0.0
         self._min_epoch_cost_gain = 0.0
         self._max_epochs_first = 1
         self._max_epochs = 1
         self._max_resegment_epochs = 1
+        self._min_shift_remainder = 2
+        self._max_shift = 2
 
         # Callbacks for cleanup/bookkeeping after each operation.
         # Should take exactly one argument: the model.
@@ -248,7 +252,7 @@ class CatmapModel(object):
 
     def train(self, min_epoch_cost_gain=5.0, min_iter_cost_gain=20.0,
               min_difference_proportion=0.005,
-              max_iterations=15, max_epochs_first=5, max_epochs=1,
+              max_iterations=10, max_epochs_first=5, max_epochs=1,
               max_resegment_epochs=1,
               max_shift_distance=2,
               min_shift_remainder=2):

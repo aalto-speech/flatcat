@@ -16,10 +16,6 @@ GENERATOR_DOT_FREQ = 500
 show_progress_bar = True
 
 
-def get_version():
-    return __version__
-
-
 def _progress(iter_func):
     """Decorator/function for displaying a progress bar when iterating
     through a list.

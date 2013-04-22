@@ -26,12 +26,10 @@ class WordBoundary(object):
 
 WORD_BOUNDARY = WordBoundary()
 
-
 ##################################
 ### Categorization-dependent code:
 ### to change the categories, only code in this module
 ### should need to be changed.
-
 
 # A data structure with one value for each category.
 # This also defines the set of possible categories
@@ -386,6 +384,40 @@ class MorphUsageProperties(object):
                     cls._valid_transitions.append((cat1, cat2))
             cls._valid_transitions = tuple(cls._valid_transitions)
         return cls._valid_transitions
+
+
+class CategorizedMorph(object):
+    """Represents a morph with attached category information.
+    These objects should be treated as immutable, even though
+    it is not enforced by the code.
+    """
+    no_category = object()
+
+    __slots__ = ['morph', 'category']
+
+    def __init__(self, morph, category=None):
+        self.morph = morph
+        if category is not None:
+            self.category = category
+        else:
+            self.category = CategorizedMorph.no_category
+
+    def __repr__(self):
+        if self.category == CategorizedMorph.no_category:
+            return unicode(self.morph)
+        return self.morph + '/' + self.category
+
+    def __eq__(self, other):
+        if not isinstance(other, CategorizedMorph):
+            return False
+        return (self.morph == other.morph and
+                self.category == other.category)
+
+    def __hash__(self):
+        return hash((self.morph, self.category))
+
+    def __len__(self):
+        return len(self.morph)
 
 
 def get_categories(wb=False):

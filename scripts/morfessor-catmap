@@ -2,18 +2,19 @@
 
 import sys
 
-from morfessor import catmap
-
+from morfessor import cmd
+from morfessor.exception import ArgumentException
+from morfessor.catmap import _logger
 
 def main(argv):
-    parser = catmap.get_default_argparser()
+    parser = cmd.get_catmap_argparser()
     try:
         args = parser.parse_args(argv)
-        catmap.main(args)
-    except catmap.ArgumentException as e:
+        cmd.catmap_main(args)
+    except ArgumentException as e:
         parser.error(e)
     except Exception as e:
-        catmap._logger.error("Fatal Error %s %s" % (type(e), e))
+        _logger.error("Fatal Error %s %s" % (type(e), e))
         raise
 
 

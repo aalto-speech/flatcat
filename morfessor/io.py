@@ -8,6 +8,8 @@ import re
 import sys
 
 from . import get_version
+from .categorizationscheme import get_categories, CategorizedMorph
+from .exception import InvalidCategoryError
 
 try:
     # In Python2 import cPickle for better performance
@@ -169,17 +171,26 @@ class MorfessorIO:
     def read_binary_model_file(self, file_name):
         """Read a pickled model from file."""
         _logger.info("Loading model from '%s'..." % file_name)
-        with open(file_name, 'rb') as fobj:
-            model = pickle.load(fobj)
+        model = self.read_binary_file(file_name)
         _logger.info("Done.")
         return model
+
+    def read_binary_file(self, file_name):
+        """Read a pickled object from a file."""
+        with open(file_name, 'rb') as fobj:
+            obj = pickle.load(fobj)
+        return obj
 
     def write_binary_model_file(self, file_name, model):
         """Pickle a model to a file."""
         _logger.info("Saving model to '%s'..." % file_name)
-        with open(file_name, 'wb') as fobj:
-            pickle.dump(model, fobj, pickle.HIGHEST_PROTOCOL)
+        self.write_binary_file(file_name, model)
         _logger.info("Done.")
+
+    def write_binary_file(self, file_name, obj):
+        """Pickle an object into a file."""
+        with open(file_name, 'wb') as fobj:
+            pickle.dump(obj, fobj, pickle.HIGHEST_PROTOCOL)
 
     def _split_atoms(self, construction):
         """Split construction to its atoms."""
@@ -295,3 +306,59 @@ class MorfessorIO:
                 return encoding
 
         raise UnicodeError("Can not determine encoding of input files")
+
+
+class CatmapIO(MorfessorIO):
+    """Extends data file formats to include category tags."""
+
+    def __init__(self, encoding=None, construction_separator=' + ',
+                 comment_start='#', compound_separator='\s+',
+                 category_separator='/'):
+        MorfessorIO.__init__(
+            self, encoding=encoding,
+            construction_separator=construction_separator,
+            comment_start=comment_start, compound_separator=compound_separator,
+            atom_separator=None)
+        self.category_separator = category_separator
+
+    def write_segmentation_file(self, file_name, segmentations, **kwargs):
+        """Write segmentation file.
+
+        File format (single line, wrapped only for pep8):
+        <count> <construction1><cat_sep><category1><cons_sep>...
+                <constructionN><cat_sep><categoryN>
+        """
+
+        _logger.info("Saving segmentations to '%s'..." % file_name)
+        with self._open_text_file_write(file_name) as file_obj:
+            d = datetime.datetime.now().replace(microsecond=0)
+            file_obj.write('# Output from Morfessor Cat-MAP {}, {!s}\n'.format(
+                get_version(), d))
+            for count, morphs in segmentations:
+                s = self.construction_separator.join(
+                    ['{}{}{}'.format(m.morph, self.category_separator,
+                                      m.category)
+                     for m in morphs])
+                file_obj.write('{} {}\n'.format(count, s))
+        _logger.info("Done.")
+
+    def read_segmentation_file(self, file_name, **kwargs):
+        """Read segmentation file.
+        see docstring for write_segmentation_file for file format.
+        """
+        _logger.info("Reading segmentations from '%s'..." % file_name)
+        for line in self._read_text_file(file_name):
+            count, analysis = line.split(' ', 1)
+            cmorphs = []
+            for morph_cat in analysis.split(self.construction_separator):
+                parts = morph_cat.rsplit(self.category_separator, 1)
+                morph = parts[0]
+                if len(parts) == 1:
+                    category = None
+                else:
+                    category = parts[1]
+                    if category not in get_categories():
+                        raise InvalidCategoryError(category)
+                cmorphs.append(CategorizedMorph(morph, category))
+            yield(int(count), tuple(cmorphs))
+        _logger.info("Done.")

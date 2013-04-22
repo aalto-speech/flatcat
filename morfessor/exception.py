@@ -1,5 +1,6 @@
 from __future__ import unicode_literals
 
+
 class MorfessorException(Exception):
     """Base class for exceptions in this module."""
     pass

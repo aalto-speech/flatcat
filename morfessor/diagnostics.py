@@ -1,3 +1,4 @@
+import collections
 import logging
 import time
 import sys
@@ -27,7 +28,10 @@ class IterationStatistics(object):
         self.tag_counts = []
         self.morph_tokens = []
         self.durations = [0]
+        self.morph_lengths = []
 
+        self.max_morph_len = 0
+        self.max_morph_len_count = 0
         self.t_prev = None
         self.word_tokens = 1.0
         self.categories = None
@@ -57,7 +61,14 @@ class IterationStatistics(object):
         self.word_tokens = float(model.word_tokens)
         if self.t_prev is not None:
             self.durations.append(t_cur - self.t_prev)
-
+        current_lengths = collections.Counter()
+        for morph in model._morph_usage.seen_morphs():
+            current_lengths[len(morph)] += 1
+            if current_lengths[len(morph)] > self.max_morph_len_count:
+                self.max_morph_len_count = current_lengths[len(morph)]
+            if len(morph) > self.max_morph_len:
+                self.max_morph_len = len(morph)
+        self.morph_lengths.append(current_lengths)
         self.t_prev = t_cur
 
     def _extract_tag_counts(self, model):
@@ -84,6 +95,8 @@ class IterationStatisticsPlotter(object):
         self.avg_morphs()
         plt.figure()
         self.durations()
+        plt.show()
+        self.morph_lengths()
         plt.show()
 
     def costs(self):
@@ -153,6 +166,17 @@ class IterationStatisticsPlotter(object):
         xls = range(len(by_epoch))
         xs = [x + 0.5 for x in xls]
         plt.xticks(xs, xls)
+
+    def morph_lengths(self):
+        for (x, lens) in enumerate(self.stats.morph_lengths):
+            for y in lens:
+                normalized = lens[y] / float(self.stats.max_morph_len_count)
+                c = [1.0 - normalized] * 3
+                plt.plot(x, y, 's', color=c, markersize=(normalized * 20.))
+        self._iteration_grid()
+        plt.xlabel('Epoch number')
+        plt.ylabel('Morph length distribution')
+        self._title()
 
     def _iteration_grid(self):
         for i in range(len(self.stats.iteration_numbers) - 1):

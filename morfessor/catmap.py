@@ -687,9 +687,8 @@ class CatmapModel(object):
 
         # FIXME random shuffle or sort by bigram frequency?
         bigram_freqs = collections.Counter()
-        wb = CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)
         for (count, segments) in self.segmentations:
-            segments = [wb] + segments + [wb]
+            segments = _wb_wrap(segments)
             for quad in ngrams(segments, n=4):
                 prev_morph, prefix, suffix, next_morph = quad
                 if (prefix.morph in self.forcesplit or
@@ -1064,8 +1063,7 @@ class CatmapModel(object):
     def cost_breakdown(self, segmentation):
         """Diagnostic function.
         Returns breakdown of costs for the given tagged segmentation."""
-        wb = CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)
-        segmentation = [wb] + list(segmentation) + [wb]
+        segmentation = _wb_wrap(segmentation)
         cost = 0.0
         components = []
         for (prefix, suffix) in ngrams(segmentation, n=2):
@@ -1188,9 +1186,7 @@ class ChangeCounts(object):
                     self.backlinks_remove[cmorph.morph].add(corpus_index)
                 elif count > 0:
                     self.backlinks_add[cmorph.morph].add(corpus_index)
-        wb_extended = list(analysis)
-        wb_extended.insert(0, CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY))
-        wb_extended.append(CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY))
+        wb_extended = _wb_wrap(analysis)
         for (prefix, suffix) in ngrams(wb_extended, n=2):
             self.transitions[(prefix.category, suffix.category)] += count
         # Make sure that backlinks_remove and backlinks_add are disjoint
@@ -1649,3 +1645,14 @@ def _log_catprobs(probs):
     probabilities into one with log probabilities"""
 
     return ByCategory(*[zlog(x) for x in probs])
+
+
+def _wb_wrap(segments, end_only=False):
+    """Add a word boundary CategorizedMorph at one or both ends of
+    the segmentation.
+    """
+    wb = CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)
+    if end_only:
+        return list(segments) + [wb]
+    else:
+        return [wb] + segments + [wb]

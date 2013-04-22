@@ -178,7 +178,7 @@ class CatmapModel(object):
             reestimate_with_unchanged_segmentation,
             self.viterbi_tag_corpus,
             min_difference_proportion=min_difference_proportion,
-            min_cost_gain=-1000.0)     # Cost gain will be ~zero.
+            min_cost_gain=-10.0)     # Cost gain will be ~zero.
         self._reestimate_probabilities()
 
         for callback in self.epoch_callbacks:
@@ -190,7 +190,7 @@ class CatmapModel(object):
         self._corpus_weight_updater = baseline.AnnotationsModelUpdate(
             annotations, self)
 
-    def train(self, min_epoch_cost_gain=5.0, min_iter_cost_gain=20.0,
+    def train(self, min_epoch_cost_gain=0.0025, min_iter_cost_gain=0.005,
               min_difference_proportion=0.005,
               max_iterations=10, max_epochs_first=5, max_epochs=1,
               max_resegment_epochs=1,
@@ -264,7 +264,7 @@ class CatmapModel(object):
         self._iteration_number += 1
         return force_another
 
-    def convergence_of_cost(self, train_func, min_cost_gain=5.0,
+    def convergence_of_cost(self, train_func, min_cost_gain=0.005,
                             max_iterations=5, must_reestimate=False,
                             iteration_name='iter'):
         """Iterates the specified training function until the model cost
@@ -280,8 +280,9 @@ class CatmapModel(object):
             train_func -- A method of CatmapModel which causes some part of
                           the model to be trained. If the return value is
                           True, at least one more iteration is forced.
-            min_epoch_cost_gain -- Stop iterating if cost reduction between
-                                   iterations is below this limit. Default 5.0
+            min_cost_gain -- Stop iterating if cost reduction between
+                             iterations is below this limit * #boundaries.
+                             Default 0.005.
             max_iterations -- Maximum number of iterations (epochs). Default 5.
             must_reestimate -- Call _reestimate_probabilities after each
                                epoch. Only necessary if tranformation leaves
@@ -313,7 +314,8 @@ class CatmapModel(object):
                 for callback in self.epoch_callbacks:
                     callback(self, iteration)
 
-            if (not force_another) and -cost_diff <= min_cost_gain:
+            if (not force_another) and -cost_diff <= (min_cost_gain *
+                                            self._corpus_coding.boundaries):
                 _logger.info('Converged, with cost difference ' +
                     '{} in final {}.'.format(cost_diff, iteration_name))
                 break
@@ -371,7 +373,7 @@ class CatmapModel(object):
 
             cost = self.get_cost()
             cost_diff = cost - previous_cost
-            if -cost_diff <= min_cost_gain:
+            if -cost_diff <= (min_cost_gain * self._corpus_coding.boundaries):
                 _logger.info('Converged, with cost difference ' +
                     '{} in final iteration.'.format(cost_diff))
                 break

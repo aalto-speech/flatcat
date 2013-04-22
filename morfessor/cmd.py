@@ -596,14 +596,14 @@ Simple usage examples (training and testing):
     add_arg = parser.add_argument_group(
         'training iteration sequence options').add_argument
     add_arg('--min-epoch-cost-gain', dest='min_epoch_cost_gain', type=float,
-            default=5.0, metavar='<float>',
+            default=0.0025, metavar='<float>',
             help='Stop iterating if cost reduction between epochs ' +
-                 'is below this limit. ' +
+                 'is below this limit * #boundaries. ' +
                  '(default %(default)s).')
     add_arg('--min-iteration-cost-gain', dest='min_iter_cost_gain', type=float,
-            default=5.0, metavar='<float>',
+            default=0.005, metavar='<float>',
             help='Stop iterating if cost reduction between iterations ' +
-                 'is below this limit. ' +
+                 'is below this limit * #boundaries. ' +
                  '(default %(default)s).')
     add_arg('--min-difference-proportion', dest='min_diff_prop', type=float,
             default=0.005, metavar='<float>',

@@ -56,6 +56,74 @@ CONTEXT_TYPE_BOTH = (CONTEXT_TYPE_INTERNAL + CONTEXT_FLAG_INITIAL +
                      CONTEXT_FLAG_FINAL)
 
 
+class HeuristicPostprocessor(object):
+    def __init__(self, model):
+        self.model = model
+
+    def remove_nonmorfemes(self, analysis):
+        """Remove nonmorfemes from the analysis by joining or retagging
+        morphs, using heuristics."""
+        while True:
+            # Repeat until there are no nonmorphemes left
+            if all([m.category != 'ZZZ' for m in analysis]):
+                return analysis
+            alternatives = []
+
+            # If there are no stems, try making the longest morph into a stem
+            longest_index = None
+            longest_len = 0
+            for (i, m) in enumerate(analysis):
+                if m.category == 'STM':
+                    # Not applicable: there is a stem already
+                    longest_index = None
+                    break
+                if len(m) > longest_len:
+                    longest_index = i
+                    longest_len = len(m)
+            if longest_index is not None:
+                tmp = list(analysis)
+                tmp[longest_index] = CategorizedMorph(tmp[longest_index].morph,
+                                                    'STM')
+                alternatives.append(tmp)
+
+            # Try joining each nonmorph in both directions,
+            for i in range(len(analysis) - 1):
+                if (analysis[i].category == 'ZZZ' or 
+                        analysis[i + 1].category == 'ZZZ'):
+                    alternatives.append(self._join_at(analysis, i))
+
+            # Try joining all sequences of 3 or more nonmorphs
+            concatenated = []
+            tmp = []
+            for m in analysis:
+                if m.category == 'ZZZ':
+                    concatenated.append(m.morph)
+                else:
+                    if len(concatenated) >= 3:
+                        tmp.append(CategorizedMorph(''.join(concatenated), 'STM'))
+                        concatenated = []
+                    tmp.append(m)
+            if len(concatenated) >= 3:
+                tmp.append(CategorizedMorph(''.join(concatenated), 'STM'))
+                concatenated = []
+            if len(concatenated) == 0 and len(tmp) > 0:
+                alternatives.append(tmp)
+
+            return alternatives     # FIXME debug
+
+    def _join_at(self, analysis, i):
+        tag = analysis[i].category
+        if analysis[i + 1].category != 'ZZZ':
+            tag = analysis[i + 1].category
+        if tag == 'ZZZ':
+            tag = 'STM'
+        morph = analysis[i].morph + analysis[i + 1].morph
+        out = list(analysis[:i]) + [CategorizedMorph(morph, tag)]
+        if len(analysis) > (i + 2):
+            out.extend(analysis[(i+2):])
+        return out
+
+
 class MorphContextBuilder(object):
     """Temporary structure used when calculating the MorphContexts."""
     def __init__(self):

@@ -7,7 +7,7 @@ import time
 from . import get_version
 from .baseline import BaselineModel
 from .catmap import CatmapModel
-from .categorizationscheme import MorphUsageProperties
+from .categorizationscheme import MorphUsageProperties, HeuristicPostprocessor
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
 from .io import MorfessorIO, CatmapIO
@@ -580,6 +580,10 @@ Simple usage examples (training and testing):
     add_arg('-f', '--forcesplit', dest="forcesplit", type=list, default=['-'],
             metavar='<list>',
             help="force split on given atoms (default %(default)s).")
+    add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
+            action='store_true',
+            help='use heuristic postprocessing to remove nonmorfemes ' +
+                 'from output segmentations.')
 #     add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
 #             metavar='<int>',
 #             help="compound frequency threshold (default %(default)s).")
@@ -828,8 +832,18 @@ def catmap_main(args):
         model.clear_callbacks()
         io.write_binary_model_file(args.savefile, model)
 
+    # Heuristic nonmorpheme removal
+    heuristic = None
+    if args.rm_nonmorph:
+        heuristic = HeuristicPostprocessor(model)
+
     if args.savesegfile is not None:
-        io.write_segmentation_file(args.savesegfile, model.segmentations)
+        if heuristic is not None:
+            segs = model.map_segmentations(heuristic.remove_nonmorfemes)
+        else:
+            segs = model.segmentations
+        io.write_segmentation_file(args.savesegfile, segs)
+
     # Segment test data
     if len(args.testfiles) > 0:
         _logger.info("Segmenting test data...")
@@ -844,6 +858,9 @@ def catmap_main(args):
             testdata = io.read_corpus_files(args.testfiles)
             for count, compound, atoms in _generator_progress(testdata):
                 constructions, logp = model.viterbi_segment(atoms)
+                if heuristic is not None:
+                    constructions = heuristic.remove_nonmorfemes(
+                                        constructions)
                 if args.test_output_tags:
                     def _output_morph(cmorph):
                         return '{}{}{}'.format(cmorph.morph,

@@ -1048,6 +1048,12 @@ class CatmapModel(object):
                 word = (word,)
             yield WordAnalysis(count, self.viterbi_segment(word)[0])
 
+    def map_segmentations(self, func):
+        """Apply a mapping to the analysis part of segmentations.
+        Convenience function."""
+        for word in self.segmentations:
+            yield WordAnalysis(word.count, func(word.analysis))
+
     def get_cost(self):
         """Return current model encoding cost."""
         # FIXME: annotation coding cost for supervised
@@ -1073,7 +1079,7 @@ class CatmapModel(object):
                        The penalty is a float that is added to the cost
                        for this choice. Use 0 to disable.
         Returns:
-            A sorted (by cost, ascending) list of 
+            A sorted (by cost, ascending) list of
             (cost, analysis, breakdown) tuples
                 cost -- the contribution of this analysis to the corpus cost.
                 analysis -- as in input.
@@ -1118,7 +1124,7 @@ class CatmapModel(object):
                 tagged.append((self.viterbi_tag(seg), 0))
         else:
             tagged = [(x, 0) for x in segmentations]
-        return best_analysis(tagged)
+        return self.best_analysis(tagged)
 
     def words_with_morph(self, morph):
         """Diagnostic function.

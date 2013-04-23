@@ -55,6 +55,11 @@ CONTEXT_TYPE_FINAL = CONTEXT_TYPE_INTERNAL + CONTEXT_FLAG_FINAL
 CONTEXT_TYPE_BOTH = (CONTEXT_TYPE_INTERNAL + CONTEXT_FLAG_INITIAL +
                      CONTEXT_FLAG_FINAL)
 
+# Penalty for each non-morpheme, in heuristic postprocessing
+# Must be smaller than LOGPROB_ZERO, to prevent impossible taggings from
+# being generated.
+NON_MORPHEME_PENALTY = 50
+
 
 class HeuristicPostprocessor(object):
     def __init__(self, model):
@@ -91,7 +96,7 @@ class HeuristicPostprocessor(object):
 
             # Try joining each nonmorpheme in both directions,
             for i in range(len(analysis) - 1):
-                if (analysis[i].category == 'ZZZ' or 
+                if (analysis[i].category == 'ZZZ' or
                         analysis[i + 1].category == 'ZZZ'):
                     alternatives.append(self._join_at(analysis, i))
 
@@ -103,14 +108,14 @@ class HeuristicPostprocessor(object):
                     concatenated.append(m.morph)
                 else:
                     if len(concatenated) >= 3:
-                        morph = ''.join(concatenated)
-                        tmp.append(CategorizedMorph(morph, 'STM'))
+                        morph = CategorizedMorph(''.join(concatenated), 'STM')
+                        tmp.append(morph)
                         self.temporaries.add(morph)
                         concatenated = []
                     tmp.append(m)
             if len(concatenated) >= 3:
-                morph = ''.join(concatenated)
-                tmp.append(CategorizedMorph(morph, 'STM'))
+                morph = CategorizedMorph(''.join(concatenated), 'STM')
+                tmp.append(morph)
                 self.temporaries.add(morph)
                 concatenated = []
             if len(concatenated) == 0 and len(tmp) > 0:
@@ -123,12 +128,21 @@ class HeuristicPostprocessor(object):
                 for cmorph in analysis:
                     if cmorph.category == 'ZZZ':
                         penalty += NON_MORPHEME_PENALTY
-                with_penalties.append(analysis, penalty)
+                with_penalties.append((analysis, penalty))
 
             for morph in self.temporaries:
-                pass
-                # FIXME: should be categorized morph, to add the correct emission
-            return self.model.best_analysis(with_penalties) # FIXME debug
+                # Allow new morphs to be formed by joining
+                self.model._modify_morph_count(morph.morph, 1)
+                self.model._corpus_coding.update_emission_count(
+                    morph.category, morph.morph, 1)
+            alternatives = self.model.best_analysis(with_penalties)
+            for morph in self.temporaries:
+                # Remove temporary morphs
+                self.model._modify_morph_count(morph.morph, -1)
+                self.model._corpus_coding.update_emission_count(
+                    morph.category, morph.morph, -1)
+
+            analysis = alternatives[0][1]
 
     def _join_at(self, analysis, i):
         tag = analysis[i].category
@@ -137,10 +151,11 @@ class HeuristicPostprocessor(object):
         if tag == 'ZZZ':
             tag = 'STM'
         morph = analysis[i].morph + analysis[i + 1].morph
-        self.temporaries.add(morph)
-        out = list(analysis[:i]) + [CategorizedMorph(morph, tag)]
+        cmorph = CategorizedMorph(morph, tag)
+        self.temporaries.add(cmorph)
+        out = list(analysis[:i]) + [cmorph]
         if len(analysis) > (i + 2):
-            out.extend(analysis[(i+2):])
+            out.extend(analysis[(i + 2):])
         return out
 
 

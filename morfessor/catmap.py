@@ -1060,27 +1060,48 @@ class CatmapModel(object):
     def set_corpus_coding_weight(self, weight):
         self._corpus_coding.weight = weight
 
-    def cost_breakdown(self, segmentation):
-        """Diagnostic function.
-        Returns breakdown of costs for the given tagged segmentation."""
-        segmentation = _wb_wrap(segmentation)
-        cost = 0.0
-        components = []
-        for (prefix, suffix) in ngrams(segmentation, n=2):
-            tmp = self._corpus_coding.log_transitionprob(prefix.category,
-                                                        suffix.category)
-            cost += tmp
-            components.append(('transition {} => {}'.format(
-                prefix.category, suffix.category), tmp))
-            if suffix.morph != WORD_BOUNDARY:
-                tmp = self._corpus_coding.log_emissionprob(
-                    suffix.category, suffix.morph)
-                cost += tmp
-                components.append(('emission   {} :: {}'.format(
-                    suffix.category, suffix.morph), tmp))
-        return (cost, segmentation, components)
+    def best_analysis(self, choices):
+        """Choose the best analysis of a set of choices.
 
-    def cost_comparison(self, segmentations):
+        Observe that the call and return signatures are different
+        from baseline: this method is more versatile.
+
+        Arguments:
+            choices -- a sequence of (analysis, penalty) tuples.
+                       The analysis must be a sequence of CategorizedMorphs,
+                       (segmented and tagged).
+                       The penalty is a float that is added to the cost
+                       for this choice. Use 0 to disable.
+        Returns:
+            A sorted (by cost, ascending) list of 
+            (cost, analysis, breakdown) tuples
+                cost -- the contribution of this analysis to the corpus cost.
+                analysis -- as in input.
+                breakdown -- A CostBreakdown object, for diagnostics
+        """
+        out = []
+        for choice in choices:
+            out.append(self.cost_breakdown(choice[0],
+                                           choice[1]))
+        return sorted(out)
+
+    def cost_breakdown(self, segmentation, penalty=0.0):
+        """Returns breakdown of costs for the given tagged segmentation."""
+        wrapped = _wb_wrap(segmentation)
+        breakdown = CostBreakdown()
+        for (prefix, suffix) in ngrams(wrapped, n=2):
+            cost = self._corpus_coding.log_transitionprob(prefix.category,
+                                                          suffix.category)
+            breakdown.transition(cost, prefix.category, suffix.category)
+            if suffix.morph != WORD_BOUNDARY:
+                cost = self._corpus_coding.log_emissionprob(
+                        suffix.category, suffix.morph)
+                breakdown.emission(cost, suffix.category, suffix.morph)
+        if penalty != 0:
+            breakdown.penalty(penalty)
+        return (breakdown.cost, segmentation, breakdown)
+
+    def cost_comparison(self, segmentations, retag=True):
         """Diagnostic function.
         (Re)tag the given segmentations, calculate their cost
         and return the sorted breakdowns of the costs.
@@ -1091,11 +1112,13 @@ class CatmapModel(object):
             return
         if all(isinstance(s, basestring) for s in segmentations):
             segmentations = [segmentations]
-        tagged = []
-        for seg in segmentations:
-            seg = self.viterbi_tag(seg)
-            tagged.append(self.cost_breakdown(seg))
-        return sorted(tagged)
+        if retag:
+            tagged = []
+            for seg in segmentations:
+                tagged.append((self.viterbi_tag(seg), 0))
+        else:
+            tagged = [(x, 0) for x in segmentations]
+        return best_analysis(tagged)
 
     def words_with_morph(self, morph):
         """Diagnostic function.
@@ -1656,3 +1679,27 @@ def _wb_wrap(segments, end_only=False):
         return list(segments) + [wb]
     else:
         return [wb] + segments + [wb]
+
+
+class CostBreakdown(object):
+    def __init__(self):
+        self.components = []
+        self.cost = 0
+
+    def __repr__(self):
+        out = '\n'.join(self.components) + '\n'
+        return 'CostBreakdown(\n{})'.format(out)
+
+    def transition(self, cost, prev_cat, next_cat):
+        self.cost += cost
+        self.components.append('transition {:3s} -> {:7s}: {}'.format(
+            prev_cat, next_cat, cost))
+
+    def emission(self, cost, cat, morph):
+        self.cost += cost
+        self.components.append('emission   {:3s} :: {:7s}: {}'.format(
+            cat, morph, cost))
+
+    def penalty(self, cost):
+        self.cost += cost
+        self.components.append('penalty: {}'.format(cost))

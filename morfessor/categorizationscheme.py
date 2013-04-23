@@ -59,6 +59,7 @@ CONTEXT_TYPE_BOTH = (CONTEXT_TYPE_INTERNAL + CONTEXT_FLAG_INITIAL +
 class HeuristicPostprocessor(object):
     def __init__(self, model):
         self.model = model
+        self.temporaries = set()
 
     def remove_nonmorfemes(self, analysis):
         """Remove nonmorfemes from the analysis by joining or retagging
@@ -68,8 +69,10 @@ class HeuristicPostprocessor(object):
             if all([m.category != 'ZZZ' for m in analysis]):
                 return analysis
             alternatives = []
+            self.temporaries = set()
 
             # If there are no stems, try making the longest morph into a stem
+            # This can also modify the tag of a morph with other than ZZZ
             longest_index = None
             longest_len = 0
             for (i, m) in enumerate(analysis):
@@ -86,13 +89,13 @@ class HeuristicPostprocessor(object):
                                                     'STM')
                 alternatives.append(tmp)
 
-            # Try joining each nonmorph in both directions,
+            # Try joining each nonmorpheme in both directions,
             for i in range(len(analysis) - 1):
                 if (analysis[i].category == 'ZZZ' or 
                         analysis[i + 1].category == 'ZZZ'):
                     alternatives.append(self._join_at(analysis, i))
 
-            # Try joining all sequences of 3 or more nonmorphs
+            # Try joining all sequences of 3 or more nonmorphemes
             concatenated = []
             tmp = []
             for m in analysis:
@@ -100,16 +103,32 @@ class HeuristicPostprocessor(object):
                     concatenated.append(m.morph)
                 else:
                     if len(concatenated) >= 3:
-                        tmp.append(CategorizedMorph(''.join(concatenated), 'STM'))
+                        morph = ''.join(concatenated)
+                        tmp.append(CategorizedMorph(morph, 'STM'))
+                        self.temporaries.add(morph)
                         concatenated = []
                     tmp.append(m)
             if len(concatenated) >= 3:
-                tmp.append(CategorizedMorph(''.join(concatenated), 'STM'))
+                morph = ''.join(concatenated)
+                tmp.append(CategorizedMorph(morph, 'STM'))
+                self.temporaries.add(morph)
                 concatenated = []
             if len(concatenated) == 0 and len(tmp) > 0:
                 alternatives.append(tmp)
 
-            return alternatives     # FIXME debug
+            # Add penalties for number of remaining nonmorphemes
+            with_penalties = []
+            for analysis in alternatives:
+                penalty = 0
+                for cmorph in analysis:
+                    if cmorph.category == 'ZZZ':
+                        penalty += NON_MORPHEME_PENALTY
+                with_penalties.append(analysis, penalty)
+
+            for morph in self.temporaries:
+                pass
+                # FIXME: should be categorized morph, to add the correct emission
+            return self.model.best_analysis(with_penalties) # FIXME debug
 
     def _join_at(self, analysis, i):
         tag = analysis[i].category
@@ -118,6 +137,7 @@ class HeuristicPostprocessor(object):
         if tag == 'ZZZ':
             tag = 'STM'
         morph = analysis[i].morph + analysis[i + 1].morph
+        self.temporaries.add(morph)
         out = list(analysis[:i]) + [CategorizedMorph(morph, tag)]
         if len(analysis) > (i + 2):
             out.extend(analysis[(i+2):])

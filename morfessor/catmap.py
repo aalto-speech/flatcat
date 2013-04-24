@@ -29,6 +29,8 @@ PY3 = sys.version_info.major == 3
 _logger = logging.getLogger(__name__)
 _logger.level = logging.DEBUG   # FIXME development convenience
 
+# Penalty for violating given annotation (FIXME change to parameter?)
+ANNOTATION_PENALTY = LOGPROB_ZERO / 2
 
 # Grid node for viterbi algorithm
 ViterbiNode = collections.namedtuple('ViterbiNode', ['cost', 'backpointer'])
@@ -128,6 +130,7 @@ class CatmapModel(object):
         self._annot_coding = None
         self.annotations = []           # (word, (analysis1, analysis2...))
         self._active_annotations = []   # index of active analysis
+        self._annotations_tagged = False
 
     def add_corpus_data(self, segmentations, freqthreshold=1,
                         count_modifier=None):
@@ -436,6 +439,9 @@ class CatmapModel(object):
         self._calculate_usage_features()
         self._calculate_transition_counts()
         self._calculate_emission_counts()
+        if self._supervised:
+            self._update_annotation_choices()
+            #self._annot_coding.update_weight()
 
     def _calculate_usage_features(self):
         """Recalculates the morph usage features (perplexities).
@@ -1068,8 +1074,9 @@ class CatmapModel(object):
 
     def get_cost(self):
         """Return current model encoding cost."""
-        # FIXME: annotation coding cost for supervised
         cost = self._corpus_coding.get_cost() + self._lexicon_coding.get_cost()
+        if self._supervised:
+            cost += self._annot_coding.get_cost_sum()
         return cost
 
     def _update_annotation_choices(self, changed_morphs=None):
@@ -1084,6 +1091,9 @@ class CatmapModel(object):
                     # This annotation doesn't contain any of the
                     # changed morphs as substring: effect is negligible
                     continue
+
+            if not self._annotations_tagged:
+                alternatives = [self.viterbi_tag(alt) for alt in alternatives]
 
             sorted_alts = self.best_analysis([AnalysisAlternative(alt, 0)
                                               for alt in alternatives])
@@ -1106,6 +1116,26 @@ class CatmapModel(object):
             self._update_counts(changes, 1)
 
             self._active_annotations[i] = new_active
+
+            self._annot_coding.set_cost(i, sorted_alts[0].cost)
+            current_analysis, _ = self.viterbi_segment(compound)
+            # FIXME this will require a normalization step if hierarchy
+            # is added
+            incorrect = True
+            for alt in alternatives:
+                if self.detag_word(current_analysis) == self.detag_word(alt):
+                    incorrect = False
+                    break
+            self._annot_coding.set_penalty(i, incorrect)
+
+    def set_annotations(self, annotations, annotatedcorpusweight):
+        self._supervised = True
+        if annotations[0][1][0][0].category != CategorizedMorph.no_category:
+            self._annotations_tagged = True
+        self.annotations = annotations
+        self._active_annotations = [None] * len(annotations)
+        self._annot_coding = CatmapAnnotationEncoding(
+                                weight=annotatedcorpusweight)
 
     def get_corpus_coding_weight(self):
         return self._corpus_coding.weight
@@ -1714,6 +1744,30 @@ class CatmapEncoding(baseline.CorpusEncoding):
                  ) * self.weight
                  #+ self.frequency_distribution_cost())
                 )
+
+
+class CatmapAnnotationEncoding(object):
+    def __init__(self, weight):
+        self.weight = weight
+        self.costs = collections.defaultdict(int)
+        self.penalties = collections.defaultdict(int)
+        self._cost_sum = 0.0
+        self._penalty_sum = 0.0
+
+    def set_cost(self, index, cost):
+        self._cost_sum -= self.costs[index]
+        self._cost_sum += cost
+        self.costs[index] = cost
+
+    def set_penalty(self, index, penalty):
+        if penalty and (not self.penalties[index]):
+            self._penalty_sum += ANNOTATION_PENALTY
+        elif (not penalty) and (self.penalties[index]):
+            self._penalty_sum -= ANNOTATION_PENALTY
+        self.penalties[index] = penalty
+
+    def get_cost_sum(self):
+        return self._cost_sum + self._penalty_sum
 
 
 def _log_catprobs(probs):

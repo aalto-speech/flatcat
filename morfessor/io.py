@@ -1,4 +1,5 @@
 import bz2
+import collections
 import codecs
 import datetime
 import gzip
@@ -351,14 +352,47 @@ class CatmapIO(MorfessorIO):
             count, analysis = line.split(' ', 1)
             cmorphs = []
             for morph_cat in analysis.split(self.construction_separator):
-                parts = morph_cat.rsplit(self.category_separator, 1)
-                morph = parts[0]
-                if len(parts) == 1:
-                    category = None
-                else:
-                    category = parts[1]
-                    if category not in get_categories():
-                        raise InvalidCategoryError(category)
-                cmorphs.append(CategorizedMorph(morph, category))
+                cmorphs.append(self._morph_or_cmorph(morph_cat))
             yield(int(count), tuple(cmorphs))
         _logger.info("Done.")
+
+    def read_annotations_file(self, file_name, construction_separator=' ',
+                              analysis_sep=','):
+        """Read a annotations file.
+
+        Each line has the format:
+        <compound> <constr1> <constr2>... <constrN>, <constr1>...<constrN>, ...
+
+        Yield tuples (compound, list(analyses)).
+
+        """
+        annotations = collections.defaultdict(list)
+        _logger.info("Reading annotations from '%s'..." % file_name)
+        for line in self._read_text_file(file_name):
+            compound, analyses_line = line.split(None, 1)
+
+            if analysis_sep is not None:
+                analyses = analyses_line.split(analysis_sep)
+            else:
+                analyses = [analyses_line]
+
+            for analysis in analyses:
+                segments = analysis.split(construction_separator)
+                annotations[compound].append([self._morph_or_cmorph(x)
+                                              for x in segments])
+        _logger.info("Done.")
+        out = []
+        for compound, analyses in annotations.items():
+            out.append((compound, analyses))
+        return out
+
+    def _morph_or_cmorph(self, morph_cat):
+        parts = morph_cat.rsplit(self.category_separator, 1)
+        morph = parts[0]
+        if len(parts) == 1:
+            category = None
+        else:
+            category = parts[1]
+            if category not in get_categories():
+                raise InvalidCategoryError(category)
+        cmorph = CategorizedMorph(morph, category)

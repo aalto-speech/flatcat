@@ -652,11 +652,11 @@ Simple usage examples (training and testing):
                  '(default %(default)s).')
 
     # Options for semi-supervised model training
-#     add_arg = parser.add_argument_group(
-#         'semi-supervised training options').add_argument
-#     add_arg('-A', '--annotations', dest="annofile", default=None,
-#             metavar='<file>',
-#             help="load annotated data for semi-supervised learning.")
+    add_arg = parser.add_argument_group(
+        'semi-supervised training options').add_argument
+    add_arg('-A', '--annotations', dest="annofile", default=None,
+            metavar='<file>',
+            help="load annotated data for semi-supervised learning.")
     add_arg('-D', '--develset', dest="develfile", default=None,
             metavar='<file>',
             help="load annotated data for tuning the corpus weight parameter.")
@@ -664,11 +664,11 @@ Simple usage examples (training and testing):
 #             default=1.0, metavar='<float>',
 #             help="corpus weight parameter (default %(default)s); "
 #             "sets the initial value if --develset is used.")
-#     add_arg('-W', '--annotationweight', dest="annotationweight",
-#             type=float, default=None, metavar='<float>',
-#             help="corpus weight parameter for annotated data (if unset, the "
-#                 "weight is set to balance the number of tokens in annotated "
-#                  "and unannotated data sets).")
+    add_arg('-W', '--annotationweight', dest="annotationweight",
+            type=float, default=None, metavar='<float>',
+            help="corpus weight parameter for annotated data (if unset, the "
+                 "weight is set to balance the number of tokens in annotated "
+                 "and unannotated data sets).")
 
     # Options for logging
     add_arg = parser.add_argument_group('logging options').add_argument
@@ -776,6 +776,12 @@ def catmap_main(args):
     for f in args.baselinefiles + args.loadsegfiles:
         model.add_corpus_data(io.read_segmentation_file(f),
                               count_modifier=dampfunc)
+
+    if args.annofile is not None:
+        annotations = io.read_annotations_file(args.annofile,
+            analysis_sep=args.analysisseparator)
+        model.set_annotations(annotations, args.annotationweight)
+
     if args.develfile is not None:
         develannots = io.read_annotations_file(args.develfile,
             analysis_sep=args.analysisseparator)

@@ -8,7 +8,6 @@ from __future__ import unicode_literals
 # Which is a workaround for the pickle namespace problem
 #__all__ = ['CatmapIO', 'CatmapModel']
 
-__version__ = '2.0.0prealpha1'
 __author__ = 'Stig-Arne Gronroos'
 __author_email__ = "morfessor@cis.hut.fi"
 
@@ -35,6 +34,13 @@ _logger.level = logging.DEBUG   # FIXME development convenience
 ViterbiNode = collections.namedtuple('ViterbiNode', ['cost', 'backpointer'])
 
 WordAnalysis = collections.namedtuple('WordAnalysis', ['count', 'analysis'])
+
+AnalysisAlternative = collections.namedtuple('AnalysisAlternative',
+                                             ['analysis', 'penalty'])
+
+SortedAnalysis = collections.namedtuple('SortedAnalysis',
+                                        ['cost', 'analysis',
+                                         'index', 'brakdown'])
 
 
 class CatmapModel(object):
@@ -116,6 +122,12 @@ class CatmapModel(object):
             self.forcesplit = []
         else:
             self.forcesplit = tuple(forcesplit)
+
+        # Variables for semi-supervised training
+        self._supervised = False
+        self._annot_coding = None
+        self.annotations = []           # (word, (analysis1, analysis2...))
+        self._active_annotations = []   # index of active analysis
 
     def add_corpus_data(self, segmentations, freqthreshold=1,
                         count_modifier=None):
@@ -1060,6 +1072,41 @@ class CatmapModel(object):
         cost = self._corpus_coding.get_cost() + self._lexicon_coding.get_cost()
         return cost
 
+    def _update_annotation_choices(self, changed_morphs=None):
+        """Update the selection of alternative analyses in annotations."""
+        if not self._supervised:
+            return
+
+        for (i, annotation) in enumerate(self.annotations):
+            (compound, alternatives) = annotation
+            if changed_morphs is not None:
+                if not any(x in compound for x in changed_morphs):
+                    # This annotation doesn't contain any of the
+                    # changed morphs as substring: effect is negligible
+                    continue
+
+            sorted_alts = self.best_analysis([AnalysisAlternative(alt, 0)
+                                              for alt in alternatives])
+            old_active = self._active_annotations[i]
+            new_active = sorted_alts[0].index
+            if new_active == old_active:
+                # Active annotation didn't change
+                continue
+
+            changes = ChangeCounts()
+            if old_active is not None:
+                changes.update(alternatives[old_active], -1)
+            changes.update(alternatives[new_active], 1)
+
+            if old_active is not None:
+                for morph in self.detag_word(alternatives[old_active]):
+                    self._modify_morph_count(morph, -1)
+            for morph in self.detag_word(alternatives[new_active]):
+                self._modify_morph_count(morph, 1)
+            self._update_counts(changes, 1)
+
+            self._active_annotations[i] = new_active
+
     def get_corpus_coding_weight(self):
         return self._corpus_coding.weight
 
@@ -1073,25 +1120,25 @@ class CatmapModel(object):
         from baseline: this method is more versatile.
 
         Arguments:
-            choices -- a sequence of (analysis, penalty) tuples.
+            choices -- a sequence of AnalysisAlternative(analysis, penalty)
+                       namedtuples.
                        The analysis must be a sequence of CategorizedMorphs,
                        (segmented and tagged).
                        The penalty is a float that is added to the cost
                        for this choice. Use 0 to disable.
         Returns:
             A sorted (by cost, ascending) list of
-            (cost, analysis, breakdown) tuples
+            SortedAnalysis(cost, analysis, index, breakdown) namedtuples.
                 cost -- the contribution of this analysis to the corpus cost.
                 analysis -- as in input.
                 breakdown -- A CostBreakdown object, for diagnostics
         """
         out = []
-        for choice in choices:
-            out.append(self.cost_breakdown(choice[0],
-                                           choice[1]))
+        for (i, choice) in enumerate(choices):
+            out.append(self.cost_breakdown(choice.analysis, choice.penalty, i))
         return sorted(out)
 
-    def cost_breakdown(self, segmentation, penalty=0.0):
+    def cost_breakdown(self, segmentation, penalty=0.0, index=0):
         """Returns breakdown of costs for the given tagged segmentation."""
         wrapped = _wb_wrap(segmentation)
         breakdown = CostBreakdown()
@@ -1105,7 +1152,7 @@ class CatmapModel(object):
                 breakdown.emission(cost, suffix.category, suffix.morph)
         if penalty != 0:
             breakdown.penalty(penalty)
-        return (breakdown.cost, segmentation, breakdown)
+        return SortedAnalysis(breakdown.cost, segmentation, index, breakdown)
 
     def cost_comparison(self, segmentations, retag=True):
         """Diagnostic function.

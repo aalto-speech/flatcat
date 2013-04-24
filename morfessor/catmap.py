@@ -440,6 +440,7 @@ class CatmapModel(object):
         self._calculate_transition_counts()
         self._calculate_emission_counts()
         if self._supervised:
+            self._active_annotations = [None] * len(self.annotations)
             self._update_annotation_choices()
             #self._annot_coding.update_weight()
 

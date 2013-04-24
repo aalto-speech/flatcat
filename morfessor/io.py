@@ -396,3 +396,4 @@ class CatmapIO(MorfessorIO):
             if category not in get_categories():
                 raise InvalidCategoryError(category)
         cmorph = CategorizedMorph(morph, category)
+        return cmorph

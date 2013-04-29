@@ -660,10 +660,10 @@ Simple usage examples (training and testing):
     add_arg('-D', '--develset', dest="develfile", default=None,
             metavar='<file>',
             help="load annotated data for tuning the corpus weight parameter.")
-#     add_arg('-w', '--corpusweight', dest="corpusweight", type=float,
-#             default=1.0, metavar='<float>',
-#             help="corpus weight parameter (default %(default)s); "
-#             "sets the initial value if --develset is used.")
+    add_arg('-w', '--corpusweight', dest="corpusweight", type=float,
+            default=1.0, metavar='<float>',
+            help="corpus weight parameter (default %(default)s); "
+            "sets the initial value if --develset is used.")
     add_arg('-W', '--annotationweight', dest="annotationweight",
             type=float, default=None, metavar='<float>',
             help="corpus weight parameter for annotated data (if unset, the "
@@ -771,7 +771,8 @@ def catmap_main(args):
             length_slope=args.length_slope,
             use_word_tokens=not args.type_ppl,
             min_perplexity_length=args.min_ppl_length)
-        model = CatmapModel(m_usage, forcesplit=args.forcesplit)
+        model = CatmapModel(m_usage, forcesplit=args.forcesplit,
+                            corpusweight=args.corpusweight)
 
     for f in args.baselinefiles + args.loadsegfiles:
         model.add_corpus_data(io.read_segmentation_file(f),
@@ -795,6 +796,7 @@ def catmap_main(args):
         model.epoch_callbacks.append(stats.callback)
         stats.set_names(model, args.training_operations)
 
+    # Load data
     do_train = False
     if args.loadfile is None:
         # Starting from segmentations instead of pickle,

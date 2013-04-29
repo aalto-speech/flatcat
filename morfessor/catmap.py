@@ -52,7 +52,8 @@ class CatmapModel(object):
 
     DEFAULT_TRAIN_OPS = ['split', 'join', 'split', 'shift', 'resegment']
 
-    def __init__(self, morph_usage, forcesplit=None):
+    def __init__(self, morph_usage, forcesplit=None,
+                 corpusweight=1.0):
         """Initialize a new model instance.
 
         Arguments:
@@ -76,7 +77,8 @@ class CatmapModel(object):
         # Cost variables
         self._lexicon_coding = CatmapLexiconEncoding(morph_usage)
         # Catmap encoding also stores the HMM parameters
-        self._corpus_coding = CatmapEncoding(morph_usage, self._lexicon_coding)
+        self._corpus_coding = CatmapEncoding(morph_usage, self._lexicon_coding,
+                                             weight=corpusweight)
 
         # Counters for the current iteration and operation within
         # that iteration. These describe the stage of training
@@ -1199,9 +1201,9 @@ class CatmapModel(object):
         if retag:
             tagged = []
             for seg in segmentations:
-                tagged.append((self.viterbi_tag(seg), 0))
+                tagged.append(AnalysisAlternative(self.viterbi_tag(seg), 0))
         else:
-            tagged = [(x, 0) for x in segmentations]
+            tagged = [AnalysisAlternative(x, 0) for x in segmentations]
         return self.best_analysis(tagged)
 
     def words_with_morph(self, morph):

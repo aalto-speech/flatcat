@@ -43,6 +43,8 @@ MorphContext = collections.namedtuple('MorphContext',
                                       ['count', 'left_perplexity',
                                        'right_perplexity'])
 
+AnalysisAlternative = collections.namedtuple('AnalysisAlternative',
+                                             ['analysis', 'penalty'])
 
 # Context type flags, from which the context type is formed.
 # (Binary flags in integer format)
@@ -128,7 +130,7 @@ class HeuristicPostprocessor(object):
                 for cmorph in analysis:
                     if cmorph.category == 'ZZZ':
                         penalty += NON_MORPHEME_PENALTY
-                with_penalties.append((analysis, penalty))
+                with_penalties.append(AnalysisAlternative(analysis, penalty))
 
             for morph in self.temporaries:
                 # Allow new morphs to be formed by joining

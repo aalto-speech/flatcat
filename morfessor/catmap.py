@@ -331,10 +331,11 @@ class CatmapModel(object):
                 for callback in self.epoch_callbacks:
                     callback(self, iteration)
 
-            if (not force_another) and -cost_diff <= (min_cost_gain *
-                                            self._corpus_coding.boundaries):
+            limit = min_cost_gain * self._corpus_coding.boundaries
+            if (not force_another) and -cost_diff <= limit:
                 _logger.info('Converged, with cost difference ' +
-                    '{} in final {}.'.format(cost_diff, iteration_name))
+                    '{} (limit {}) in final {}.'.format(
+                        cost_diff, limit, iteration_name))
                 break
             else:
                 _logger.info('Cost difference {} in {} {}/{}'.format(

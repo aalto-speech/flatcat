@@ -800,6 +800,8 @@ class CatmapModel(object):
             self._lexicon_coding.add(morph)
         elif old_count > 0 and new_count == 0:
             self._lexicon_coding.remove(morph)
+        if self._supervised:
+            self._annot_coding.update_count(morph, old_count, new_count)
 
     def _update_counts(self, change_counts, multiplier):
         """Updates the model counts according to the pre-calculated
@@ -1080,65 +1082,56 @@ class CatmapModel(object):
         """Return current model encoding cost."""
         cost = self._corpus_coding.get_cost() + self._lexicon_coding.get_cost()
         if self._supervised:
-            cost += self._annot_coding.get_cost_sum()
+            cost += self._annot_coding.get_cost()
         return cost
 
-    def _update_annotation_choices(self, changed_morphs=None):
+    def _update_annotation_choices(self):
         """Update the selection of alternative analyses in annotations."""
         if not self._supervised:
             return
 
         for (i, annotation) in enumerate(self.annotations):
             (compound, alternatives) = annotation
-            if changed_morphs is not None:
-                if not any(x in compound for x in changed_morphs):
-                    # This annotation doesn't contain any of the
-                    # changed morphs as substring: effect is negligible
-                    continue
 
             if not self._annotations_tagged:
                 alternatives = [self.viterbi_tag(alt) for alt in alternatives]
 
             sorted_alts = self.best_analysis([AnalysisAlternative(alt, 0)
                                               for alt in alternatives])
-            old_active = self._active_annotations[i]
-            new_active = sorted_alts[0].index
+            old_active = self.segmentations[i]
+            new_active = sorted_alts[0]
             if new_active == old_active:
                 # Active annotation didn't change
                 continue
 
             changes = ChangeCounts()
             if old_active is not None:
-                changes.update(alternatives[old_active], -1)
-            changes.update(alternatives[new_active], 1)
+                changes.update(old_active, -1)
+            changes.update(new_active, 1)
 
+            # Active segmentation changed before removal/adding of morphs
+            self.segmentations[i] = new_active
+            # Only morphs in both new_active and old_active will get penalty,
+            # which will be cancelled out when adding new_active.
             if old_active is not None:
-                for morph in self.detag_word(alternatives[old_active]):
+                for morph in self.detag_word(old_active):
                     self._modify_morph_count(morph, -1)
-            for morph in self.detag_word(alternatives[new_active]):
+            for morph in self.detag_word(new_active):
                 self._modify_morph_count(morph, 1)
             self._update_counts(changes, 1)
 
-            self._active_annotations[i] = new_active
-
-            self._annot_coding.set_cost(i, sorted_alts[0].cost)
-            current_analysis, _ = self.viterbi_segment(compound)
-            # FIXME this will require a normalization step if hierarchy
-            # is added
-            incorrect = True
-            for alt in alternatives:
-                if self.detag_word(current_analysis) == self.detag_word(alt):
-                    incorrect = False
-                    break
-            self._annot_coding.set_penalty(i, incorrect)
-
     def set_annotations(self, annotations, annotatedcorpusweight):
         self._supervised = True
-        if annotations[0][1][0][0].category != CategorizedMorph.no_category:
-            self._annotations_tagged = True
-        self.annotations = annotations
-        self._active_annotations = [None] * len(annotations)
-        self._annot_coding = CatmapAnnotationEncoding(
+        self._annotations_tagged = True
+        for annotation in annotations:
+            if annotation[1][0][0].category == CategorizedMorph.no_category:
+                self._annotations_tagged = False
+            # The fist entries in self.segmentations are the currently active
+            # annotations, in the same order as in self.annotations
+            self.segmentations.insert(len(self.annotations), annotation[1][0])
+            self.annotations.append(annotation)
+        self._annot_coding = baseline.AnnotatedCorpusEncoding(
+                                self._corpus_coding,
                                 weight=annotatedcorpusweight)
 
     def get_corpus_coding_weight(self):
@@ -1748,30 +1741,6 @@ class CatmapEncoding(baseline.CorpusEncoding):
                  ) * self.weight
                  #+ self.frequency_distribution_cost())
                 )
-
-
-class CatmapAnnotationEncoding(object):
-    def __init__(self, weight):
-        self.weight = weight
-        self.costs = collections.defaultdict(int)
-        self.penalties = collections.defaultdict(int)
-        self._cost_sum = 0.0
-        self._penalty_sum = 0.0
-
-    def set_cost(self, index, cost):
-        self._cost_sum -= self.costs[index]
-        self._cost_sum += cost
-        self.costs[index] = cost
-
-    def set_penalty(self, index, penalty):
-        if penalty and (not self.penalties[index]):
-            self._penalty_sum += ANNOTATION_PENALTY
-        elif (not penalty) and (self.penalties[index]):
-            self._penalty_sum -= ANNOTATION_PENALTY
-        self.penalties[index] = penalty
-
-    def get_cost_sum(self):
-        return self._cost_sum + self._penalty_sum
 
 
 def _log_catprobs(probs):

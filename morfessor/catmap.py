@@ -1098,8 +1098,8 @@ class CatmapModel(object):
 
             sorted_alts = self.best_analysis([AnalysisAlternative(alt, 0)
                                               for alt in alternatives])
-            old_active = self.segmentations[i]
-            new_active = sorted_alts[0]
+            old_active = self.segmentations[i].analysis
+            new_active = sorted_alts[0].analysis
             if new_active == old_active:
                 # Active annotation didn't change
                 continue
@@ -1110,7 +1110,7 @@ class CatmapModel(object):
             changes.update(new_active, 1)
 
             # Active segmentation changed before removal/adding of morphs
-            self.segmentations[i] = new_active
+            self.segmentations[i] = WordAnalysis(1, new_active)
             # Only morphs in both new_active and old_active will get penalty,
             # which will be cancelled out when adding new_active.
             if old_active is not None:
@@ -1128,7 +1128,9 @@ class CatmapModel(object):
                 self._annotations_tagged = False
             # The fist entries in self.segmentations are the currently active
             # annotations, in the same order as in self.annotations
-            self.segmentations.insert(len(self.annotations), annotation[1][0])
+            self.segmentations.insert(
+                len(self.annotations),
+                WordAnalysis(1, annotation[1][0]))
             self.annotations.append(annotation)
         self._annot_coding = baseline.AnnotatedCorpusEncoding(
                                 self._corpus_coding,

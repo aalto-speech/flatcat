@@ -338,8 +338,10 @@ class CatmapModel(object):
                         cost_diff, limit, iteration_name))
                 break
             else:
-                _logger.info('Cost difference {} in {} {}/{}'.format(
-                    cost_diff, iteration_name, iteration + 1, max_iterations))
+                _logger.info(
+                    'Cost difference {} (limit {}) in {} {}/{}'.format(
+                    cost_diff, limit,
+                    iteration_name, iteration + 1, max_iterations))
             previous_cost = cost
 
     def convergence_of_analysis(self, train_func, resegment_func,
@@ -1097,6 +1099,9 @@ class CatmapModel(object):
         if not self._supervised:
             return
 
+        constructions_add = collections.Counter()
+        constructions_rm = collections.Counter()
+        changes = ChangeCounts()
         for (i, annotation) in enumerate(self.annotations):
             (compound, alternatives) = annotation
 
@@ -1111,7 +1116,6 @@ class CatmapModel(object):
                 # Active annotation didn't change
                 continue
 
-            changes = ChangeCounts()
             if old_active is not None:
                 changes.update(old_active, -1)
             changes.update(new_active, 1)
@@ -1122,10 +1126,18 @@ class CatmapModel(object):
             # which will be cancelled out when adding new_active.
             if old_active is not None:
                 for morph in self.detag_word(old_active):
-                    self._modify_morph_count(morph, -1)
+                    constructions_rm[morph] += 1
             for morph in self.detag_word(new_active):
-                self._modify_morph_count(morph, 1)
-            self._update_counts(changes, 1)
+                constructions_add[morph] += 1
+
+        for (morph, count) in constructions_rm.items():
+            self._modify_morph_count(morph, count)
+        self._annot_coding.set_constructions(constructions_add)
+        for (morph, count) in constructions_add.items():
+            self._modify_morph_count(morph, count)
+            # FIXME unnecessary: performed by _modify_morph_count
+            #self._annot_coding.set_count(morph, count)
+        self._update_counts(changes, 1)
 
     def add_annotations(self, annotations, annotatedcorpusweight):
         self._supervised = True
@@ -1139,11 +1151,11 @@ class CatmapModel(object):
                 len(self.annotations),
                 WordAnalysis(1, annotation[1][0]))
             self.annotations.append(annotation)
-        self._annot_coding.boundaries = len(self.annotations)
         self._calculate_morph_backlinks()
         self._annot_coding = baseline.AnnotatedCorpusEncoding(
                                 self._corpus_coding,
                                 weight=annotatedcorpusweight)
+        self._annot_coding.boundaries = len(self.annotations)
 
     def get_corpus_coding_weight(self):
         return self._corpus_coding.weight

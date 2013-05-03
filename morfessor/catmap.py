@@ -445,7 +445,7 @@ class CatmapModel(object):
         if self._supervised:
             self._active_annotations = [None] * len(self.annotations)
             self._update_annotation_choices()
-            #self._annot_coding.update_weight()
+            self._annot_coding.update_weight()
 
     def _calculate_usage_features(self):
         """Recalculates the morph usage features (perplexities).
@@ -547,6 +547,13 @@ class CatmapModel(object):
                 self._corpus_coding.update_emission_count(morph.category,
                                                           morph.morph,
                                                           count)
+
+    def _calculate_morph_backlinks(self):
+        self.morph_backlinks.clear()
+        for (i, segmentation) in enumerate(self.segmentations):
+            for morph in self.detag_word(segmentation.analysis):
+                self.morph_backlinks[morph].add(i)
+            i += 1
 
     def _find_in_corpus(self, rule, targets=None):
         """Returns the indices of words in the corpus segmentation
@@ -1120,7 +1127,7 @@ class CatmapModel(object):
                 self._modify_morph_count(morph, 1)
             self._update_counts(changes, 1)
 
-    def set_annotations(self, annotations, annotatedcorpusweight):
+    def add_annotations(self, annotations, annotatedcorpusweight):
         self._supervised = True
         self._annotations_tagged = True
         for annotation in annotations:
@@ -1132,6 +1139,8 @@ class CatmapModel(object):
                 len(self.annotations),
                 WordAnalysis(1, annotation[1][0]))
             self.annotations.append(annotation)
+        self._annot_coding.boundaries = len(self.annotations)
+        self._calculate_morph_backlinks()
         self._annot_coding = baseline.AnnotatedCorpusEncoding(
                                 self._corpus_coding,
                                 weight=annotatedcorpusweight)

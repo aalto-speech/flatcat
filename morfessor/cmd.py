@@ -781,7 +781,7 @@ def catmap_main(args):
     if args.annofile is not None:
         annotations = io.read_annotations_file(args.annofile,
             analysis_sep=args.analysisseparator)
-        model.set_annotations(annotations, args.annotationweight)
+        model.add_annotations(annotations, args.annotationweight)
 
     if args.develfile is not None:
         develannots = io.read_annotations_file(args.develfile,

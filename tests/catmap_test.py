@@ -13,6 +13,7 @@ import unittest
 import morfessor
 from morfessor import catmap
 from morfessor import categorizationscheme as scheme
+from morfessor.categorizationscheme import CategorizedMorph
 from morfessor.utils import LOGPROB_ZERO
 
 
@@ -290,6 +291,15 @@ class TestModelConsistency(unittest.TestCase):
         (500, ('SSSSS',)),
         (2, ('AASSSSS',)))
 
+    dummy_annotation = (
+        ('ABCDEFG', ((CategorizedMorph('ABC', None),
+                      CategorizedMorph('DEFG', None)),)),
+        ('HIJKLMN', ((CategorizedMorph('H', None),
+                      CategorizedMorph('IJKLMN', None)),
+                     (CategorizedMorph('H', None),
+                      CategorizedMorph('IJ', None),
+                      CategorizedMorph('KLMN', None)))))
+
     def setUp(self):
         self.model = _load_catmap(TestModelConsistency.dummy_segmentation)
 
@@ -303,7 +313,6 @@ class TestModelConsistency(unittest.TestCase):
         segmentation is consistent."""
         self.presplit()
         self.initial_state_asserts()
-#test_modify_morph_count
 
     def test_transforms(self):
         self.model.add_corpus_data(
@@ -369,6 +378,13 @@ class TestModelConsistency(unittest.TestCase):
             self.model._update_counts(cc, -1)
 
         self._apply_revert(apply_update_counts, revert_update_counts, None)
+
+    def test_add_annotations(self):
+        self.model.add_annotations(TestModelConsistency.dummy_annotation)
+        self.presplit()
+        self._apply_revert(self.model._update_annotation_choices,
+                           self.model._update_annotation_choices,
+                           None)
 
     def _apply_revert(self, apply_func, revert_func, is_remove):
         state_exact, state_approx = self.store_state()
@@ -460,6 +476,12 @@ class TestModelConsistency(unittest.TestCase):
         for (i, tmp) in enumerate(
                 self.model._morph_usage.category_token_count):
             state_approx['category_token_count_{}'.format(i)] = float(tmp)
+        if self.model._annot_coding is not None:
+            state_exact['annot_tokens'] = self.model._annot_coding.tokens
+            state_exact['annot_logtokensum'] = float(
+                self.model._annot_coding.logtokensum)
+            state_exact['annot_constructions'] = sorted(
+                self.model._annot_coding.constructions)
         return (state_exact, state_approx)
 
     def compare_to_stored_state(self, state_exact, state_approx):

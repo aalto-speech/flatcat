@@ -1092,6 +1092,13 @@ class CatmapModel(object):
         cost = self._corpus_coding.get_cost() + self._lexicon_coding.get_cost()
         if self._supervised:
             cost += self._annot_coding.get_cost()
+        assert cost >= 0, '{}\t{}\t{}\t{}\t{}\t{}'.format(
+            self._annot_coding.boundaries,  # FIXME FIXME debug
+            self._annot_coding.tokens,
+            self._annot_coding.logtokensum,
+            len(self._annot_coding.constructions),
+            self._corpus_coding.boundaries,
+            self._corpus_coding.tokens)
         return cost
 
     def _update_annotation_choices(self):
@@ -1132,14 +1139,17 @@ class CatmapModel(object):
 
         for (morph, count) in constructions_rm.items():
             self._modify_morph_count(morph, count)
-        self._annot_coding.set_constructions(constructions_add)
         for (morph, count) in constructions_add.items():
             self._modify_morph_count(morph, count)
-            # FIXME unnecessary: performed by _modify_morph_count
-            #self._annot_coding.set_count(morph, count)
         self._update_counts(changes, 1)
+        self._annot_coding.set_constructions(constructions_add)
+        for morph in constructions_add:
+            # Will need to check for proper expansion when introducing
+            # hierarchical morphs
+            self._annot_coding.set_count(morph,
+                                         self._morph_usage.count(morph))
 
-    def add_annotations(self, annotations, annotatedcorpusweight):
+    def add_annotations(self, annotations, annotatedcorpusweight=None):
         self._supervised = True
         self._annotations_tagged = True
         for annotation in annotations:

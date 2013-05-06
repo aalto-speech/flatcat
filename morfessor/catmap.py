@@ -1094,13 +1094,6 @@ class CatmapModel(object):
         cost = self._corpus_coding.get_cost() + self._lexicon_coding.get_cost()
         if self._supervised:
             cost += self._annot_coding.get_cost()
-        assert cost >= 0, '{}\t{}\t{}\t{}\t{}\t{}'.format(
-            self._annot_coding.boundaries,  # FIXME FIXME debug
-            self._annot_coding.tokens,
-            self._annot_coding.logtokensum,
-            len(self._annot_coding.constructions),
-            self._corpus_coding.boundaries,
-            self._corpus_coding.tokens)
         return cost
 
     def _update_annotation_choices(self):
@@ -1110,9 +1103,10 @@ class CatmapModel(object):
 
         constructions_add = collections.Counter()
         constructions_rm = collections.Counter()
+        blacklist = set()
         changes = ChangeCounts()
         for (i, annotation) in enumerate(self.annotations):
-            (compound, alternatives) = annotation
+            (_, alternatives) = annotation
 
             if not self._annotations_tagged:
                 alternatives = [self.viterbi_tag(alt) for alt in alternatives]
@@ -1136,8 +1130,11 @@ class CatmapModel(object):
             if old_active is not None:
                 for morph in self.detag_word(old_active):
                     constructions_rm[morph] += 1
-            for morph in self.detag_word(new_active):
+            new_detagged = self.detag_word(new_active)
+            for morph in new_detagged:
                 constructions_add[morph] += 1
+            for (prefix, suffix) in ngrams(new_detagged, n=2):
+                blacklist.add(prefix + suffix)
 
         for (morph, count) in constructions_rm.items():
             self._modify_morph_count(morph, count)
@@ -1145,6 +1142,10 @@ class CatmapModel(object):
             self._modify_morph_count(morph, count)
         self._update_counts(changes, 1)
         self._annot_coding.set_constructions(constructions_add)
+        for supermorph in blacklist:
+            self._annot_coding.add_to_blacklist(supermorph)
+            self._annot_coding.set_count(supermorph,
+                                         self._morph_usage.count(supermorph))
         for morph in constructions_add:
             # Will need to check for proper expansion when introducing
             # hierarchical morphs
@@ -1164,7 +1165,7 @@ class CatmapModel(object):
                 WordAnalysis(1, annotation[1][0]))
             self.annotations.append(annotation)
         self._calculate_morph_backlinks()
-        self._annot_coding = baseline.AnnotatedCorpusEncoding(
+        self._annot_coding = CatmapAnnotatedCorpusEncoding(
                                 self._corpus_coding,
                                 weight=annotatedcorpusweight)
         self._annot_coding.boundaries = len(self.annotations)
@@ -1252,7 +1253,7 @@ class CatmapModel(object):
         but are currently segmented in a way that is not included in the
         annotation alternatives."""
         for (i, anno) in enumerate(self.annotations):
-            (word, alternatives) = anno
+            (_, alternatives) = anno
             alts_de = [self.detag_word(alt) for alt in alternatives]
             seg_de = self.detag_word(self.segmentations[i].analysis)
             if seg_de not in alts_de:
@@ -1788,6 +1789,43 @@ class CatmapEncoding(baseline.CorpusEncoding):
                  ) * self.weight
                  #+ self.frequency_distribution_cost())
                 )
+
+
+class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
+    def __init__(self, corpus_coding, weight=None, penalty=-9999.9):
+        super(CatmapAnnotatedCorpusEncoding, self).__init__(corpus_coding,
+                                                            weight=weight,
+                                                            penalty=penalty)
+        self.blacklist = set()
+
+    def add_to_blacklist(self, morph):
+        """Blacklist to prevent supermorphs of annotation parts from
+        being added to the lexicon, unless they are separately included
+        in the annotations.
+        """
+        if morph not in self.constructions:
+            self.blacklist.add(morph)
+
+    def set_constructions(self, constructions):
+        super(CatmapAnnotatedCorpusEncoding, self).set_constructions(
+            constructions)
+        self.blacklist.clear()
+
+    def set_count(self, construction, count):
+        super(CatmapAnnotatedCorpusEncoding, self).set_count(construction,
+                                                             count)
+        if count > 0 and construction in self.blacklist:
+            self.logtokensum += self.penalty
+
+    def update_count(self, construction, old_count, new_count):
+        super(CatmapAnnotatedCorpusEncoding, self).update_count(construction,
+                                                                old_count,
+                                                                new_count)
+        if construction in self.blacklist:
+            if old_count > 0:
+                self.logtokensum -= self.penalty
+            if new_count > 0:
+                self.logtokensum += self.penalty
 
 
 def _log_catprobs(probs):

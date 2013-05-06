@@ -98,6 +98,10 @@ class HeuristicPostprocessor(object):
 
             # Try joining each nonmorpheme in both directions,
             for i in range(len(analysis) - 1):
+                if (analysis[i].morph in self.model.forcesplit or
+                        analysis[i + 1].morph in self.model.forcesplit):
+                    # Unless forcesplit prevents it
+                    continue
                 if (analysis[i].category == 'ZZZ' or
                         analysis[i + 1].category == 'ZZZ'):
                     alternatives.append(self._join_at(analysis, i))
@@ -106,7 +110,7 @@ class HeuristicPostprocessor(object):
             concatenated = []
             tmp = []
             for m in analysis:
-                if m.category == 'ZZZ':
+                if m.category == 'ZZZ' and m.morph not in self.model.forcesplit:
                     concatenated.append(m.morph)
                 else:
                     if len(concatenated) >= 3:
@@ -128,7 +132,8 @@ class HeuristicPostprocessor(object):
             for analysis in alternatives:
                 penalty = 0
                 for cmorph in analysis:
-                    if cmorph.category == 'ZZZ':
+                    if (cmorph.category == 'ZZZ' and
+                            cmorph.morph not in self.model.forcesplit):
                         penalty += NON_MORPHEME_PENALTY
                 with_penalties.append(AnalysisAlternative(analysis, penalty))
 

@@ -52,6 +52,3 @@ else
 	echo "Saving boundary precision recall into ${DATASET}_catmap2.bpr"
 	python bin/bpr_v1.11.py -g ${GOLDSTD} -p ${DATASET}_catmap2.dev_result > ${DATASET}_catmap2.bpr
 fi
-
-# Make this filtering part of the process?
-# python bin/remove_na.py morphochal07_fin_n100_catmap2.dev_result morphochal07_fin_n100_oldcatmap.dev_result > morphochal07_fin_n100_catmap2.filtered.dev_result

@@ -29,12 +29,12 @@ PPL_THRESH=10
 EPOCH_COST="0.0025"
 ITER_COST="0.005"
 
-TESTDATA="data/morphochal07_fin_dev.goldstd.words"
-GOLDSTD="data/morphochal07_fin_dev.goldstd.segmentation"
+TESTDATA="data/morphochal10_fin_dev.goldstd.words"
+GOLDSTD="data/morphochal10_fin_dev.goldstd.segmentation"
 FORCESPLIT=":-"		# hyphen can't be first char
 STATS="--statsfile ${DATASET}.stats.pickled"
-#EXPERIMENTAL="-d log --max-iterations 10 -D data/morphochal07_fin_train.goldstd.segmentation"
-EXPERIMENTAL="-d log --max-iterations 10 -A data/morphochal07_fin_train.goldstd.segmentation -w 0.1"
+#EXPERIMENTAL="-d log --max-iterations 10 -D data/morphochal10_fin_train.goldstd.segmentation"
+EXPERIMENTAL="-d log --max-iterations 10 -A data/morphochal10_fin_train.goldstd.segmentation -w 0.1"
 #EXPERIMENTAL=""
 
 # Baseline segmentation

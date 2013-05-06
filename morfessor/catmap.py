@@ -1061,6 +1061,8 @@ class CatmapModel(object):
                 self.viterbi_segment(word.analysis)[0])
             if word != self.segmentations[i]:
                 num_changed_words += 1
+        self._reestimate_probabilities()
+        self._calculate_morph_backlinks()
         return num_changed_words
 
     def viterbi_analyze_list(self, corpus):
@@ -1225,7 +1227,8 @@ class CatmapModel(object):
             return
         if all(isinstance(s, basestring) for s in segmentations):
             segmentations = [segmentations]
-        if retag:
+        if retag is not None:
+            assert isinstance(retag, bool)
             tagged = []
             for seg in segmentations:
                 tagged.append(AnalysisAlternative(self.viterbi_tag(seg), 0))
@@ -1243,6 +1246,17 @@ class CatmapModel(object):
             seg = self.segmentations[i]
             out.append((i, seg.count, seg.analysis))
         return sorted(out)
+
+    def violated_annotations(self):
+        """Yields all segmentations which have an associated annotation,
+        but are currently segmented in a way that is not included in the
+        annotation alternatives."""
+        for (i, anno) in enumerate(self.annotations):
+            (word, alternatives) = anno
+            alts_de = [self.detag_word(alt) for alt in alternatives]
+            seg_de = self.detag_word(self.segmentations[i].analysis)
+            if seg_de not in alts_de:
+                yield (seg_de, alts_de)
 
     def clear_callbacks(self):
         """Callbacks are not saved in the pickled model, because pickle is

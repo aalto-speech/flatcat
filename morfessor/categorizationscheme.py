@@ -496,7 +496,7 @@ class CategorizedMorph(object):
     These objects should be treated as immutable, even though
     it is not enforced by the code.
     """
-    no_category = object()
+    no_category = ''
 
     __slots__ = ['morph', 'category']
 

@@ -306,18 +306,19 @@ class TestModelConsistency(unittest.TestCase):
     def test_initial_state(self):
         """Tests that the initial state produced by loading a baseline
         segmentation is consistent."""
-        self.initial_state_asserts()
+        self._initial_state_asserts()
 
     def test_presplit_state(self):
         """Tests that the initial parameter estimation from the baseline
         segmentation is consistent."""
-        self.presplit()
-        self.initial_state_asserts()
+        self._presplit()
+        self._initial_state_asserts()
+        self._destructive_backlink_check()
 
     def test_transforms(self):
         self.model.add_corpus_data(
             TestModelConsistency.one_split_segmentation)
-        self.presplit()
+        self._presplit()
 
         tmp = ((('AA', 'BBBBB'), ('AABBBBB',)),           # join
                (('AASSSSS',), ('AA', 'SSSSS')),           # split
@@ -359,9 +360,10 @@ class TestModelConsistency(unittest.TestCase):
                 lambda: apply_transformation(forward),
                 lambda: apply_transformation(backward),
                 None)
+        self._destructive_backlink_check()
 
     def test_update_counts(self):
-        self.presplit()
+        self._presplit()
         # manual change to join the one occurence of AA BBBBB
         cc = catmap.ChangeCounts(
             emissions={catmap.CategorizedMorph('AA', 'ZZZ'): -1,
@@ -381,13 +383,14 @@ class TestModelConsistency(unittest.TestCase):
 
     def test_add_annotations(self):
         self.model.add_annotations(TestModelConsistency.dummy_annotation)
-        self.presplit()
+        self._presplit()
         self._apply_revert(self.model._update_annotation_choices,
                            self.model._update_annotation_choices,
                            None)
+        self._destructive_backlink_check()
 
     def _apply_revert(self, apply_func, revert_func, is_remove):
-        state_exact, state_approx = self.store_state()
+        state_exact, state_approx = self._store_state()
         old_cost = self.model.get_cost()
         apply_func()
 
@@ -403,7 +406,7 @@ class TestModelConsistency(unittest.TestCase):
         self.assertAlmostEqual(old_cost, new_cost, places=4, msg=msg)
 
         # The model should have returned to initial state
-        self.compare_to_stored_state(state_exact, state_approx)
+        self._compare_to_stored_state(state_exact, state_approx)
 
         # sanity check: costs should never be negative
         self.assertTrue(old_cost >= 0)
@@ -419,7 +422,7 @@ class TestModelConsistency(unittest.TestCase):
                 self.assertTrue(mid_cost > old_cost)
 
     def test_estimate_remove_temporaries(self):
-        self.presplit()
+        self._presplit()
 
         prefix = 'BB'
         suffix = 'BBB'
@@ -428,13 +431,13 @@ class TestModelConsistency(unittest.TestCase):
                                                          (prefix, suffix)))
         self.model._morph_usage.remove_temporaries(tmp)
 
-        self.initial_state_asserts()
+        self._initial_state_asserts()
 
-    def presplit(self):
+    def _presplit(self):
         self.model.viterbi_tag_corpus()
         self.model._reestimate_probabilities()
 
-    def initial_state_asserts(self):
+    def _initial_state_asserts(self):
         category_totals = self.model._morph_usage.category_token_count
 
         self.assertAlmostEqual(sum(category_totals), 2.0, places=9)
@@ -456,9 +459,9 @@ class TestModelConsistency(unittest.TestCase):
             (2.0 * math.log(2.0)) + (5.0 * math.log(5.0)), places=9)
 
         # catmap coding
-        self.general_consistency_asserts()
+        self._general_consistency_asserts()
 
-    def store_state(self):
+    def _store_state(self):
         state_exact = {
             'seen_morphs': sorted(self.model._morph_usage.seen_morphs()),
             'contexts': dict(self.model._morph_usage._contexts),
@@ -484,8 +487,8 @@ class TestModelConsistency(unittest.TestCase):
                 self.model._annot_coding.constructions)
         return (state_exact, state_approx)
 
-    def compare_to_stored_state(self, state_exact, state_approx):
-        current_exact, current_approx = self.store_state()
+    def _compare_to_stored_state(self, state_exact, state_approx):
+        current_exact, current_approx = self._store_state()
         for key in state_exact:
             self.assertEqual(state_exact[key], current_exact[key],
                 'Reverting did not return to same state: {}'.format(key))
@@ -494,7 +497,7 @@ class TestModelConsistency(unittest.TestCase):
                 places=3,
                 msg='Reverting did not return to same state: {}'.format(key))
 
-    def general_consistency_asserts(self):
+    def _general_consistency_asserts(self):
         """ These values should be internally consistent at all times."""
         self.assertAlmostEqual(
             sum(self.model._corpus_coding._transition_counts.values()),
@@ -533,6 +536,19 @@ class TestModelConsistency(unittest.TestCase):
                              self.model._corpus_coding._cat_tagcount[cat],
                              msg)
 
+    def _destructive_backlink_check(self):
+        """Destructively checks that morph backlinks cover the whole corpus.
+        """
+
+        for morph in self.model.morph_backlinks:
+            for i in self.model.morph_backlinks[morph]:
+                seg = self.model.segmentations[i]
+                self.model.segmentations[i] = catmap.WordAnalysis(
+                    seg.count, [x for x in seg.analysis
+                                if x.morph != morph])
+        for seg in self.model.segmentations:
+            self.assertEqual(len(seg.analysis), 0,
+                             msg='missing backlinks: {}'.format(seg))
 
 def _zexp(x):
     if x >= LOGPROB_ZERO:

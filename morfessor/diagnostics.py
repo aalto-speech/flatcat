@@ -95,7 +95,7 @@ class IterationStatisticsPlotter(object):
         self.avg_morphs()
         plt.figure()
         self.durations()
-        plt.show()
+        plt.figure()
         self.morph_lengths()
         plt.show()
 
@@ -175,7 +175,7 @@ class IterationStatisticsPlotter(object):
                 plt.plot(x, y, 's', color=c, markersize=(normalized * 20.))
         self._iteration_grid()
         plt.xlabel('Epoch number')
-        plt.ylabel('Morph length distribution')
+        plt.ylabel('Morph type length distribution')
         self._title()
 
     def _iteration_grid(self):

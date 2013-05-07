@@ -384,9 +384,42 @@ class TestModelConsistency(unittest.TestCase):
     def test_add_annotations(self):
         self.model.add_annotations(TestModelConsistency.dummy_annotation)
         self._presplit()
+        self.model._update_annotation_choices()
         self._apply_revert(self.model._update_annotation_choices,
                            self.model._update_annotation_choices,
                            None)
+        self._destructive_backlink_check()
+
+    def test_annotation_blacklist(self):
+        self.model.add_annotations(TestModelConsistency.dummy_annotation)
+        self._presplit()
+        self.model._update_annotation_choices()
+
+        cc = catmap.ChangeCounts(
+            emissions={catmap.CategorizedMorph('H', 'ZZZ'): -1,
+                       catmap.CategorizedMorph('IJKLMN', 'STM'): -1,
+                       catmap.CategorizedMorph('HIJKLMN', 'STM'): 1},
+            transitions={(catmap.WORD_BOUNDARY, 'ZZZ'): -1,
+                         ('ZZZ', 'STM'): -1,
+                         (catmap.WORD_BOUNDARY, 'STM'): 1
+                         })
+
+        def apply_blacklist_violation():
+            self.model._modify_morph_count('H', -1)
+            self.model._modify_morph_count('IJKLMN', -1)
+            self.model._modify_morph_count('HIJKLMN', 1)
+            self.model._update_counts(cc, 1)
+
+        def revert_blacklist_violation():
+            self.model._modify_morph_count('H', 1)
+            self.model._modify_morph_count('IJKLMN', 1)
+            self.model._modify_morph_count('HIJKLMN', -1)
+            self.model._update_counts(cc, -1)
+            self.model._morph_usage.remove_temporaries(set(['HIJKLMN']))
+
+        self._apply_revert(apply_blacklist_violation,
+                           revert_blacklist_violation,
+                           False)   # Not an add, but still a known bad move
         self._destructive_backlink_check()
 
     def _apply_revert(self, apply_func, revert_func, is_remove):
@@ -481,7 +514,7 @@ class TestModelConsistency(unittest.TestCase):
             state_approx['category_token_count_{}'.format(i)] = float(tmp)
         if self.model._annot_coding is not None:
             state_exact['annot_tokens'] = self.model._annot_coding.tokens
-            state_exact['annot_logtokensum'] = float(
+            state_approx['annot_logtokensum'] = float(
                 self.model._annot_coding.logtokensum)
             state_exact['annot_constructions'] = sorted(
                 self.model._annot_coding.constructions)

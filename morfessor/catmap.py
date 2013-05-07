@@ -1115,15 +1115,12 @@ class CatmapModel(object):
                                               for alt in alternatives])
             old_active = self.segmentations[i].analysis
             new_active = sorted_alts[0].analysis
-            if new_active == old_active:
-                # Active annotation didn't change
-                continue
 
             if old_active is not None:
                 changes.update(old_active, -1)
             changes.update(new_active, 1)
 
-            # Active segmentation changed before removal/adding of morphs
+            # Active segmentation is changed before removal/adding of morphs
             self.segmentations[i] = WordAnalysis(1, new_active)
             # Only morphs in both new_active and old_active will get penalty,
             # which will be cancelled out when adding new_active.
@@ -1137,7 +1134,7 @@ class CatmapModel(object):
                 blacklist.add(prefix + suffix)
 
         for (morph, count) in constructions_rm.items():
-            self._modify_morph_count(morph, count)
+            self._modify_morph_count(morph, -count)
         for (morph, count) in constructions_add.items():
             self._modify_morph_count(morph, count)
         self._update_counts(changes, 1)

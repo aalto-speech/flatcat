@@ -110,7 +110,8 @@ class HeuristicPostprocessor(object):
             concatenated = []
             tmp = []
             for m in analysis:
-                if m.category == 'ZZZ' and m.morph not in self.model.forcesplit:
+                if (m.category == 'ZZZ' and
+                        m.morph not in self.model.forcesplit):
                     concatenated.append(m.morph)
                 else:
                     if len(concatenated) >= 3:
@@ -126,6 +127,10 @@ class HeuristicPostprocessor(object):
                 concatenated = []
             if len(concatenated) == 0 and len(tmp) > 0:
                 alternatives.append(tmp)
+
+            if len(alternatives) == 0:
+                print('No alternatives')
+                return analysis
 
             # Add penalties for number of remaining nonmorphemes
             with_penalties = []

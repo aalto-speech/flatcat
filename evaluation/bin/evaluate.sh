@@ -34,7 +34,7 @@ GOLDSTD="data/morphochal10_fin_dev.goldstd.segmentation"
 FORCESPLIT=":-"		# hyphen can't be first char
 STATS="--statsfile ${DATASET}.stats.pickled"
 #EXPERIMENTAL="-d log --max-iterations 10 -D data/morphochal10_fin_train.goldstd.segmentation"
-EXPERIMENTAL="-d log --max-iterations 10 -A data/morphochal10_fin_train.goldstd.segmentation -w 0.1"
+EXPERIMENTAL="-d log --max-iterations 10 -A data/morphochal10_fin_train.goldstd.segmentation -w 0.1 --annotation-supermorph-penalty 0"
 #EXPERIMENTAL=""
 
 # Baseline segmentation

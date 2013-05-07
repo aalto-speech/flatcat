@@ -13,7 +13,7 @@ from .categorizationscheme import MorphUsageProperties, HeuristicPostprocessor
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
 from .io import MorfessorIO, CatmapIO
-from .utils import _generator_progress
+from .utils import _generator_progress, LOGPROB_ZERO
 
 PY3 = sys.version_info.major == 3
 
@@ -586,6 +586,12 @@ Simple usage examples (training and testing):
             action='store_true',
             help='use heuristic postprocessing to remove nonmorfemes ' +
                  'from output segmentations.')
+    add_arg('--nonmorpheme-heuristics', dest='heuristic_ops', type=list,
+            default=HeuristicPostprocessor.DEFAULT_OPERATIONS,
+            metavar='<list>',
+            help='List of heuristics to use for removal of non-morfemes. ' +
+            'Has no effect unless used together with --remove-nonmorphemes.' +
+            ' (default %(default)s).')
 #     add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
 #             metavar='<int>',
 #             help="compound frequency threshold (default %(default)s).")
@@ -632,7 +638,7 @@ Simple usage examples (training and testing):
     add_arg('--max-resegment-epochs', dest='max_resegment_epochs',
             type=int, default=1, metavar='<int>',
             help='Maximum number of epochs of resegmentation in ' +
-                 'all iterations. Resegmentation is the heaviest operation' +
+                 'all iterations. Resegmentation is the heaviest operation. ' +
                  '(default %(default)s).')
     add_arg('--training-operations', dest='training_operations', type=list,
             default=CatmapModel.DEFAULT_TRAIN_OPS, metavar='<list>',
@@ -656,19 +662,33 @@ Simple usage examples (training and testing):
         'semi-supervised training options').add_argument
     add_arg('-A', '--annotations', dest="annofile", default=None,
             metavar='<file>',
-            help="load annotated data for semi-supervised learning.")
+            help="Load annotated data for semi-supervised learning.")
     add_arg('-D', '--develset', dest="develfile", default=None,
             metavar='<file>',
-            help="load annotated data for tuning the corpus weight parameter.")
+            help="Load annotated data for tuning the corpus weight parameter.")
     add_arg('-w', '--corpusweight', dest="corpusweight", type=float,
             default=1.0, metavar='<float>',
-            help="corpus weight parameter (default %(default)s); "
+            help="Corpus weight parameter (default %(default)s); "
             "sets the initial value if --develset is used.")
     add_arg('-W', '--annotationweight', dest="annotationweight",
             type=float, default=None, metavar='<float>',
-            help="corpus weight parameter for annotated data (if unset, the "
+            help="Corpus weight parameter for annotated data (if unset, the "
                  "weight is set to balance the number of tokens in annotated "
                  "and unannotated data sets).")
+    add_arg('--annotation-penalty', dest='annotationpenalty', type=float,
+            default=-(LOGPROB_ZERO - 1), metavar='<float>',
+            help='Penalty for removal of morphs used in the currently ' +
+            'active annotations. ' +
+            '(default %(default)s).')
+    add_arg('--annotation-supermorph-penalty', dest='annotationsuperpenalty',
+            type=float, default=-(LOGPROB_ZERO - 1), metavar='<float>',
+            help='Penalty for adding supermorphs of morph bigrams used in '
+            'the currently active annotations. ' +
+            'If such supermorphs are added, ' +
+            'segmentation is likely to prefer them over the submorphs ' +
+            '(because emissions contribute most of the corpus cost), ' +
+            'reducing the effectiveness of annotations. ' +
+            '(default %(default)s).')
 
     # Options for logging
     add_arg = parser.add_argument_group('logging options').add_argument
@@ -781,7 +801,10 @@ def catmap_main(args):
     if args.annofile is not None:
         annotations = io.read_annotations_file(args.annofile,
             analysis_sep=args.analysisseparator)
-        model.add_annotations(annotations, args.annotationweight)
+        model.add_annotations(annotations,
+                              args.annotationweight,
+                              args.annotationpenalty,
+                              args.annotationsuperpenalty)
 
     if args.develfile is not None:
         develannots = io.read_annotations_file(args.develfile,
@@ -845,7 +868,8 @@ def catmap_main(args):
     # Heuristic nonmorpheme removal
     heuristic = None
     if args.rm_nonmorph:
-        heuristic = HeuristicPostprocessor(model)
+        heuristic = HeuristicPostprocessor(model,
+                                           operations=args.heuristic_ops)
 
     if args.savesegfile is not None:
         if heuristic is not None:

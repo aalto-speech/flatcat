@@ -1150,7 +1150,8 @@ class CatmapModel(object):
             self._annot_coding.set_count(morph,
                                          self._morph_usage.count(morph))
 
-    def add_annotations(self, annotations, annotatedcorpusweight=None):
+    def add_annotations(self, annotations, annotatedcorpusweight=None,
+        penalty=-999999, blacklist_penalty=-999999):
         self._supervised = True
         self._annotations_tagged = True
         for annotation in annotations:
@@ -1165,7 +1166,9 @@ class CatmapModel(object):
         self._calculate_morph_backlinks()
         self._annot_coding = CatmapAnnotatedCorpusEncoding(
                                 self._corpus_coding,
-                                weight=annotatedcorpusweight)
+                                weight=annotatedcorpusweight,
+                                penalty=penalty,
+                                blacklist_penalty=blacklist_penalty)
         self._annot_coding.boundaries = len(self.annotations)
 
     def get_corpus_coding_weight(self):
@@ -1790,18 +1793,20 @@ class CatmapEncoding(baseline.CorpusEncoding):
 
 
 class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
-    def __init__(self, corpus_coding, weight=None, penalty=-9999.9):
+    def __init__(self, corpus_coding, weight=None,
+                 penalty=-999999, blacklist_penalty=-999999):
         super(CatmapAnnotatedCorpusEncoding, self).__init__(corpus_coding,
                                                             weight=weight,
                                                             penalty=penalty)
         self.blacklist = set()
+        self.blacklist_penalty = blacklist_penalty
 
     def add_to_blacklist(self, morph):
         """Blacklist to prevent supermorphs of annotation parts from
         being added to the lexicon, unless they are separately included
         in the annotations.
         """
-        if morph not in self.constructions:
+        if self.blacklist_penalty != 0 and morph not in self.constructions:
             self.blacklist.add(morph)
 
     def set_constructions(self, constructions):
@@ -1821,9 +1826,9 @@ class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
                                                                 new_count)
         if construction in self.blacklist:
             if old_count > 0:
-                self.logtokensum -= self.penalty
+                self.logtokensum -= self.blacklist_penalty
             if new_count > 0:
-                self.logtokensum += self.penalty
+                self.logtokensum += self.blacklist_penalty
 
 
 def _log_catprobs(probs):

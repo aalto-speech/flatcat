@@ -64,13 +64,22 @@ NON_MORPHEME_PENALTY = 50
 
 
 class HeuristicPostprocessor(object):
-    def __init__(self, model):
+    DEFAULT_OPERATIONS = ['longest-to-stem', 'join-two', 'join-all']
+
+    def __init__(self, model, operations=None):
         self.model = model
         self.temporaries = set()
+        if operations is None:
+            self.operations = HeuristicPostprocessor.DEFAULT_OPERATIONS
+        else:
+            self.operations = operations
 
     def remove_nonmorfemes(self, analysis):
         """Remove nonmorfemes from the analysis by joining or retagging
         morphs, using heuristics."""
+        if len(self.operations) == 0:
+            return analysis
+
         while True:
             # Repeat until there are no nonmorphemes left
             if all([m.category != 'ZZZ' for m in analysis]):
@@ -78,55 +87,61 @@ class HeuristicPostprocessor(object):
             alternatives = []
             self.temporaries = set()
 
-            # If there are no stems, try making the longest morph into a stem
+            # If there are no stems, try making the longest morph
+            # into a stem.
             # This can also modify the tag of a morph with other than ZZZ
-            longest_index = None
-            longest_len = 0
-            for (i, m) in enumerate(analysis):
-                if m.category == 'STM':
-                    # Not applicable: there is a stem already
-                    longest_index = None
-                    break
-                if len(m) > longest_len:
-                    longest_index = i
-                    longest_len = len(m)
-            if longest_index is not None:
-                tmp = list(analysis)
-                tmp[longest_index] = CategorizedMorph(tmp[longest_index].morph,
-                                                    'STM')
-                alternatives.append(tmp)
+            if 'longest-to-stem' in self.operations:
+                longest_index = None
+                longest_len = 0
+                for (i, m) in enumerate(analysis):
+                    if m.category == 'STM':
+                        # Not applicable: there is a stem already
+                        longest_index = None
+                        break
+                    if len(m) > longest_len:
+                        longest_index = i
+                        longest_len = len(m)
+                if longest_index is not None:
+                    tmp = list(analysis)
+                    tmp[longest_index] = CategorizedMorph(
+                                            tmp[longest_index].morph,
+                                            'STM')
+                    alternatives.append(tmp)
 
             # Try joining each nonmorpheme in both directions,
-            for i in range(len(analysis) - 1):
-                if (analysis[i].morph in self.model.forcesplit or
-                        analysis[i + 1].morph in self.model.forcesplit):
-                    # Unless forcesplit prevents it
-                    continue
-                if (analysis[i].category == 'ZZZ' or
-                        analysis[i + 1].category == 'ZZZ'):
-                    alternatives.append(self._join_at(analysis, i))
+            if 'join-two' in self.operations:
+                for i in range(len(analysis) - 1):
+                    if (analysis[i].morph in self.model.forcesplit or
+                            analysis[i + 1].morph in self.model.forcesplit):
+                        # Unless forcesplit prevents it
+                        continue
+                    if (analysis[i].category == 'ZZZ' or
+                            analysis[i + 1].category == 'ZZZ'):
+                        alternatives.append(self._join_at(analysis, i))
 
             # Try joining all sequences of 3 or more nonmorphemes
-            concatenated = []
-            tmp = []
-            for m in analysis:
-                if (m.category == 'ZZZ' and
-                        m.morph not in self.model.forcesplit):
-                    concatenated.append(m.morph)
-                else:
-                    if len(concatenated) >= 3:
-                        morph = CategorizedMorph(''.join(concatenated), 'STM')
-                        tmp.append(morph)
-                        self.temporaries.add(morph)
-                        concatenated = []
-                    tmp.append(m)
-            if len(concatenated) >= 3:
-                morph = CategorizedMorph(''.join(concatenated), 'STM')
-                tmp.append(morph)
-                self.temporaries.add(morph)
+            if 'join-all' in self.operations:
                 concatenated = []
-            if len(concatenated) == 0 and len(tmp) > 0:
-                alternatives.append(tmp)
+                tmp = []
+                for m in analysis:
+                    if (m.category == 'ZZZ' and
+                            m.morph not in self.model.forcesplit):
+                        concatenated.append(m.morph)
+                    else:
+                        if len(concatenated) >= 3:
+                            morph = CategorizedMorph(''.join(concatenated),
+                                                     'STM')
+                            tmp.append(morph)
+                            self.temporaries.add(morph)
+                            concatenated = []
+                        tmp.append(m)
+                if len(concatenated) >= 3:
+                    morph = CategorizedMorph(''.join(concatenated), 'STM')
+                    tmp.append(morph)
+                    self.temporaries.add(morph)
+                    concatenated = []
+                if len(concatenated) == 0 and len(tmp) > 0:
+                    alternatives.append(tmp)
 
             if len(alternatives) == 0:
                 return analysis

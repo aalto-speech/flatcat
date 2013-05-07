@@ -129,7 +129,6 @@ class HeuristicPostprocessor(object):
                 alternatives.append(tmp)
 
             if len(alternatives) == 0:
-                print('No alternatives')
                 return analysis
 
             # Add penalties for number of remaining nonmorphemes

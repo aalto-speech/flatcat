@@ -131,7 +131,6 @@ class CatmapModel(object):
         self._supervised = False
         self._annot_coding = None
         self.annotations = []           # (word, (analysis1, analysis2...))
-        self._active_annotations = []   # index of active analysis
         self._annotations_tagged = False
 
     def add_corpus_data(self, segmentations, freqthreshold=1,
@@ -445,8 +444,10 @@ class CatmapModel(object):
         self._calculate_transition_counts()
         self._calculate_emission_counts()
         if self._supervised:
-            self._active_annotations = [None] * len(self.annotations)
+            old_cost = self.get_cost()
             self._update_annotation_choices()
+            _logger.info('Updated annotation choices, changing cost from '
+                         '{} to {}'.format(old_cost, self.get_cost()))
             self._annot_coding.update_weight()
 
     def _calculate_usage_features(self):

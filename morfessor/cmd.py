@@ -581,17 +581,23 @@ Simple usage examples (training and testing):
                  "'ones'; default '%(default)s').")
     add_arg('-f', '--forcesplit', dest="forcesplit", type=list, default=['-'],
             metavar='<list>',
-            help="force split on given atoms (default %(default)s).")
+            help="force split on given atoms. " +
+            "Each character in the string will be included as a " +
+            "forcesplit atom. " +
+            "(default '-').")
     add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
             action='store_true',
             help='use heuristic postprocessing to remove nonmorfemes ' +
                  'from output segmentations.')
-    add_arg('--nonmorpheme-heuristics', dest='heuristic_ops', type=list,
-            default=HeuristicPostprocessor.DEFAULT_OPERATIONS,
+    add_arg('--nonmorpheme-heuristics', dest='heuristic_ops', type=str,
+            default=' '.join(HeuristicPostprocessor.DEFAULT_OPERATIONS),
             metavar='<list>',
             help='List of heuristics to use for removal of non-morfemes. ' +
-            'Has no effect unless used together with --remove-nonmorphemes.' +
-            ' (default %(default)s).')
+                 'The format of the list is a quoted string of (unquoted) ' +
+                 'operation names separated by spaces. ' +
+                 'Has no effect unless used together with ' +
+                 '--remove-nonmorphemes.' +
+                 " (default '%(default)s').")
 #     add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
 #             metavar='<int>',
 #             help="compound frequency threshold (default %(default)s).")
@@ -640,12 +646,14 @@ Simple usage examples (training and testing):
             help='Maximum number of epochs of resegmentation in ' +
                  'all iterations. Resegmentation is the heaviest operation. ' +
                  '(default %(default)s).')
-    add_arg('--training-operations', dest='training_operations', type=list,
-            default=CatmapModel.DEFAULT_TRAIN_OPS, metavar='<list>',
+    add_arg('--training-operations', dest='training_operations', type=str,
+            default=' '.join(CatmapModel.DEFAULT_TRAIN_OPS), metavar='<list>',
             help='The sequence of training operations. ' +
                  'Valid training operations are strings for which ' +
                  'CatmapModel has a function named _op_X_generator. ' +
-                 '(default %(default)s).')
+                 'The format of the list is a quoted string of (unquoted) ' +
+                 'operation names separated by spaces. ' +
+                 "(default '%(default)s').")
     add_arg('--max-shift-distance', dest='max_shift_distance',
             type=int, default=2, metavar='<int>',
             help='Maximum number of letters that the break between morphs ' +
@@ -781,6 +789,7 @@ def catmap_main(args):
                   category_separator=args.catseparator)
 
     # Load exisiting model or create a new one
+    training_ops = args.training_operations.split(' ')
     if args.loadfile is not None:
         model = io.read_binary_model_file(args.loadfile)
     else:
@@ -817,13 +826,13 @@ def catmap_main(args):
     if args.stats_file is not None:
         stats = IterationStatistics()
         model.epoch_callbacks.append(stats.callback)
-        stats.set_names(model, args.training_operations)
+        stats.set_names(model, training_ops)
 
     # Load data
     do_train = False
     if args.loadfile is None:
         # Starting from segmentations instead of pickle,
-        model.training_operations = args.training_operations
+        model.training_operations = training_ops
         # Need to (re)estimate the probabilities
         if len(args.loadsegfiles) == 0:
             # Starting from a baseline model
@@ -868,8 +877,9 @@ def catmap_main(args):
     # Heuristic nonmorpheme removal
     heuristic = None
     if args.rm_nonmorph:
+        heuristic_ops = args.heuristic_ops.split(' ')
         heuristic = HeuristicPostprocessor(model,
-                                           operations=args.heuristic_ops)
+                                           operations=heuristic_ops)
 
     if args.savesegfile is not None:
         if heuristic is not None:

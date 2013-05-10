@@ -18,7 +18,7 @@ function schedule_job {
 	then
 		ln -s ${REAL_SCRIPT} ${JOB}.sh
 	fi
-	${SCHEDULER}${JOB}.sh
+	${SCHEDULER}${JOB}.sh -n
 	sleep ${DELAY}
 }
 

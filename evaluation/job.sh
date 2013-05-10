@@ -11,14 +11,19 @@ then
 	exit 1
 fi
 
+if [[ ! -z $DRYFLAG && $DRYFLAG != '-n' ]]
+then
+	echo "DRYFLAG set to unrecognized value. Defaulting to '-n' (dryrun) for safety."
+	export DRYFLAG="-n"
+fi
 
 ### Default parameters
 
-export PYTHONPATH=/triton/ics/scratch/sgronroo/morfessor
+#export PYTHONPATH=/triton/ics/scratch/sgronroo/morfessor
+export PYTHONPATH=~/morfessor/morfessor
 export PYTHONIOENCODING="utf-8"
 
 EVALUATE_SCRIPT="./bin/evaluate.sh"
-
 RUN_TITLE="${BASE}"
 
 # Force splitting on these characters
@@ -54,9 +59,11 @@ case $BASE in
 		;;
 	("heuristics")
 		# These are postprocessing variants, so all are run in the same job,
-		# starting with default parameters (unnecessary to combine with default)
+		# starting with default parameters (redundant to combine with default)
 		echo "Running with variants of heuristics (4 variants + default)..."
 		RUN_TITLE="heuristics_off"
+		DATE=`date +%Y%m%d_%H%M%S`
+		export OUTDIR="${DATE}_${BASE}"
 		;;
 	("ppl_thresh_A")
 		PPL_THRESH=15
@@ -97,6 +104,7 @@ case $BASE in
 		export BASELINEDIR="baseline_${DATASET}_forcesplit"
 		export BASELINE_TRAIN_PARAMS="${BASELINE_TRAIN_PARAMS} -f ${FORCESPLIT}"
 		CATMAP_TRAIN_EXTRA="-f ${FORCESPLIT}"
+		;;
 	(*)
 		echo "Unknown job ${BASE}"
                 exit 1
@@ -106,7 +114,7 @@ esac
 ### Run evaluation
 
 export CATMAP_TRAIN_PARAMS="${CATMAP_TRAIN_CORE} ${CATMAP_TRAIN_SEQ} ${CATMAP_TRAIN_EXTRA}"
-$EVALUATE_SCRIPT $RUN_TITLE
+$EVALUATE_SCRIPT $RUN_TITLE $DRYFLAG
 
 if [[ $BASE == "heuristics" ]]
 then
@@ -115,17 +123,17 @@ then
 
 	RUN_TITLE="heuristics_on"
 	export CATMAP_TEST_PARAMS="--remove-nonmorphemes"
-	$EVALUATE_SCRIPT $RUN_TITLE
+	$EVALUATE_SCRIPT $RUN_TITLE $DRYFLAG
 
 	RUN_TITLE="heuristics_lts_disabled"
-	export CATMAP_TEST_PARAMS='--remove-nonmorphemes --nonmorpheme-heuristics ["join-two", "join-all"]'
-	$EVALUATE_SCRIPT $RUN_TITLE
+	export CATMAP_TEST_PARAMS="--remove-nonmorphemes --nonmorpheme-heuristics 'join-two join-all'"
+	$EVALUATE_SCRIPT $RUN_TITLE $DRYFLAG
 
 	RUN_TITLE="heuristics_jt_disabled"
-	export CATMAP_TEST_PARAMS='--remove-nonmorphemes --nonmorpheme-heuristics ["longest-to-stem", "join-all"]'
-	$EVALUATE_SCRIPT $RUN_TITLE
+	export CATMAP_TEST_PARAMS="--remove-nonmorphemes --nonmorpheme-heuristics 'longest-to-stem join-all'"
+	$EVALUATE_SCRIPT $RUN_TITLE $DRYFLAG
 
 	RUN_TITLE="heuristics_ja_disabled"
-	export CATMAP_TEST_PARAMS='--remove-nonmorphemes --nonmorpheme-heuristics ["longest-to-stem", "join-two"]'
-	$EVALUATE_SCRIPT $RUN_TITLE
+	export CATMAP_TEST_PARAMS="--remove-nonmorphemes --nonmorpheme-heuristics 'longest-to-stem join-two'"
+	$EVALUATE_SCRIPT $RUN_TITLE $DRYFLAG
 fi

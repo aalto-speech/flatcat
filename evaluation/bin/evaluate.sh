@@ -90,8 +90,8 @@ CATMAP_MODEL="${OUTDIR}/model.pickled"
 COMMON_TEST_PARAMS='--output-format {compound}\t{analysis}\n'
 BASELINE_TEST_OUTPUT="${BASELINEDIR}/baseline.dev_result"
 BASELINE_BPR_OUTPUT="${BASELINEDIR}/baseline.bpr"
-CATMAP_TEST_OUTPUT="${OUTDIR}/catmap2.dev_result"
-CATMAP_BPR_OUTPUT="${OUTDIR}/catmap2.bpr"
+CATMAP_TEST_OUTPUT="${OUTDIR}/${RUN_TITLE}.catmap2.dev_result"
+CATMAP_BPR_OUTPUT="${OUTDIR}/${RUN_TITLE}.catmap2.bpr"
 
 # Set to empty to disable collection of diagnostics
 STATS="--statsfile ${OUTDIR}/stats.pickled"
@@ -129,7 +129,7 @@ then
 	echo "run: $RUN_TITLE" >> "${CATMAP_BPR_OUTPUT}"
 	echo "train-start: ${TRAIN_START_TIME}" >> "${CATMAP_BPR_OUTPUT}"
 	echo "train-end  : ${TRAIN_END_TIME}" >> "${CATMAP_BPR_OUTPUT}"
-	echo "BASELINE_OUTPUT=${BASELINE_OUTPUT}"
+	echo "BASELINE_OUTPUT=${BASELINE_OUTPUT}" >> "${CATMAP_BPR_OUTPUT}"
 	echo "COMMON_PARAMS=${COMMON_PARAMS}" >> "${CATMAP_BPR_OUTPUT}"
 	echo "BASELINE_TRAIN_PARAMS=${BASELINE_TRAIN_PARAMS}" >> "${CATMAP_BPR_OUTPUT}"
 	echo "CATMAP_TRAIN_PARAMS=${CATMAP_TRAIN_PARAMS}" >> "${CATMAP_BPR_OUTPUT}"

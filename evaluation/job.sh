@@ -1,15 +1,14 @@
 #!/bin/bash
 #SBATCH --time=0-15:00:00 --mem-per-cpu=2000
 #SBATCH -p batch
-#SBATCH -o morphochal07_fin_n100.out
+#SBATCH -o morphochal07_fin_n100_%j.out
 
-BASE=`basename $0 .sh`
-
-if [[ $BASE == "job" ]]
+if [[ $# < 1 ]]
 then
-	echo "Dont call me directly"
+	echo "Usage: sbatch job.sh <RUN-TITLE>"
 	exit 1
 fi
+BASE=$1
 
 if [[ ! -z $DRYFLAG && $DRYFLAG != '-n' ]]
 then

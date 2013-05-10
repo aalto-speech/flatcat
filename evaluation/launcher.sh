@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Job script (contains the actual experiment parameters)
-REAL_SCRIPT="job.sh"
+PARAM_SCRIPT="job.sh"
 
 # How long to sleep between calls to the scheduler (seconds)
 DELAY=2
@@ -14,11 +14,7 @@ else
 fi
 
 function schedule_job {
-	if [[ ! -e ${JOB}.sh ]]
-	then
-		ln -s ${REAL_SCRIPT} ${JOB}.sh
-	fi
-	${SCHEDULER}${JOB}.sh -n
+	${SCHEDULER}${PARAM_SCRIPT} ${JOB}
 	sleep ${DELAY}
 }
 

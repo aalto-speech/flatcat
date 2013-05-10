@@ -590,11 +590,11 @@ Simple usage examples (training and testing):
             help='use heuristic postprocessing to remove nonmorfemes ' +
                  'from output segmentations.')
     add_arg('--nonmorpheme-heuristics', dest='heuristic_ops', type=str,
-            default=' '.join(HeuristicPostprocessor.DEFAULT_OPERATIONS),
+            default=','.join(HeuristicPostprocessor.DEFAULT_OPERATIONS),
             metavar='<list>',
             help='List of heuristics to use for removal of non-morfemes. ' +
-                 'The format of the list is a quoted string of (unquoted) ' +
-                 'operation names separated by spaces. ' +
+                 'The format of the list is a string of (unquoted) ' +
+                 'operation names separated by single commas (no space). ' +
                  'Has no effect unless used together with ' +
                  '--remove-nonmorphemes.' +
                  " (default '%(default)s').")
@@ -647,12 +647,12 @@ Simple usage examples (training and testing):
                  'all iterations. Resegmentation is the heaviest operation. ' +
                  '(default %(default)s).')
     add_arg('--training-operations', dest='training_operations', type=str,
-            default=' '.join(CatmapModel.DEFAULT_TRAIN_OPS), metavar='<list>',
+            default=','.join(CatmapModel.DEFAULT_TRAIN_OPS), metavar='<list>',
             help='The sequence of training operations. ' +
                  'Valid training operations are strings for which ' +
                  'CatmapModel has a function named _op_X_generator. ' +
-                 'The format of the list is a quoted string of (unquoted) ' +
-                 'operation names separated by spaces. ' +
+                 'The format of the list is a string of (unquoted) ' +
+                 'operation names separated by single commas (no space). ' +
                  "(default '%(default)s').")
     add_arg('--max-shift-distance', dest='max_shift_distance',
             type=int, default=2, metavar='<int>',
@@ -789,7 +789,7 @@ def catmap_main(args):
                   category_separator=args.catseparator)
 
     # Load exisiting model or create a new one
-    training_ops = args.training_operations.split(' ')
+    training_ops = args.training_operations.split(',')
     if args.loadfile is not None:
         model = io.read_binary_model_file(args.loadfile)
     else:
@@ -877,7 +877,7 @@ def catmap_main(args):
     # Heuristic nonmorpheme removal
     heuristic = None
     if args.rm_nonmorph:
-        heuristic_ops = args.heuristic_ops.split(' ')
+        heuristic_ops = args.heuristic_ops.split(',')
         heuristic = HeuristicPostprocessor(model,
                                            operations=heuristic_ops)
 

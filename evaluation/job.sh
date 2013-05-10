@@ -34,12 +34,15 @@ ITER_COST="0.005"
 
 # FIXME outfile for sbatch?
 
+# Dataset selection
+#export DATASET="toy"	#debug
+export DATASET="morphochal07_fin_n100"
+
 # Parameters given to all training and testing commands
 export COMMON_PARAMS="-e latin-1"
 
 # Parameters only given to baseline commands
 #export BASELINEDIR=""
-export DATASET="toy"	#FIXME
 export BASELINE_TRAIN_PARAMS="--traindata-list"
 export BASELINE_TEST_PARAMS=""
 
@@ -92,18 +95,51 @@ case $BASE in
 		;;
 	("dampening_log")
 		export COMMON_PARAMS="${COMMON_PARAMS} --dampening log"
-		export BASELINEDIR="baseline_${DATASET}_log"
+		export BASELINEDIR="baseline_log"
 		echo "Running with log dampening"
 		;;
 	("dampening_types")
 		export COMMON_PARAMS="${COMMON_PARAMS} --dampening ones"
-		export BASELINEDIR="baseline_${DATASET}_types"
+		export BASELINEDIR="baseline_types"
 		echo "Running with dampening to types"
 		;;
 	("forcesplit")
-		export BASELINEDIR="baseline_${DATASET}_forcesplit"
+		export BASELINEDIR="baseline_forcesplit"
 		export BASELINE_TRAIN_PARAMS="${BASELINE_TRAIN_PARAMS} -f ${FORCESPLIT}"
 		CATMAP_TRAIN_EXTRA="-f ${FORCESPLIT}"
+		echo "Running with forcesplit"
+		;;
+	("max_epochs_A")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-epochs-first 1 --max-epochs 1"
+		echo "Running with max epochs"
+		;;
+	("max_epochs_B")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-epochs-first 2 --max-epochs 1"
+		echo "Running with max epochs"
+		;;
+	("max_epochs_C")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-epochs-first 1 --max-epochs 2"
+		echo "Running with max epochs"
+		;;
+	("max_epochs_D")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-epochs-first 2 --max-epochs 2"
+		echo "Running with max epochs"
+		;;
+	("max_epochs_E")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-epochs-first 5 --max-epochs 2"
+		echo "Running with max epochs"
+		;;
+	("max_epochs_F")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-epochs-first 1 --max-epochs 5"
+		echo "Running with max epochs"
+		;;
+	("max_epochs_G")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-epochs-first 2 --max-epochs 5"
+		echo "Running with max epochs"
+		;;
+	("max_epochs_H")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-epochs-first 5 --max-epochs 5"
+		echo "Running with max epochs"
 		;;
 	(*)
 		echo "Unknown job ${BASE}"
@@ -126,14 +162,14 @@ then
 	$EVALUATE_SCRIPT $RUN_TITLE $DRYFLAG
 
 	RUN_TITLE="heuristics_lts_disabled"
-	export CATMAP_TEST_PARAMS="--remove-nonmorphemes --nonmorpheme-heuristics 'join-two join-all'"
+	export CATMAP_TEST_PARAMS="--remove-nonmorphemes --nonmorpheme-heuristics join-two,join-all"
 	$EVALUATE_SCRIPT $RUN_TITLE $DRYFLAG
 
 	RUN_TITLE="heuristics_jt_disabled"
-	export CATMAP_TEST_PARAMS="--remove-nonmorphemes --nonmorpheme-heuristics 'longest-to-stem join-all'"
+	export CATMAP_TEST_PARAMS="--remove-nonmorphemes --nonmorpheme-heuristics longest-to-stem,join-all"
 	$EVALUATE_SCRIPT $RUN_TITLE $DRYFLAG
 
 	RUN_TITLE="heuristics_ja_disabled"
-	export CATMAP_TEST_PARAMS="--remove-nonmorphemes --nonmorpheme-heuristics 'longest-to-stem join-two'"
+	export CATMAP_TEST_PARAMS="--remove-nonmorphemes --nonmorpheme-heuristics longest-to-stem,join-two"
 	$EVALUATE_SCRIPT $RUN_TITLE $DRYFLAG
 fi

@@ -50,6 +50,8 @@ then
 	echo "WARNING: did not select dataset, using toy as fallback"
 fi
 
+ROOT_DIR="results_${DATASET}"
+
 # Output directory for the results of this run
 if [[ -z ${OUTDIR} ]]
 then
@@ -58,13 +60,13 @@ fi
 # Directory containing baseline segmentation to use (created if necessary)
 if [[ -z ${BASELINEDIR} ]]
 then
-	BASELINEDIR="baseline_${DATASET}_default"
+	BASELINEDIR="baseline_default"
 fi
 
 if [[ -z ${DRY} ]]
 then
-	mkdir -p $OUTDIR
-	mkdir -p $BASELINEDIR
+	mkdir -p "${ROOT_DIR}/${OUTDIR}"
+	mkdir -p "${ROOT_DIR}/${BASELINEDIR}"
 fi
 
 TRAINDATA="${DATADIR}/${DATASET}.wordcounts.gz"
@@ -77,25 +79,25 @@ GOLDSTD="${DATADIR}/morphochal10_fin_dev.goldstd.segmentation"
 #COMMON_PARAMS="-e latin-1"
 
 # Parameters only given to baseline commands
-BASELINE_OUTPUT="${BASELINEDIR}/baseline.gz"
+BASELINE_OUTPUT="${ROOT_DIR}/${BASELINEDIR}/baseline.gz"
 #BASELINE_TRAIN_PARAMS="--traindata-list -f ${FORCESPLIT}"
 #BASELINE_TEST_PARAMS=""
 
 # Parameters only given to catmap commands
-CATMAP_MODEL="${OUTDIR}/model.pickled"
+CATMAP_MODEL="${ROOT_DIR}/${OUTDIR}/model.pickled"
 #CATMAP_TRAIN_PARAMS="-p ${PPL_THRESH} --min-iteration-cost-gain ${ITER_COST} --min-epoch-cost-gain ${EPOCH_COST} -f ${FORCESPLIT}"
 #CATMAP_TEST_PARAMS="--remove-nonmorphemes"
 
 # Testing parameters
 COMMON_TEST_PARAMS='--output-format {compound}\t{analysis}\n'
-BASELINE_TEST_OUTPUT="${BASELINEDIR}/baseline.dev_result"
-BASELINE_BPR_OUTPUT="${BASELINEDIR}/baseline.bpr"
-CATMAP_TEST_OUTPUT="${OUTDIR}/${RUN_TITLE}.catmap2.dev_result"
-CATMAP_BPR_OUTPUT="${OUTDIR}/${RUN_TITLE}.catmap2.bpr"
+BASELINE_TEST_OUTPUT="${ROOT_DIR}/${BASELINEDIR}/baseline.dev_result"
+BASELINE_BPR_OUTPUT="${ROOT_DIR}/${BASELINEDIR}/baseline.bpr"
+CATMAP_TEST_OUTPUT="${ROOT_DIR}/${OUTDIR}/${RUN_TITLE}.catmap2.dev_result"
+CATMAP_BPR_OUTPUT="${ROOT_DIR}/${OUTDIR}/${RUN_TITLE}.catmap2.bpr"
 
 # Set to empty to disable collection of diagnostics
-STATS="--statsfile ${OUTDIR}/stats.pickled"
-LOG="--logfile ${OUTDIR}/catmap2.log"
+STATS="--statsfile ${ROOT_DIR}/${OUTDIR}/stats.pickled"
+LOG="--logfile ${ROOT_DIR}/${OUTDIR}/catmap2.log"
 
 ### Training
 # Baseline segmentation

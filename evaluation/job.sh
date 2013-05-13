@@ -18,8 +18,13 @@ fi
 
 ### Default parameters
 
-#export PYTHONPATH=/triton/ics/scratch/sgronroo/morfessor
+# Dataset selection
+export DATASET="toy"	#debug
+#export DATASET="morphochal07_fin_n100"
+
 export PYTHONPATH=~/morfessor/morfessor
+#export PYTHONPATH=/triton/ics/scratch/sgronroo/morfessor
+
 export PYTHONIOENCODING="utf-8"
 
 EVALUATE_SCRIPT="./bin/evaluate.sh"
@@ -32,10 +37,6 @@ EPOCH_COST="0.0025"
 ITER_COST="0.005"
 
 # FIXME outfile for sbatch?
-
-# Dataset selection
-#export DATASET="toy"	#debug
-export DATASET="morphochal07_fin_n100"
 
 # Parameters given to all training and testing commands
 export COMMON_PARAMS="-e latin-1"
@@ -139,6 +140,138 @@ case $BASE in
 	("max_epochs_H")
 		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-epochs-first 5 --max-epochs 5"
 		echo "Running with max epochs"
+		;;
+	("cost_limits_A")
+		CATMAP_TRAIN_SEQ="--min-iteration-cost-gain 0.002 --min-epoch-cost-gain 0.001 --max-epochs-first 5 --max-epochs 5"
+		echo "Running with cost limits"
+		;;
+	("cost_limits_B")
+		CATMAP_TRAIN_SEQ="--min-iteration-cost-gain 0.002 --min-epoch-cost-gain 0.0025 --max-epochs-first 5 --max-epochs 5"
+		echo "Running with cost limits"
+		;;
+	("cost_limits_C")
+		CATMAP_TRAIN_SEQ="--min-iteration-cost-gain 0.002 --min-epoch-cost-gain 0.01 --max-epochs-first 5 --max-epochs 5"
+		echo "Running with cost limits"
+		;;
+	("cost_limits_D")
+		CATMAP_TRAIN_SEQ="--min-iteration-cost-gain 0.005 --min-epoch-cost-gain 0.001 --max-epochs-first 5 --max-epochs 5"
+		echo "Running with cost limits"
+		;;
+	("cost_limits_E")
+		CATMAP_TRAIN_SEQ="--min-iteration-cost-gain 0.005 --min-epoch-cost-gain 0.005 --max-epochs-first 5 --max-epochs 5"
+		echo "Running with cost limits"
+		;;
+	("cost_limits_F")
+		CATMAP_TRAIN_SEQ="--min-iteration-cost-gain 0.005 --min-epoch-cost-gain 0.01 --max-epochs-first 5 --max-epochs 5"
+		echo "Running with cost limits"
+		;;
+	("cost_limits_G")
+		CATMAP_TRAIN_SEQ="--min-iteration-cost-gain 0.05 --min-epoch-cost-gain 0.001 --max-epochs-first 5 --max-epochs 5"
+		echo "Running with cost limits"
+		;;
+	("cost_limits_H")
+		CATMAP_TRAIN_SEQ="--min-iteration-cost-gain 0.05 --min-epoch-cost-gain 0.0025 --max-epochs-first 5 --max-epochs 5"
+		echo "Running with cost limits"
+		;;
+	("cost_limits_I")
+		CATMAP_TRAIN_SEQ="--min-iteration-cost-gain 0.05 --min-epoch-cost-gain 0.01 --max-epochs-first 5 --max-epochs 5"
+		echo "Running with cost limits"
+		;;
+	("exclude_split1")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --training-operations join,split,shift,resegment"
+		echo "Running with first split excluded"
+		;;
+	("exclude_join")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --training-operations split,split,shift,resegment"
+		echo "Running with join excluded"
+		;;
+	("exclude_split2")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --training-operations split,join,shift,resegment"
+		echo "Running with second split excluded"
+		;;
+	("exclude_shift")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --training-operations split,join,split,resegment"
+		echo "Running with shift excluded"
+		;;
+	("exclude_resegment")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --training-operations split,join,split,shift"
+		echo "Running with resegment excluded"
+		;;
+	("shift_A")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-shift-distance 1 --min-shift-remainder 1"
+		echo "Running with shift parameters"
+		;;
+	("shift_B")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-shift-distance 1 --min-shift-remainder 2"
+		echo "Running with shift parameters"
+		;;
+	("shift_C")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-shift-distance 1 --min-shift-remainder 3"
+		echo "Running with shift parameters"
+		;;
+	("shift_D")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-shift-distance 2 --min-shift-remainder 1"
+		echo "Running with shift parameters"
+		;;
+	("shift_E")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-shift-distance 2 --min-shift-remainder 3"
+		echo "Running with shift parameters"
+		;;
+	("shift_F")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-shift-distance 3 --min-shift-remainder 1"
+		echo "Running with shift parameters"
+		;;
+	("shift_G")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-shift-distance 3 --min-shift-remainder 2"
+		echo "Running with shift parameters"
+		;;
+	("shift_H")
+		CATMAP_TRAIN_SEQ="${CATMAP_TRAIN_SEQ} --max-shift-distance 3 --min-shift-remainder 3"
+		echo "Running with shift parameters"
+		;;
+	("corpus_weight_learning")
+		CATMAP_TRAIN_EXTRA="--develset data/morphochal10_fin_train.goldstd.segmentation"
+		echo "Running with corpus weight learning"
+		;;
+	("semisupervised_auto")
+		CATMAP_TRAIN_EXTRA="--annotations data/morphochal10_fin_train.goldstd.segmentation"
+		echo "Running semisupervised, with automatic weight"
+		;;
+	("semisupervised_penalty_A")
+		CATMAP_TRAIN_EXTRA="--annotation-penalty 10 --annotation-supermorph-penalty 0 --annotations data/morphochal10_fin_train.goldstd.segmentation"
+		echo "Running semisupervised, with penalties"
+		;;
+	("semisupervised_penalty_B")
+		CATMAP_TRAIN_EXTRA="--annotation-penalty 10 --annotation-supermorph-penalty 10 --annotations data/morphochal10_fin_train.goldstd.segmentation"
+		echo "Running semisupervised, with penalties"
+		;;
+	("semisupervised_penalty_C")
+		CATMAP_TRAIN_EXTRA="--annotation-penalty 10 --annotation-supermorph-penalty 100 --annotations data/morphochal10_fin_train.goldstd.segmentation"
+		echo "Running semisupervised, with penalties"
+		;;
+	("semisupervised_penalty_D")
+		CATMAP_TRAIN_EXTRA="--annotation-penalty 100 --annotation-supermorph-penalty 0 --annotations data/morphochal10_fin_train.goldstd.segmentation"
+		echo "Running semisupervised, with penalties"
+		;;
+	("semisupervised_penalty_E")
+		CATMAP_TRAIN_EXTRA="--annotation-penalty 100 --annotation-supermorph-penalty 10 --annotations data/morphochal10_fin_train.goldstd.segmentation"
+		echo "Running semisupervised, with penalties"
+		;;
+	("semisupervised_penalty_F")
+		CATMAP_TRAIN_EXTRA="--annotation-penalty 100 --annotation-supermorph-penalty 100 --annotations data/morphochal10_fin_train.goldstd.segmentation"
+		echo "Running semisupervised, with penalties"
+		;;
+	("semisupervised_penalty_G")
+		CATMAP_TRAIN_EXTRA="--annotation-penalty 999999 --annotation-supermorph-penalty 0 --annotations data/morphochal10_fin_train.goldstd.segmentation"
+		echo "Running semisupervised, with penalties"
+		;;
+	("semisupervised_penalty_H")
+		CATMAP_TRAIN_EXTRA="--annotation-penalty 999999 --annotation-supermorph-penalty 10 --annotations data/morphochal10_fin_train.goldstd.segmentation"
+		echo "Running semisupervised, with penalties"
+		;;
+	("semisupervised_penalty_I")
+		CATMAP_TRAIN_EXTRA="--annotation-penalty 999999 --annotation-supermorph-penalty 100 --annotations data/morphochal10_fin_train.goldstd.segmentation"
+		echo "Running semisupervised, with penalties"
 		;;
 	(*)
 		echo "Unknown job ${BASE}"

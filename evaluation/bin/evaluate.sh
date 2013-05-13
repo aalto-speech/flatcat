@@ -107,6 +107,12 @@ then
 	check_return
 fi
 
+if [[ ! -z ${BASELINE_ONLY} ]]
+then
+	echo "Only making baseline."
+	exit 0
+fi
+
 # Train catmap model
 if [[ -z ${POSTPROCESSING_ONLY} ]]
 then

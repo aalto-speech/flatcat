@@ -684,12 +684,12 @@ Simple usage examples (training and testing):
                  "weight is set to balance the number of tokens in annotated "
                  "and unannotated data sets).")
     add_arg('--annotation-penalty', dest='annotationpenalty', type=float,
-            default=-(LOGPROB_ZERO - 1), metavar='<float>',
+            default=LOGPROB_ZERO - 1, metavar='<float>',
             help='Penalty for removal of morphs used in the currently ' +
             'active annotations. ' +
             '(default %(default)s).')
     add_arg('--annotation-supermorph-penalty', dest='annotationsuperpenalty',
-            type=float, default=-(LOGPROB_ZERO - 1), metavar='<float>',
+            type=float, default=LOGPROB_ZERO - 1, metavar='<float>',
             help='Penalty for adding supermorphs of morph bigrams used in '
             'the currently active annotations. ' +
             'If such supermorphs are added, ' +
@@ -812,8 +812,8 @@ def catmap_main(args):
             analysis_sep=args.analysisseparator)
         model.add_annotations(annotations,
                               args.annotationweight,
-                              args.annotationpenalty,
-                              args.annotationsuperpenalty)
+                              -args.annotationpenalty,
+                              -args.annotationsuperpenalty)
 
     if args.develfile is not None:
         develannots = io.read_annotations_file(args.develfile,

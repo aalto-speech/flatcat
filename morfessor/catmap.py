@@ -22,7 +22,7 @@ from .categorizationscheme import MorphUsageProperties, WORD_BOUNDARY
 from .categorizationscheme import ByCategory, get_categories, CategorizedMorph
 from .exception import InvalidOperationError
 from .utils import Sparse, LOGPROB_ZERO, ngrams, minargmin, zlog
-from .utils import _generator_progress, _nt_zeros
+from .utils import _progress, _generator_progress, _nt_zeros
 
 PY3 = sys.version_info.major == 3
 
@@ -133,6 +133,9 @@ class CatmapModel(object):
         self.annotations = []           # (word, (analysis1, analysis2...))
         self._annotations_tagged = False
 
+        # Variables for online learning
+        self.training_corpus_filter = None
+
     def add_corpus_data(self, segmentations, freqthreshold=1,
                         count_modifier=None):
         """Adds the given segmentations (with counts) to the corpus data.
@@ -236,19 +239,93 @@ class CatmapModel(object):
             min_cost_gain=min_iter_cost_gain,
             iteration_name='iteration')
 
+    def train_online(self, data, count_modifier=None, epoch_interval=10000,
+                     max_epochs=None):
+        """Adapt the model in online fashion."""
+
+        if count_modifier is not None:
+            counts = {}
+
+        _logger.info("Starting online training")
+
+        epochs = 0
+        i = 0
+        more_tokens = True
+        self._reestimate_probabilities()
+        while more_tokens:
+            newcost = self.get_cost()
+            _logger.info("Tokens processed: %s\tCost: %s" % (i, newcost))
+
+            for _ in _progress(range(epoch_interval)):
+                try:
+                    _, _, w = next(data)
+                except StopIteration:
+                    more_tokens = False
+                    break
+
+                if count_modifier is not None:
+                    if not w in counts:
+                        c = 0
+                        counts[w] = 1
+                        addc = 1
+                    else:
+                        c = counts[w]
+                        counts[w] = c + 1
+                        addc = count_modifier(c + 1) - count_modifier(c)
+                else:
+                    addc = 1
+                segments, _ = self.viterbi_segment(w)
+                if addc > 0:
+                    self.add_corpus_data([WordAnalysis(addc, segments)])
+                    self._reestimate_probabilities()
+
+                    i_new = len(self.segmentations) - 1
+                    self.training_corpus_filter = lambda: (
+                        self.segmentations[i_new],)
+
+                    for i in range(len(self.training_operations)):
+                        if self.training_operations[i] == 'resegment':
+                            continue
+                        operation = self._resolve_operation(i)
+                        self._transformation_epoch(operation())
+
+                    segments = self.segmentations[i_new].analysis
+
+                _logger.debug("#%s: %s -> %s" %
+                              (i, w, segments))
+                i += 1
+
+            # also reestimates the probabilities
+            _logger.info("Epoch reached, resegmenting corpus")
+            self.viterbi_segment_corpus()
+
+            epochs += 1
+            if max_epochs is not None and epochs >= max_epochs:
+                _logger.info("Max number of epochs reached, stop training")
+                break
+
+        self._reestimate_probabilities()
+        newcost = self.get_cost()
+        _logger.info("Tokens processed: %s\tCost: %s" % (i, newcost))
+        return epochs, newcost
+
+    def _resolve_operation(self, op_number):
+        operation_name = '_op_{}_generator'.format(
+            self.training_operations[op_number])
+        try:
+            operation = self.__getattribute__(operation_name)
+        except AttributeError:
+            raise InvalidOperationError(
+                self.training_operations[op_number],
+                operation_name)
+        return operation
+
     def _train_iteration(self):
         """One iteration of training, which contains several epochs
         of each operation in sequence.
         """
         while self._operation_number < len(self.training_operations):
-            operation_name = '_op_{}_generator'.format(
-                self.training_operations[self._operation_number])
-            try:
-                operation = self.__getattribute__(operation_name)
-            except AttributeError:
-                raise InvalidOperationError(
-                    self.training_operations[self._operation_number],
-                    operation_name)
+            operation = self._resolve_operation(self._operation_number)
             min_epoch_cost_gain = self._training_params('min_epoch_cost_gain')
             max_epochs = self._training_params('max_epochs')
             must_reestimate = self._training_params('must_reestimate')
@@ -679,7 +756,14 @@ class CatmapModel(object):
         Use with _transformation_epoch
         """
         # FIXME random shuffle or sort by length/frequency?
-        epoch_morphs = sorted(self._morph_usage.seen_morphs(), key=len)
+        if self.training_corpus_filter is None:
+            unsorted = self._morph_usage.seen_morphs()
+        else:
+            unsorted = set()
+            for (count, segmentation) in self.training_corpus_filter():
+                for morph in self.detag_word(segmentation):
+                    unsorted.add(morph)
+        epoch_morphs = sorted(unsorted, key=len)
         for morph in epoch_morphs:
             if len(morph) == 1:
                 continue
@@ -719,7 +803,11 @@ class CatmapModel(object):
 
         # FIXME random shuffle or sort by bigram frequency?
         bigram_freqs = collections.Counter()
-        for (count, segments) in self.segmentations:
+        if self.training_corpus_filter is None:
+            source = self.segmentations
+        else:
+            source = self.training_corpus_filter()
+        for (count, segments) in source:
             segments = _wb_wrap(segments)
             for quad in ngrams(segments, n=4):
                 prev_morph, prefix, suffix, next_morph = quad
@@ -795,6 +883,7 @@ class CatmapModel(object):
         all words in the corpus using viterbi_segment.
         Use with _transformation_epoch
         """
+        # Does not use training_corpus_filter
         for (i, word) in enumerate(self.segmentations):
             yield ([ViterbiResegmentTransformation(word, self)],
                    set([i]), set())

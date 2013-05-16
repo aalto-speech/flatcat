@@ -118,6 +118,7 @@ class CatmapModel(object):
         # Should take exactly one argument: the model.
         self.operation_callbacks = []
         self.epoch_callbacks = []
+        self._changed_segmentations = set()
 
         # Force these atoms to be kept as separate morphs.
         # Calling morfessor baseline with the same forcesplit value ensures
@@ -240,6 +241,7 @@ class CatmapModel(object):
         """One iteration of training, which contains several epochs
         of each operation in sequence.
         """
+        self._changed_segmentations = set()  # FIXME: use for convergence
         while self._operation_number < len(self.training_operations):
             operation_name = '_op_{}_generator'.format(
                 self.training_operations[self._operation_number])
@@ -672,6 +674,7 @@ class CatmapModel(object):
                     temporaries.difference_update(
                         self.detag_word(new_analysis.analysis))
                 self._update_counts(best.transform.change_counts, 1)
+                self._changed_segmentations.update(best.targets)
             self._morph_usage.remove_temporaries(temporaries)
 
     def _op_split_generator(self):

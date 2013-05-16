@@ -33,6 +33,7 @@ class IterationStatistics(object):
         self.morph_tokens = []
         self.durations = [0]
         self.morph_lengths = []
+        self.changes = []
 
         self.gold_bpr = []
         self._reference = None
@@ -74,6 +75,7 @@ class IterationStatistics(object):
         self.morph_types.append(len(model._morph_usage.seen_morphs()))
         self.morph_tokens.append(sum(tcounts))
         self.word_tokens = float(model.word_tokens)
+        self.changes.append(len(model._changed_segmentations))
 
         if self._reference is not None:
             wlist, annotations = zip(*self._reference)
@@ -125,6 +127,8 @@ class IterationStatisticsPlotter(object):
         self.types_and_tokens()
         plt.figure()
         self.morph_lengths()
+        plt.figure()
+        self.changes()
         if self.stats._reference is not None:
             plt.figure()
             self.gold_bpr()
@@ -236,6 +240,13 @@ class IterationStatisticsPlotter(object):
         plt.xlabel('Epoch number')
         plt.ylabel('Boundary precision recall score')
         plt.legend(['Precision', 'Recall', 'F-measure'])
+        self._title()
+
+    def changes(self):
+        plt.plot(self.stats.changes)
+        self._iteration_grid()
+        plt.xlabel('Epoch number')
+        plt.ylabel('Changed segmentations (cumulative within iteration)')
         self._title()
 
     def _iteration_grid(self):

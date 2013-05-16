@@ -15,6 +15,7 @@ if not PY3:     # my version of matplotlib doesn't support python 3
     except ImportError:
         _logger.info('Unable to import matplotlib.pyplot: plotting disabled')
 
+from . import baseline
 from .exception import UnsupportedConfigurationError
 
 
@@ -25,10 +26,16 @@ class IterationStatistics(object):
         self.epoch_numbers = []
 
         self.costs = []
+        self.corpuscosts = []
+        self.lexiconcosts = []
         self.tag_counts = []
+        self.morph_types = []
         self.morph_tokens = []
         self.durations = [0]
         self.morph_lengths = []
+
+        self.gold_bpr = []
+        self._reference = None
 
         self.max_morph_len = 0
         self.max_morph_len_count = 0
@@ -47,6 +54,9 @@ class IterationStatistics(object):
         self.ops = training_operations
         self.categories = model.get_categories()
 
+    def set_gold_standard(self, reference):
+        self._reference = reference
+
     def callback(self, model, epoch_number=0):
         t_cur = time.time()
 
@@ -55,10 +65,24 @@ class IterationStatistics(object):
         self.epoch_numbers.append(epoch_number)
 
         self.costs.append(model.get_cost())
+        self.corpuscosts.append(model._corpus_coding.get_cost() /
+                                model._corpus_coding.weight)
+        self.lexiconcosts.append(model._lexicon_coding.get_cost() /
+                                 model._lexicon_coding.weight)
         tcounts = self._extract_tag_counts(model)
         self.tag_counts.append(tcounts)
+        self.morph_types.append(len(model._morph_usage.seen_morphs()))
         self.morph_tokens.append(sum(tcounts))
         self.word_tokens = float(model.word_tokens)
+
+        if self._reference is not None:
+            wlist, annotations = zip(*self._reference)
+            segments = [model.viterbi_segment(w)[0] for w in wlist]
+            self.gold_bpr.append(
+                baseline.AnnotationsModelUpdate._bpr_evaluation(
+                    [[x] for x in segments],
+                    annotations))
+
         if self.t_prev is not None:
             self.durations.append(t_cur - self.t_prev)
         current_lengths = collections.Counter()
@@ -90,13 +114,20 @@ class IterationStatisticsPlotter(object):
         plt.figure()
         self.costs()
         plt.figure()
+        self.basecosts()
+        plt.figure()
         self.tag_counts()
         plt.figure()
         self.avg_morphs()
         plt.figure()
         self.durations()
         plt.figure()
+        self.types_and_tokens()
+        plt.figure()
         self.morph_lengths()
+        if self.stats._reference is not None:
+            plt.figure()
+            self.gold_bpr()
         plt.show()
 
     def costs(self):
@@ -104,6 +135,18 @@ class IterationStatisticsPlotter(object):
         self._iteration_grid()
         plt.xlabel('Epoch number')
         plt.ylabel('Model cost')
+        self._title()
+
+    def basecosts(self):
+        plt.plot(self.stats.corpuscosts, color='red')
+        plt.plot(self.stats.lexiconcosts, color='green')
+        plt.plot([sum(x) for x in zip(self.stats.corpuscosts,
+                                      self.stats.lexiconcosts)],
+                 color='black')
+        self._iteration_grid()
+        plt.xlabel('Epoch number')
+        plt.ylabel('Unweighted base cost (no penalties)')
+        plt.legend(['Corpus', 'Lexicon (approx)', 'Sum'])
         self._title()
 
     def tag_counts(self):
@@ -125,6 +168,15 @@ class IterationStatisticsPlotter(object):
         self._iteration_grid()
         plt.xlabel('Epoch number')
         plt.ylabel('Avg number of morphs per word token')
+        self._title()
+
+    def types_and_tokens(self):
+        plt.plot(self.stats.morph_tokens, color="red")
+        plt.plot(self.stats.morph_types, color="blue")
+        plt.legend(['Tokens', 'Types'])
+        self._iteration_grid()
+        plt.xlabel('Epoch number')
+        plt.ylabel('Count of morph tokens / types')
         self._title()
 
     def durations(self):
@@ -176,6 +228,14 @@ class IterationStatisticsPlotter(object):
         self._iteration_grid()
         plt.xlabel('Epoch number')
         plt.ylabel('Morph type length distribution')
+        self._title()
+
+    def gold_bpr(self):
+        plt.plot(self.stats.gold_bpr)
+        self._iteration_grid()
+        plt.xlabel('Epoch number')
+        plt.ylabel('Boundary precision recall score')
+        plt.legend(['Precision', 'Recall', 'F-measure'])
         self._title()
 
     def _iteration_grid(self):

@@ -118,6 +118,7 @@ class CatmapModel(object):
         # Should take exactly one argument: the model.
         self.operation_callbacks = []
         self.epoch_callbacks = []
+        self._changed_segmentations = set()
 
         # Force these atoms to be kept as separate morphs.
         # Calling morfessor baseline with the same forcesplit value ensures
@@ -132,6 +133,9 @@ class CatmapModel(object):
         self._annot_coding = None
         self.annotations = []           # (word, (analysis1, analysis2...))
         self._annotations_tagged = False
+
+        self._cost_field_width = 9
+        self._cost_field_precision = 4
 
     def add_corpus_data(self, segmentations, freqthreshold=1,
                         count_modifier=None):
@@ -232,6 +236,7 @@ class CatmapModel(object):
 
         self.convergence_of_cost(
             self._train_iteration,
+            self._iteration_update,
             max_iterations=max_iterations,
             min_cost_gain=min_iter_cost_gain,
             iteration_name='iteration')
@@ -240,6 +245,7 @@ class CatmapModel(object):
         """One iteration of training, which contains several epochs
         of each operation in sequence.
         """
+        self._changed_segmentations = set()  # FIXME: use for convergence
         while self._operation_number < len(self.training_operations):
             operation_name = '_op_{}_generator'.format(
                 self.training_operations[self._operation_number])
@@ -251,23 +257,28 @@ class CatmapModel(object):
                     operation_name)
             min_epoch_cost_gain = self._training_params('min_epoch_cost_gain')
             max_epochs = self._training_params('max_epochs')
-            must_reestimate = self._training_params('must_reestimate')
-            _logger.info(
-                'Iteration {}, operation {} ({}), max {} epoch(s).'.format(
+            if self._training_params('must_reestimate'):
+                update_func = self._reestimate_probabilities
+            else:
+                update_func = None
+
+            msg = 'Iteration {:2d}, operation {:2d} ({}), max {:2d} epoch(s).'
+            _logger.info(msg.format(
                     self._iteration_number, self._operation_number,
                     self.training_operations[self._operation_number],
                     max_epochs))
             self.convergence_of_cost(
                 lambda: self._transformation_epoch(operation()),
+                update_func=update_func,
                 min_cost_gain=min_epoch_cost_gain,
                 max_iterations=max_epochs,
-                must_reestimate=must_reestimate,
                 iteration_name='epoch')
             self._reestimate_probabilities()
             self._operation_number += 1
             for callback in self.operation_callbacks:
                 callback(self)
 
+    def _iteration_update(self):
         force_another = False
         if self._corpus_weight_updater is not None:
             if self._corpus_weight_updater.update_model(
@@ -275,13 +286,16 @@ class CatmapModel(object):
                 self._reestimate_probabilities()
                 if self._iteration_number < self._max_iterations:
                     force_another = True
+            for callback in self.operation_callbacks:
+                callback(self)
 
         self._operation_number = 0
         self._iteration_number += 1
         return force_another
 
-    def convergence_of_cost(self, train_func, min_cost_gain=0.005,
-                            max_iterations=5, must_reestimate=False,
+    def convergence_of_cost(self, train_func, update_func,
+                            min_cost_gain=0.005,
+                            max_iterations=5,
                             iteration_name='iter'):
         """Iterates the specified training function until the model cost
         no longer improves enough or until maximum number of iterations
@@ -294,37 +308,42 @@ class CatmapModel(object):
 
         Arguments:
             train_func -- A method of CatmapModel which causes some part of
-                          the model to be trained. If the return value is
-                          True, at least one more iteration is forced.
+                          the model to be trained.
+            update_func -- Updates to the model between iterations,
+                           that should not be considered in the convergence
+                           analysis. However, if the return value is
+                           True, at least one more iteration is forced unless
+                           the maximum limit has been reached.
             min_cost_gain -- Stop iterating if cost reduction between
                              iterations is below this limit * #boundaries.
                              Default 0.005.
             max_iterations -- Maximum number of iterations (epochs). Default 5.
-            must_reestimate -- Call _reestimate_probabilities after each
-                               epoch. Only necessary if tranformation leaves
-                               the model inconsistent. Default: False.
             iteration_name -- Name for the level of iteration,
                               to get meaningful log messages.
         """
 
         previous_cost = self.get_cost()
         for iteration in range(max_iterations):
-            _logger.info(
-                '{} {}/{}.'.format(
-                    iteration_name, iteration + 1, max_iterations))
-            _logger.info(time.strftime("%a, %d.%m.%Y %H:%M:%S"))
+            cost = self.get_cost()
+            msg = ('{:9s} {:2d}/{:<2d}          Cost: {:' +
+                   self._cost_field_fmt(cost) + 'f}.')
+            _logger.info(msg.format(iteration_name,
+                                    iteration + 1, max_iterations,
+                                    cost))
 
             # perform the optimization
-            force_another = train_func()
-
-            # only do full re-estimation of parameters if the
-            # tranformation leaves the model inconsistent
-            if must_reestimate:
-                self._reestimate_probabilities()
+            train_func()
 
             cost = self.get_cost()
             cost_diff = cost - previous_cost
-            _logger.info('Cost now {}'.format(cost))
+
+            # perform update between optimization iterations
+            if update_func is not None:
+                _logger.info('{:24s} Cost: {}'.format(
+                    'Before ' + iteration_name + ' update.', cost))
+                force_another = update_func()
+            else:
+                force_another = False
 
             if iteration_name == 'epoch':
                 for callback in self.epoch_callbacks:
@@ -332,15 +351,23 @@ class CatmapModel(object):
 
             limit = min_cost_gain * self._corpus_coding.boundaries
             if (not force_another) and -cost_diff <= limit:
-                _logger.info('Converged, with cost difference ' +
-                    '{} (limit {}) in final {}.'.format(
-                        cost_diff, limit, iteration_name))
+                _logger.info('{:24s} Cost: {}'.format(
+                    iteration_name + ' final.', self.get_cost()))
+                msg = ('Cost difference {:' +
+                            self._cost_field_fmt(cost_diff) + 'f} ' +
+                       '(limit {}) ' +
+                       'in {:9s} {:2d}    (Converged).')
+                _logger.info(msg.format(cost_diff, limit,
+                                        iteration_name, iteration + 1))
                 break
             else:
-                _logger.info(
-                    'Cost difference {} (limit {}) in {} {}/{}'.format(
-                    cost_diff, limit,
-                    iteration_name, iteration + 1, max_iterations))
+                msg = ('Cost difference {:' +
+                            self._cost_field_fmt(cost_diff) + 'f} ' +
+                       '(limit {}) ' +
+                       'in {:9s} {:2d}/{:<2d}')
+                _logger.info(msg.format(cost_diff, limit,
+                                        iteration_name, iteration + 1,
+                                        max_iterations))
             previous_cost = cost
 
     def convergence_of_analysis(self, train_func, resegment_func,
@@ -382,31 +409,42 @@ class CatmapModel(object):
         previous_cost = self.get_cost()
         for iteration in range(max_iterations):
             _logger.info(
-                'Iteration {} ({}). {}/{}'.format(
+                'Iteration {:2d} ({}). {:2d}/{:<2d}'.format(
                     self._iteration_number, train_func.__name__,
                     iteration + 1, max_iterations))
-            _logger.info(time.strftime("%a, %d.%m.%Y %H:%M:%S"))
 
             # perform the optimization
             train_func()
 
             cost = self.get_cost()
             cost_diff = cost - previous_cost
-            if -cost_diff <= (min_cost_gain * self._corpus_coding.boundaries):
-                _logger.info('Converged, with cost difference ' +
-                    '{} in final iteration.'.format(cost_diff))
+            cost_limit = min_cost_gain * self._corpus_coding.boundaries
+            if -cost_diff <= cost_limit:
+                msg = ('Cost difference {:' +
+                            self._cost_field_fmt(cost_diff) + 'f} ' +
+                       '(limit {}) ' +
+                       'in iteration {:2d}    (Converged).')
+                _logger.info(msg.format(cost_diff, cost_limit, iteration + 1))
                 break
 
             # perform the reanalysis
             differences = resegment_func()
 
-            if differences <= (min_difference_proportion *
-                               len(self.segmentations)):
-                _logger.info('Converged, with ' +
-                    '{} differences in final iteration.'.format(differences))
+            limit = min_difference_proportion * len(self.segmentations)
+            # the length of the slot needed to display
+            # the number of segmentations
+            field_width = str(len(str(len(self.segmentations))))
+            if differences <= limit:
+                msg = ('Segmentation differences: {:' + field_width + 'd} ' +
+                       '(limit {:' + field_width + 'd}). ' +
+                       'in iteration {:2d}    (Converged).')
+                _logger.info(msg.format(differences, int(math.floor(limit)),
+                                        iteration + 1))
                 break
-            _logger.info('{} differences. Cost difference: {}'.format(
-                differences, cost_diff))
+            msg = ('Segmentation differences: {:' + field_width + 'd} ' +
+                   '(limit {:' + field_width + 'd}). Cost difference: {}')
+            _logger.info(msg.format(differences, int(math.floor(limit)),
+                                    cost_diff))
             previous_cost = cost
 
     def _training_params(self, param_name):
@@ -672,6 +710,7 @@ class CatmapModel(object):
                     temporaries.difference_update(
                         self.detag_word(new_analysis.analysis))
                 self._update_counts(best.transform.change_counts, 1)
+                self._changed_segmentations.update(best.targets)
             self._morph_usage.remove_temporaries(temporaries)
 
     def _op_split_generator(self):
@@ -1036,8 +1075,8 @@ class CatmapModel(object):
                         CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)))
 
         if best.cost >= LOGPROB_ZERO:
-            _logger.warning(
-                'No possible segmentation for word {}'.format(word))
+            #_logger.warning(
+            #    'No possible segmentation for word {}'.format(word))
             return [CategorizedMorph(word, None)], LOGPROB_ZERO
 
         # Backtrace for the best morph-category sequence
@@ -1268,6 +1307,13 @@ class CatmapModel(object):
 
         self.operation_callbacks = []
         self.epoch_callbacks = []
+
+    def _cost_field_fmt(self, cost):
+        current = len(str(int(cost))) + self._cost_field_precision + 1
+        if current > self._cost_field_width:
+            self._cost_field_width = current
+        return '{}.{}'.format(self._cost_field_width,
+                              self._cost_field_precision)
 
     @staticmethod
     def get_categories(wb=False):

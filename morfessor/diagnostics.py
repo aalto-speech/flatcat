@@ -256,7 +256,7 @@ class IterationStatisticsPlotter(object):
                 plt.axvline(x=(i + 0.5), color=[.6, .6, .6])
             if (self.stats.operation_numbers[i] <
                     self.stats.operation_numbers[i + 1]):
-                plt.axvline(x=(i + 0.5), color=[.6, .6, .6], linestyle=':')
+                plt.axvline(x=(i + 0.5), color=[.5, .5, .5], linestyle=':')
 
     def _title(self):
         plt.title(self.stats.title)

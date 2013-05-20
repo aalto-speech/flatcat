@@ -1193,15 +1193,15 @@ class CatmapModel(object):
         penalty=-999999, blacklist_penalty=-999999):
         self._supervised = True
         self._annotations_tagged = True
-        for annotation in annotations:
-            if annotation[1][0][0].category == CategorizedMorph.no_category:
+        for (word, alternatives) in annotations.items():
+            if alternatives[0][0].category == CategorizedMorph.no_category:
                 self._annotations_tagged = False
             # The fist entries in self.segmentations are the currently active
             # annotations, in the same order as in self.annotations
             self.segmentations.insert(
                 len(self.annotations),
-                WordAnalysis(1, annotation[1][0]))
-            self.annotations.append(annotation)
+                WordAnalysis(1, alternatives[0]))
+            self.annotations.append((word, alternatives))
         self._calculate_morph_backlinks()
         self._annot_coding = CatmapAnnotatedCorpusEncoding(
                                 self._corpus_coding,

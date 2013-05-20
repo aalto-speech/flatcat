@@ -291,14 +291,14 @@ class TestModelConsistency(unittest.TestCase):
         (500, ('SSSSS',)),
         (2, ('AASSSSS',)))
 
-    dummy_annotation = (
-        ('ABCDEFG', ((CategorizedMorph('ABC', None),
-                      CategorizedMorph('DEFG', None)),)),
-        ('HIJKLMN', ((CategorizedMorph('H', None),
-                      CategorizedMorph('IJKLMN', None)),
-                     (CategorizedMorph('H', None),
-                      CategorizedMorph('IJ', None),
-                      CategorizedMorph('KLMN', None)))))
+    dummy_annotation = {
+        'ABCDEFG': ((CategorizedMorph('ABC', None),
+                     CategorizedMorph('DEFG', None)),),
+        'HIJKLMN': ((CategorizedMorph('H', None),
+                     CategorizedMorph('IJKLMN', None)),
+                    (CategorizedMorph('H', None),
+                     CategorizedMorph('IJ', None),
+                     CategorizedMorph('KLMN', None)))}
 
     def setUp(self):
         self.model = _load_catmap(TestModelConsistency.dummy_segmentation)

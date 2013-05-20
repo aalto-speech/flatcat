@@ -713,7 +713,7 @@ Simple usage examples (training and testing):
     add_arg('--statsfile', dest='stats_file', metavar='<file>',
             help='Collect iteration statistics and pickle them ' +
                  'into this file.')
-    add_arg('--stats-annotations', dest="statsannofile", default=None,
+    add_arg('--stats-annotations', dest="statsannotfile", default=None,
             metavar='<file>',
             help='Load annotated data for f-measure diagnostics. '
                  'Useful for analyzing convergence properties.')
@@ -832,9 +832,9 @@ def catmap_main(args):
         model.epoch_callbacks.append(stats.callback)
         stats.set_names(model, training_ops)
 
-        if args.statsannofile is not None:
+        if args.statsannotfile is not None:
             stats.set_gold_standard(
-                io.read_annotations_file(args.statsannofile,
+                io.read_annotations_file(args.statsannotfile,
                     analysis_sep=args.analysisseparator))
 
     # Load data

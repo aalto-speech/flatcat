@@ -119,6 +119,7 @@ class CatmapModel(object):
         self.operation_callbacks = []
         self.epoch_callbacks = []
         self._changed_segmentations = set()
+        self._changed_segmentations_op = set()
 
         # Force these atoms to be kept as separate morphs.
         # Calling morfessor baseline with the same forcesplit value ensures
@@ -653,6 +654,7 @@ class CatmapModel(object):
         EpochNode = collections.namedtuple('EpochNode', ['cost',
                                                          'transform',
                                                          'targets'])
+        self._changed_segmentations_op = set()  # FIXME
         for experiment in _generator_progress(transformation_generator):
             (transform_group, targets, temporaries) = experiment
             if len(transform_group) == 0:
@@ -711,6 +713,7 @@ class CatmapModel(object):
                         self.detag_word(new_analysis.analysis))
                 self._update_counts(best.transform.change_counts, 1)
                 self._changed_segmentations.update(best.targets)
+                self._changed_segmentations_op.update(best.targets)
             self._morph_usage.remove_temporaries(temporaries)
 
     def _op_split_generator(self):

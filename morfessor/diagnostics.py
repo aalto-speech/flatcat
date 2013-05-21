@@ -34,6 +34,7 @@ class IterationStatistics(object):
         self.durations = [0]
         self.morph_lengths = []
         self.changes = []
+        self.changes_op = []
 
         self.gold_bpr = []
         self._reference = None
@@ -76,6 +77,7 @@ class IterationStatistics(object):
         self.morph_tokens.append(sum(tcounts))
         self.word_tokens = float(model.word_tokens)
         self.changes.append(len(model._changed_segmentations))
+        self.changes_op.append(len(model._changed_segmentations_op))
 
         if self._reference is not None:
             tmp = self._reference.items()
@@ -244,10 +246,12 @@ class IterationStatisticsPlotter(object):
         self._title()
 
     def changes(self):
-        plt.plot(self.stats.changes)
+        plt.plot(self.stats.changes, color='blue')
+        plt.plot(self.stats.changes_op, color='red')
+        plt.legend(['cumulative w/in iter', 'in epoch'])
         self._iteration_grid()
         plt.xlabel('Epoch number')
-        plt.ylabel('Changed segmentations (cumulative within iteration)')
+        plt.ylabel('Changed segmentations')
         self._title()
 
     def _iteration_grid(self):

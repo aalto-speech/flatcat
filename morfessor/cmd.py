@@ -631,7 +631,7 @@ Simple usage examples (training and testing):
     add_arg('--max-iterations', dest='max_iterations', type=int, default=15,
             metavar='<int>',
             help='Maximum number of iterations. (default %(default)s).')
-    add_arg('--max-epochs-first', dest='max_epochs_first', type=int, default=5,
+    add_arg('--max-epochs-first', dest='max_epochs_first', type=int, default=1,
             metavar='<int>',
             help='Maximum number of epochs of each operation in ' +
                  'the first iteration. ' +
@@ -642,7 +642,7 @@ Simple usage examples (training and testing):
                  'the subsequent iterations. ' +
                  '(default %(default)s).')
     add_arg('--max-resegment-epochs', dest='max_resegment_epochs',
-            type=int, default=1, metavar='<int>',
+            type=int, default=2, metavar='<int>',
             help='Maximum number of epochs of resegmentation in ' +
                  'all iterations. Resegmentation is the heaviest operation. ' +
                  '(default %(default)s).')
@@ -689,13 +689,13 @@ Simple usage examples (training and testing):
             'active annotations. ' +
             '(default %(default)s).')
     add_arg('--annotation-supermorph-penalty', dest='annotationsuperpenalty',
-            type=float, default=LOGPROB_ZERO - 1, metavar='<float>',
+            type=float, default=0, metavar='<float>',
             help='Penalty for adding supermorphs of morph bigrams used in '
             'the currently active annotations. ' +
             'If such supermorphs are added, ' +
             'segmentation is likely to prefer them over the submorphs ' +
-            '(because emissions contribute most of the corpus cost), ' +
-            'reducing the effectiveness of annotations. ' +
+            '(because emissions contribute most of the corpus cost). ' +
+            'Set to zero to disable. ' +
             '(default %(default)s).')
 
     # Options for logging

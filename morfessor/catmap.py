@@ -50,7 +50,7 @@ class CatmapModel(object):
 
     word_boundary = WORD_BOUNDARY
 
-    DEFAULT_TRAIN_OPS = ['split', 'join', 'split', 'shift', 'resegment']
+    DEFAULT_TRAIN_OPS = ['split', 'join', 'shift', 'resegment']
 
     def __init__(self, morph_usage, forcesplit=None,
                  corpusweight=1.0):
@@ -205,15 +205,13 @@ class CatmapModel(object):
         for callback in self.epoch_callbacks:
             callback(self)
 
-        self._iteration_number = 1
-
     def set_development_annotations(self, annotations):
         self._corpus_weight_updater = baseline.AnnotationsModelUpdate(
             annotations, self)
 
     def train(self, min_epoch_cost_gain=0.0025, min_iter_cost_gain=0.005,
               min_difference_proportion=0.005,
-              max_iterations=10, max_epochs_first=5, max_epochs=1,
+              max_iterations=15, max_epochs_first=1, max_epochs=1,
               max_resegment_epochs=1,
               max_shift_distance=2,
               min_shift_remainder=2):
@@ -234,6 +232,7 @@ class CatmapModel(object):
         if self._iteration_number == 0:
             # Zero:th pre-iteration: let probabilities converge
             self.initialize_probabilities(min_difference_proportion)
+            self._iteration_update()
 
         self.convergence_of_cost(
             self._train_iteration,
@@ -282,8 +281,8 @@ class CatmapModel(object):
     def _iteration_update(self):
         force_another = False
         if self._corpus_weight_updater is not None:
-            if self._corpus_weight_updater.update_model(
-                        self._iteration_number):
+            i = max(self._iteration_number, 1.0)
+            if self._corpus_weight_updater.update_model(i):
                 self._reestimate_probabilities()
                 if self._iteration_number < self._max_iterations:
                     force_another = True

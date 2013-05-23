@@ -29,6 +29,7 @@ PYTHON="pypy"
 # Location of morfessor scripts
 CATMAP="../scripts/morfessor-catmap"
 BASELINE="../scripts/morfessor-train"
+BASELINE_TEST="../scripts/morfessor-segment"
 
 # Location of boundary precision recall script
 BPR="bin/bpr_v1.11.py"
@@ -108,7 +109,7 @@ then
 
 	### Testing
 	# Segment test data using baseline
-	${DRY} ${PYTHON} ${BASELINE} ${COMMON_PARAMS} ${COMMON_TEST_PARAMS} ${BASELINE_TEST_PARAMS} -L ${BASELINE_OUTPUT} -T ${TESTDATA} -o ${BASELINE_TEST_OUTPUT}
+	${DRY} ${PYTHON} ${BASELINE_TEST} ${COMMON_PARAMS} ${COMMON_TEST_PARAMS} ${BASELINE_TEST_PARAMS} -L ${BASELINE_OUTPUT} -o ${BASELINE_TEST_OUTPUT} ${TESTDATA}
 		check_return
 
 	# Calculate boundary precision recall

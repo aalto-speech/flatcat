@@ -220,10 +220,6 @@ class MorphUsageProperties(object):
                         ('PRE', WORD_BOUNDARY),
                         ('PRE', 'SUF'),
                         (WORD_BOUNDARY, 'SUF'))
-    # These transitions are additionally not considered for splitting a morph
-    invalid_split_transitions = (('SUF', 'PRE'),
-                                 ('SUF', 'STM'),
-                                 ('STM', 'PRE'))
 
     # Cache for memoized valid transitions
     _valid_transitions = None

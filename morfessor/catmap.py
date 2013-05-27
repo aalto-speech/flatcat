@@ -1840,12 +1840,20 @@ class CatmapEncoding(baseline.CorpusEncoding):
                 )
 
 
-class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
+class CatmapAnnotatedCorpusEncoding(object):
     def __init__(self, corpus_coding, weight=None,
                  penalty=-999999, blacklist_penalty=-999999):
-        super(CatmapAnnotatedCorpusEncoding, self).__init__(corpus_coding,
-                                                            weight=weight,
-                                                            penalty=penalty)
+        self.do_update_weight = True
+        self.weight = 1.0
+        if weight is not None:
+            self.do_update_weight = False
+            self.weight = weight
+        self.corpus_coding = corpus_coding
+        self.penalty = penalty
+        self.constructions = collections.Counter()
+        self.boundaries = 0
+
+        self.penaltysum = 0.0
         self.blacklist = set()
         self.blacklist_penalty = blacklist_penalty
 
@@ -1858,25 +1866,46 @@ class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
             self.blacklist.add(morph)
 
     def set_constructions(self, constructions):
-        super(CatmapAnnotatedCorpusEncoding, self).set_constructions(
-            constructions)
+        self.penaltysum = 0.0
+        self.constructins = constructions
         self.blacklist.clear()
 
     def set_count(self, construction, count):
-        super(CatmapAnnotatedCorpusEncoding, self).set_count(construction,
-                                                             count)
-        if count > 0 and construction in self.blacklist:
-            self.logtokensum += self.penalty
+        if count == 0:
+            if construction in self.constructions:
+                annot_count = self.constructions[construction]
+                self.penaltysum += annot_count * self.penalty
+        else:
+            if construction in self.blacklist:
+                self.penaltysum += self.blacklist_penalty
 
     def update_count(self, construction, old_count, new_count):
-        super(CatmapAnnotatedCorpusEncoding, self).update_count(construction,
-                                                                old_count,
-                                                                new_count)
+        if construction in self.constructions:
+            annot_count = self.constructions[construction]
+            if old_count == 0:
+                self.penaltysum -= annot_count * self.penalty
+            if new_count == 0:
+                self.penaltysum += annot_count * self.penalty
         if construction in self.blacklist:
             if old_count > 0:
-                self.logtokensum -= self.blacklist_penalty
+                self.penaltysum -= self.blacklist_penalty
             if new_count > 0:
-                self.logtokensum += self.blacklist_penalty
+                self.penaltysum += self.blacklist_penalty
+
+    def update_weight(self):
+        """Update the weight of the Encoding by taking the ratio of the
+        corpus boundaries and annotated boundaries
+        """
+        if not self.do_update_weight:
+            return
+        old = self.weight
+        self.weight = float(self.corpus_coding.boundaries) / self.boundaries
+        if self.weight != old:
+            _logger.info("Weight of annotated data penalties set to %s"
+                         % self.weight)
+
+    def get_cost(self):
+        return self.penaltysum * self.weight
 
 
 def _log_catprobs(probs):

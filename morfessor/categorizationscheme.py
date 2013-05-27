@@ -258,11 +258,44 @@ class MorphUsageProperties(object):
         self._contexts = Sparse(default=MorphContext(0, 1.0, 1.0))
         self._context_builders = collections.defaultdict(MorphContextBuilder)
 
+        self._contexts_per_iter = 50000 # FIXME customizable
+
         # Cache for memoized feature-based conditional class probabilities
         self._condprob_cache = collections.defaultdict(float)
         self._marginalizer = None
 
-    def clear(self):
+    def calculate_usage_features(self, seg_func):
+        self._clear()
+        count_sum = 0
+        while True:
+            # If risk of running out of memory, perform calculations in
+            # multiple loops over the data
+            conserving_memory = False
+            for rcount, segments in seg_func():
+                count_sum += rcount
+
+                if self.use_word_tokens:
+                    pcount = rcount
+                else:
+                    # pcount used for perplexity, rcount is real count
+                    pcount = 1
+
+                for (i, morph) in enumerate(segments):
+                    # Collect information about the contexts in which
+                    # the morphs occur.
+                    if self._add_to_context(morph, pcount, rcount,
+                                            i, segments):
+                        conserving_memory = True
+
+            self._compress_contexts()
+
+            if not conserving_memory:
+                break
+            print("FIXME one usage feature iter wasn't enough")
+
+        return count_sum
+
+    def _clear(self):
         """Resets the context variables.
         Use before fully reprocessing a segmented corpus."""
         self._contexts.clear()
@@ -270,8 +303,14 @@ class MorphUsageProperties(object):
         self._condprob_cache.clear()
         self._marginalizer = None
 
-    def add_to_context(self, morph, pcount, rcount, i, segments):
+    def _add_to_context(self, morph, pcount, rcount, i, segments):
         """Collect information about the contexts in which the morph occurs"""
+        if morph in self._contexts:
+            return False
+        if (len(self._context_builders) > self._contexts_per_iter and
+                morph not in self._context_builders):
+            return True
+
         # Previous morph.
         if i == 0:
             # Word boundaries are counted as separate contexts
@@ -295,8 +334,9 @@ class MorphUsageProperties(object):
             self._context_builders[morph].right[neighbour] += pcount
 
         self._context_builders[morph].count += rcount
+        return False
 
-    def compress_contexts(self):
+    def _compress_contexts(self):
         """Calculate compact features from the context data collected into
         _context_builders. This is done to save memory."""
         for morph in self._context_builders:

@@ -598,9 +598,9 @@ Simple usage examples (training and testing):
                  'Has no effect unless used together with ' +
                  '--remove-nonmorphemes.' +
                  " (default '%(default)s').")
-#     add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
-#             metavar='<int>',
-#             help="compound frequency threshold (default %(default)s).")
+    add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
+            metavar='<int>',
+            help="compound frequency threshold (default %(default)s).")
 #     add_arg('--viterbi-smoothing', dest="viterbismooth", default=0,
 #             type=float, metavar='<float>',
 #             help="additive smoothing parameter for Viterbi "
@@ -809,7 +809,8 @@ def catmap_main(args):
 
     for f in args.baselinefiles + args.loadsegfiles:
         model.add_corpus_data(io.read_segmentation_file(f),
-                              count_modifier=dampfunc)
+                              count_modifier=dampfunc,
+                              freqthreshold=args.freqthreshold)
 
     if args.annofile is not None:
         annotations = io.read_annotations_file(args.annofile,

@@ -492,28 +492,11 @@ class CatmapModel(object):
         """Recalculates the morph usage features (perplexities).
         """
 
-        self._corpus_coding.boundaries = 0
         self._lexicon_coding.clear()
-        self._morph_usage.clear()
 
-        for rcount, segments in self.segmentations:
-            self._corpus_coding.boundaries += rcount
-            # Category tags are not needed for these calculations
-            segments = CatmapModel.detag_word(segments)
-
-            if self._morph_usage.use_word_tokens:
-                pcount = rcount
-            else:
-                # pcount used for perplexity, rcount is real count
-                pcount = 1
-
-            for (i, morph) in enumerate(segments):
-                # Collect information about the contexts in which
-                # the morphs occur.
-                self._morph_usage.add_to_context(morph, pcount, rcount,
-                                                 i, segments)
-        
-        self._morph_usage.compress_contexts()
+        self._corpus_coding.boundaries = (
+            self._morph_usage.calculate_usage_features(
+                lambda: self.detag_list(self.segmentations)))
 
         for morph in self._morph_usage.seen_morphs():
             self._lexicon_coding.add(morph)

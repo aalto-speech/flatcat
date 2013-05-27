@@ -492,7 +492,6 @@ class CatmapModel(object):
         """Recalculates the morph usage features (perplexities).
         """
 
-        num_letter_tokens = collections.Counter()
         self._corpus_coding.boundaries = 0
         self._lexicon_coding.clear()
         self._morph_usage.clear()
@@ -507,16 +506,13 @@ class CatmapModel(object):
             else:
                 # pcount used for perplexity, rcount is real count
                 pcount = 1
-            num_letter_tokens[WORD_BOUNDARY] += pcount
 
             for (i, morph) in enumerate(segments):
                 # Collect information about the contexts in which
                 # the morphs occur.
                 self._morph_usage.add_to_context(morph, pcount, rcount,
                                                  i, segments)
-
-                for letter in morph:
-                    num_letter_tokens[letter] += pcount
+        
         self._morph_usage.compress_contexts()
 
         for morph in self._morph_usage.seen_morphs():
@@ -1905,7 +1901,7 @@ class CatmapAnnotatedCorpusEncoding(object):
                          % self.weight)
 
     def get_cost(self):
-        return self.penaltysum * self.weight
+        return -self.penaltysum * self.weight
 
 
 def _log_catprobs(probs):

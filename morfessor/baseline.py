@@ -777,7 +777,7 @@ class BaselineModel(object):
         self._corpus_coding.weight = weight
 
 
-class AnnotationsModelUpdate:
+class AnnotationsModelUpdate(object):
     """Class for using development annotations to update the corpus weight
     during batch training
 

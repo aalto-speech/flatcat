@@ -181,15 +181,10 @@ class CatmapModel(object):
 
         _logger.info('Initializing from baseline segmentation...')
         self._calculate_usage_features()
-        _logger.info('initializing A')   # FIXME
         self._unigram_transition_probs()
-        _logger.info('initializing B')   # FIXME
         self.viterbi_tag_corpus()
-        _logger.info('initializing C')   # FIXME
         self._calculate_transition_counts()
-        _logger.info('initializing D')   # FIXME
         self._calculate_emission_counts()
-        _logger.info('Done initializing')   # FIXME
 
     def initialize_probabilities(self, min_difference_proportion=0.005):
         """Initialize emission and transition probabilities without
@@ -211,9 +206,13 @@ class CatmapModel(object):
         for callback in self.epoch_callbacks:
             callback(self)
 
-    def set_development_annotations(self, annotations):
-        self._corpus_weight_updater = baseline.AnnotationsModelUpdate(
-            annotations, self)
+    def set_development_annotations(self, annotations, heuristic=None):
+        if heuristic is None:
+            heuristic_func = lambda x: x
+        else:
+            heuristic_func = heuristic.remove_nonmorfemes
+        self._corpus_weight_updater = CatmapAnnotationsModelUpdate(
+            annotations, self, heuristic_func)
 
     def train(self, min_epoch_cost_gain=0.0025, min_iter_cost_gain=0.005,
               min_difference_proportion=0.005,
@@ -1891,6 +1890,32 @@ class CatmapAnnotatedCorpusEncoding(object):
 
     def get_cost(self):
         return -self.penaltysum * self.weight
+
+
+class CatmapAnnotationsModelUpdate(baseline.AnnotationsModelUpdate):
+    def __init__(self, annotations, model, heuristic_func):
+        super(CatmapAnnotationsModelUpdate, self).__init__(annotations, model)
+        self.heuristic_func = heuristic_func
+
+    def update_model(self, epochs):
+        """Tune model corpus weight based on the precision and
+        recall of the development data, trying to keep them equal"""
+        tmp = self.data.items()
+        wlist, annotations = zip(*tmp)
+        segments = [self.heuristic_func(self.model.viterbi_segment(w)[0])
+                    for w in wlist]
+        d = self._estimate_segmentation_dir(segments, annotations)
+
+        if d != 0:
+            weight = self.model.get_corpus_coding_weight()
+            if d > 0:
+                weight *= 1 + 2.0 / epochs
+            else:
+                weight *= 1.0 / (1 + 2.0 / epochs)
+            self.model.set_corpus_coding_weight(weight)
+            _logger.info("Corpus weight set to {}".format(weight))
+            return True
+        return False
 
 
 def _log_catprobs(probs):

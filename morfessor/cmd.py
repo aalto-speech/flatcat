@@ -860,10 +860,18 @@ def catmap_main(args):
         model.viterbi_tag_corpus()
         do_train = True
 
+    # Heuristic nonmorpheme removal
+    heuristic = None
+    if args.rm_nonmorph:
+        heuristic_ops = args.heuristic_ops.split(',')
+        heuristic = HeuristicPostprocessor(model,
+                                           operations=heuristic_ops)
+
     # Train model, if there is new data to train on
     if do_train:
         if develannots is not None:
-            model.set_development_annotations(develannots)
+            model.set_development_annotations(develannots,
+                                              heuristic=heuristic)
 
         ts = time.time()
         model.train(min_epoch_cost_gain=args.min_epoch_cost_gain,
@@ -885,13 +893,6 @@ def catmap_main(args):
     if args.savefile is not None:
         model.clear_callbacks()
         io.write_binary_model_file(args.savefile, model)
-
-    # Heuristic nonmorpheme removal
-    heuristic = None
-    if args.rm_nonmorph:
-        heuristic_ops = args.heuristic_ops.split(',')
-        heuristic = HeuristicPostprocessor(model,
-                                           operations=heuristic_ops)
 
     if args.savesegfile is not None:
         if heuristic is not None:

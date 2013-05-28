@@ -808,9 +808,11 @@ def catmap_main(args):
                             corpusweight=args.corpusweight)
 
     for f in args.baselinefiles + args.loadsegfiles:
+        _logger.info('Calling model.add_corpus_data')
         model.add_corpus_data(io.read_segmentation_file(f),
                               count_modifier=dampfunc,
                               freqthreshold=args.freqthreshold)
+        _logger.info('Done with model.add_corpus_data')
 
     if args.annofile is not None:
         annotations = io.read_annotations_file(args.annofile,

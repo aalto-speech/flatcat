@@ -179,11 +179,17 @@ class CatmapModel(object):
         baseline model.
         """
 
+        _logger.info('Initializing from baseline segmentation...')
         self._calculate_usage_features()
+        _logger.info('initializing A')   # FIXME
         self._unigram_transition_probs()
+        _logger.info('initializing B')   # FIXME
         self.viterbi_tag_corpus()
+        _logger.info('initializing C')   # FIXME
         self._calculate_transition_counts()
+        _logger.info('initializing D')   # FIXME
         self._calculate_emission_counts()
+        _logger.info('Done initializing')   # FIXME
 
     def initialize_probabilities(self, min_difference_proportion=0.005):
         """Initialize emission and transition probabilities without

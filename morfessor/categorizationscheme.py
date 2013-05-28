@@ -1,9 +1,11 @@
 from __future__ import unicode_literals
 import collections
+import logging
 import math
 
 from .utils import Sparse
 
+_logger = logging.getLogger(__name__)
 
 class WordBoundary(object):
     def __repr__(self):
@@ -265,14 +267,21 @@ class MorphUsageProperties(object):
         self._marginalizer = None
 
     def calculate_usage_features(self, seg_func):
+        import resource     # FIXME
+        foo = 0             # FIXME
         self._clear()
         count_sum = 0
         while True:
+            _logger.info('Loop of calculate_usage_features')    # FIXME
             # If risk of running out of memory, perform calculations in
             # multiple loops over the data
             conserving_memory = False
             for rcount, segments in seg_func():
                 count_sum += rcount
+                if (foo % 1000) == 0:
+                    _logger.info('Mem usage at {}: {}'.format(foo,
+                    resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
+                foo += 1
 
                 if self.use_word_tokens:
                     pcount = rcount
@@ -287,11 +296,11 @@ class MorphUsageProperties(object):
                                             i, segments):
                         conserving_memory = True
 
+            _logger.info('Ready to compress, conserving_memory = {}'.format(conserving_memory)) # FIXME
             self._compress_contexts()
 
             if not conserving_memory:
                 break
-            print("FIXME one usage feature iter wasn't enough")
 
         return count_sum
 

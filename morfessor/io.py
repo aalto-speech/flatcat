@@ -358,12 +358,12 @@ class CatmapIO(MorfessorIO):
 
     def read_annotations_file(self, file_name, construction_separator=' ',
                               analysis_sep=','):
-        """Read a annotations file.
+        """Read an annotations file.
 
         Each line has the format:
         <compound> <constr1> <constr2>... <constrN>, <constr1>...<constrN>, ...
 
-        Yield tuples (compound, list(analyses)).
+        Returns a defaultdict mapping a compound to a list of analyses.
 
         """
         annotations = collections.defaultdict(list)
@@ -381,10 +381,7 @@ class CatmapIO(MorfessorIO):
                 annotations[compound].append([self._morph_or_cmorph(x)
                                               for x in segments])
         _logger.info("Done.")
-        out = []
-        for compound, analyses in annotations.items():
-            out.append((compound, analyses))
-        return out
+        return annotations
 
     def _morph_or_cmorph(self, morph_cat):
         parts = morph_cat.rsplit(self.category_separator, 1)

@@ -29,6 +29,7 @@ PYTHON="pypy"
 # Location of morfessor scripts
 CATMAP="../scripts/morfessor-catmap"
 BASELINE="../scripts/morfessor-train"
+BASELINE_TEST="../scripts/morfessor-segment"
 
 # Location of boundary precision recall script
 BPR="bin/bpr_v1.11.py"
@@ -99,12 +100,34 @@ CATMAP_BPR_OUTPUT="${ROOT_DIR}/${OUTDIR}/${RUN_TITLE}.catmap2.bpr"
 STATS="--statsfile ${ROOT_DIR}/${OUTDIR}/stats.pickled"
 LOG="--logfile ${ROOT_DIR}/${OUTDIR}/catmap2.log"
 
-### Training
-# Baseline segmentation
+############ Baseline
 if [[ ! -e ${BASELINE_OUTPUT} ]]
 then
+	### Training
 	${DRY} ${PYTHON} ${BASELINE} ${COMMON_PARAMS} -S ${BASELINE_OUTPUT} ${BASELINE_TRAIN_PARAMS} ${TRAINDATA}
 	check_return
+
+	### Testing
+	# Segment test data using baseline
+	${DRY} ${PYTHON} ${BASELINE_TEST} ${COMMON_PARAMS} ${COMMON_TEST_PARAMS} ${BASELINE_TEST_PARAMS} -L ${BASELINE_OUTPUT} -o ${BASELINE_TEST_OUTPUT} ${TESTDATA}
+		check_return
+
+	# Calculate boundary precision recall
+	# (This is run using regular python regardless of choice above, due to numpy dependency)
+	BPR_COMMAND="${DRY} python ${BPR} -g ${GOLDSTD} -p ${BASELINE_TEST_OUTPUT}"
+	if [[ -z $DRY ]]
+	then
+		echo "Saving boundary precision recall into ${BASELINE_BPR_OUTPUT}"
+		${BPR_COMMAND} > "${BASELINE_BPR_OUTPUT}"
+		echo "run: $BASELINEDIR" >> "${BASELINE_BPR_OUTPUT}"
+		echo "BASELINE_OUTPUT=${BASELINE_OUTPUT}" >> "${BASELINE_BPR_OUTPUT}"
+		echo "COMMON_PARAMS=${COMMON_PARAMS}" >> "${BASELINE_BPR_OUTPUT}"
+		echo "BASELINE_TRAIN_PARAMS=${BASELINE_TRAIN_PARAMS}" >> "${BASELINE_BPR_OUTPUT}"
+		echo "BASELINE_TRAIN_PARAMS=${BASELINE_TRAIN_PARAMS}" >> "${BASELINE_BPR_OUTPUT}"
+		echo "COMMON_TEST_PARAMS=${COMMON_TEST_PARAMS}" >> "${BASELINE_BPR_OUTPUT}"
+	else
+		${BPR_COMMAND} ">" ${BASELINE_BPR_OUTPUT}
+	fi
 fi
 
 if [[ ! -z ${BASELINE_ONLY} ]]
@@ -113,6 +136,7 @@ then
 	exit 0
 fi
 
+############ Catmap
 # Train catmap model
 if [[ -z ${POSTPROCESSING_ONLY} ]]
 then

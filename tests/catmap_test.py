@@ -291,14 +291,14 @@ class TestModelConsistency(unittest.TestCase):
         (500, ('SSSSS',)),
         (2, ('AASSSSS',)))
 
-    dummy_annotation = (
-        ('ABCDEFG', ((CategorizedMorph('ABC', None),
-                      CategorizedMorph('DEFG', None)),)),
-        ('HIJKLMN', ((CategorizedMorph('H', None),
-                      CategorizedMorph('IJKLMN', None)),
-                     (CategorizedMorph('H', None),
-                      CategorizedMorph('IJ', None),
-                      CategorizedMorph('KLMN', None)))))
+    dummy_annotation = {
+        'ABCDEFG': ((CategorizedMorph('ABC', None),
+                     CategorizedMorph('DEFG', None)),),
+        'HIJKLMN': ((CategorizedMorph('H', None),
+                     CategorizedMorph('IJKLMN', None)),
+                    (CategorizedMorph('H', None),
+                     CategorizedMorph('IJ', None),
+                     CategorizedMorph('KLMN', None)))}
 
     def setUp(self):
         self.model = _load_catmap(TestModelConsistency.dummy_segmentation)
@@ -391,7 +391,8 @@ class TestModelConsistency(unittest.TestCase):
         self._destructive_backlink_check()
 
     def test_annotation_blacklist(self):
-        self.model.add_annotations(TestModelConsistency.dummy_annotation)
+        self.model.add_annotations(TestModelConsistency.dummy_annotation,
+                                   blacklist_penalty=-999999)
         self._presplit()
         self.model._update_annotation_choices()
 
@@ -442,6 +443,7 @@ class TestModelConsistency(unittest.TestCase):
         self._compare_to_stored_state(state_exact, state_approx)
 
         # sanity check: costs should never be negative
+        print(old_cost, mid_cost, new_cost)
         self.assertTrue(old_cost >= 0)
         self.assertTrue(mid_cost >= 0)
         self.assertTrue(new_cost >= 0)
@@ -513,9 +515,8 @@ class TestModelConsistency(unittest.TestCase):
                 self.model._morph_usage.category_token_count):
             state_approx['category_token_count_{}'.format(i)] = float(tmp)
         if self.model._annot_coding is not None:
-            state_exact['annot_tokens'] = self.model._annot_coding.tokens
-            state_approx['annot_logtokensum'] = float(
-                self.model._annot_coding.logtokensum)
+            state_approx['annot_penaltysum'] = float(
+                self.model._annot_coding.penaltysum)
             state_exact['annot_constructions'] = sorted(
                 self.model._annot_coding.constructions)
         return (state_exact, state_approx)

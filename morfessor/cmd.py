@@ -598,9 +598,9 @@ Simple usage examples (training and testing):
                  'Has no effect unless used together with ' +
                  '--remove-nonmorphemes.' +
                  " (default '%(default)s').")
-#     add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
-#             metavar='<int>',
-#             help="compound frequency threshold (default %(default)s).")
+    add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
+            metavar='<int>',
+            help="compound frequency threshold (default %(default)s).")
 #     add_arg('--viterbi-smoothing', dest="viterbismooth", default=0,
 #             type=float, metavar='<float>',
 #             help="additive smoothing parameter for Viterbi "
@@ -631,7 +631,7 @@ Simple usage examples (training and testing):
     add_arg('--max-iterations', dest='max_iterations', type=int, default=15,
             metavar='<int>',
             help='Maximum number of iterations. (default %(default)s).')
-    add_arg('--max-epochs-first', dest='max_epochs_first', type=int, default=5,
+    add_arg('--max-epochs-first', dest='max_epochs_first', type=int, default=1,
             metavar='<int>',
             help='Maximum number of epochs of each operation in ' +
                  'the first iteration. ' +
@@ -642,7 +642,7 @@ Simple usage examples (training and testing):
                  'the subsequent iterations. ' +
                  '(default %(default)s).')
     add_arg('--max-resegment-epochs', dest='max_resegment_epochs',
-            type=int, default=1, metavar='<int>',
+            type=int, default=2, metavar='<int>',
             help='Maximum number of epochs of resegmentation in ' +
                  'all iterations. Resegmentation is the heaviest operation. ' +
                  '(default %(default)s).')
@@ -689,13 +689,13 @@ Simple usage examples (training and testing):
             'active annotations. ' +
             '(default %(default)s).')
     add_arg('--annotation-supermorph-penalty', dest='annotationsuperpenalty',
-            type=float, default=LOGPROB_ZERO - 1, metavar='<float>',
+            type=float, default=0, metavar='<float>',
             help='Penalty for adding supermorphs of morph bigrams used in '
             'the currently active annotations. ' +
             'If such supermorphs are added, ' +
             'segmentation is likely to prefer them over the submorphs ' +
-            '(because emissions contribute most of the corpus cost), ' +
-            'reducing the effectiveness of annotations. ' +
+            '(because emissions contribute most of the corpus cost). ' +
+            'Set to zero to disable. ' +
             '(default %(default)s).')
 
     # Options for logging
@@ -713,6 +713,10 @@ Simple usage examples (training and testing):
     add_arg('--statsfile', dest='stats_file', metavar='<file>',
             help='Collect iteration statistics and pickle them ' +
                  'into this file.')
+    add_arg('--stats-annotations', dest="statsannotfile", default=None,
+            metavar='<file>',
+            help='Load annotated data for f-measure diagnostics. '
+                 'Useful for analyzing convergence properties.')
 
     add_arg = parser.add_argument_group('other options').add_argument
     add_arg('-h', '--help', action='help',
@@ -804,8 +808,11 @@ def catmap_main(args):
                             corpusweight=args.corpusweight)
 
     for f in args.baselinefiles + args.loadsegfiles:
+        _logger.info('Calling model.add_corpus_data')
         model.add_corpus_data(io.read_segmentation_file(f),
-                              count_modifier=dampfunc)
+                              count_modifier=dampfunc,
+                              freqthreshold=args.freqthreshold)
+        _logger.info('Done with model.add_corpus_data')
 
     if args.annofile is not None:
         annotations = io.read_annotations_file(args.annofile,
@@ -828,6 +835,11 @@ def catmap_main(args):
         model.epoch_callbacks.append(stats.callback)
         stats.set_names(model, training_ops)
 
+        if args.statsannotfile is not None:
+            stats.set_gold_standard(
+                io.read_annotations_file(args.statsannotfile,
+                    analysis_sep=args.analysisseparator))
+
     # Load data
     do_train = False
     if args.loadfile is None:
@@ -848,10 +860,18 @@ def catmap_main(args):
         model.viterbi_tag_corpus()
         do_train = True
 
+    # Heuristic nonmorpheme removal
+    heuristic = None
+    if args.rm_nonmorph:
+        heuristic_ops = args.heuristic_ops.split(',')
+        heuristic = HeuristicPostprocessor(model,
+                                           operations=heuristic_ops)
+
     # Train model, if there is new data to train on
     if do_train:
         if develannots is not None:
-            model.set_development_annotations(develannots)
+            model.set_development_annotations(develannots,
+                                              heuristic=heuristic)
 
         ts = time.time()
         model.train(min_epoch_cost_gain=args.min_epoch_cost_gain,
@@ -873,13 +893,6 @@ def catmap_main(args):
     if args.savefile is not None:
         model.clear_callbacks()
         io.write_binary_model_file(args.savefile, model)
-
-    # Heuristic nonmorpheme removal
-    heuristic = None
-    if args.rm_nonmorph:
-        heuristic_ops = args.heuristic_ops.split(',')
-        heuristic = HeuristicPostprocessor(model,
-                                           operations=heuristic_ops)
 
     if args.savesegfile is not None:
         if heuristic is not None:

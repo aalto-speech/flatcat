@@ -1,8 +1,11 @@
 from __future__ import unicode_literals
 import collections
+import logging
 import math
 
 from .utils import Sparse
+
+_logger = logging.getLogger(__name__)
 
 
 class WordBoundary(object):
@@ -64,11 +67,13 @@ NON_MORPHEME_PENALTY = 50
 
 
 class HeuristicPostprocessor(object):
-    DEFAULT_OPERATIONS = ['longest-to-stem', 'join-two', 'join-all']
+    DEFAULT_OPERATIONS = ['missing-stem', 'longest-to-stem',
+                          'join-two', 'join-all']
 
     def __init__(self, model, operations=None):
         self.model = model
         self.temporaries = set()
+        self.max_join_stem_len = 4
         if operations is None:
             self.operations = HeuristicPostprocessor.DEFAULT_OPERATIONS
         else:
@@ -90,7 +95,7 @@ class HeuristicPostprocessor(object):
             # If there are no stems, try making the longest morph
             # into a stem.
             # This can also modify the tag of a morph with other than ZZZ
-            if 'longest-to-stem' in self.operations:
+            if 'missing-stem' in self.operations:
                 longest_index = None
                 longest_len = 0
                 for (i, m) in enumerate(analysis):
@@ -106,7 +111,27 @@ class HeuristicPostprocessor(object):
                     tmp[longest_index] = CategorizedMorph(
                                             tmp[longest_index].morph,
                                             'STM')
-                    alternatives.append(tmp)
+                    alternatives.append(AnalysisAlternative(tmp, 0))
+
+            # Otherwise try making the longest nonmorpheme into a stem.
+            # penalized because there is already a stem.
+            if longest_index is None and 'longest-to-stem' in self.operations:
+                longest_index = None
+                longest_len = 0
+                for (i, m) in enumerate(analysis):
+                    if m.category != 'ZZZ':
+                        continue
+                    if len(m) > longest_len:
+                        longest_index = i
+                        longest_len = len(m)
+                if longest_index is not None:
+                    tmp = list(analysis)
+                    tmp[longest_index] = CategorizedMorph(
+                                            tmp[longest_index].morph,
+                                            'STM')
+                    alternatives.append(AnalysisAlternative(
+                        tmp,
+                        NON_MORPHEME_PENALTY / 2))
 
             # Try joining each nonmorpheme in both directions,
             if 'join-two' in self.operations:
@@ -115,9 +140,10 @@ class HeuristicPostprocessor(object):
                             analysis[i + 1].morph in self.model.forcesplit):
                         # Unless forcesplit prevents it
                         continue
-                    if (analysis[i].category == 'ZZZ' or
-                            analysis[i + 1].category == 'ZZZ'):
-                        alternatives.append(self._join_at(analysis, i))
+                    if (self._accept_join(analysis[i], analysis[i + 1]) or
+                            self._accept_join(analysis[i + 1], analysis[i])):
+                        alternatives.append(AnalysisAlternative(
+                            self._join_at(analysis, i), 0))
 
             # Try joining all sequences of 3 or more nonmorphemes
             if 'join-all' in self.operations:
@@ -141,15 +167,14 @@ class HeuristicPostprocessor(object):
                     self.temporaries.add(morph)
                     concatenated = []
                 if len(concatenated) == 0 and len(tmp) > 0:
-                    alternatives.append(tmp)
+                    alternatives.append(AnalysisAlternative(tmp, 0))
 
             if len(alternatives) == 0:
                 return analysis
 
             # Add penalties for number of remaining nonmorphemes
             with_penalties = []
-            for analysis in alternatives:
-                penalty = 0
+            for (analysis, penalty) in alternatives:
                 for cmorph in analysis:
                     if (cmorph.category == 'ZZZ' and
                             cmorph.morph not in self.model.forcesplit):
@@ -183,6 +208,19 @@ class HeuristicPostprocessor(object):
         if len(analysis) > (i + 2):
             out.extend(analysis[(i + 2):])
         return out
+
+    def _accept_join(self, joiner, target):
+        if joiner.category != 'ZZZ':
+            # Only nonmorphemes can be joined
+            return False
+        if target.category == 'ZZZ':
+            # Both parts are nonmorphemes: can join regardless of length
+            return True
+        if target.category == 'STM' and len(target) <= self.max_join_stem_len:
+            # Can join to short enough stems
+            return True
+        # Otherwise don't accept join
+        return False
 
 
 class MorphContextBuilder(object):
@@ -220,10 +258,6 @@ class MorphUsageProperties(object):
                         ('PRE', WORD_BOUNDARY),
                         ('PRE', 'SUF'),
                         (WORD_BOUNDARY, 'SUF'))
-    # These transitions are additionally not considered for splitting a morph
-    invalid_split_transitions = (('SUF', 'PRE'),
-                                 ('SUF', 'STM'),
-                                 ('STM', 'PRE'))
 
     # Cache for memoized valid transitions
     _valid_transitions = None
@@ -262,11 +296,51 @@ class MorphUsageProperties(object):
         self._contexts = Sparse(default=MorphContext(0, 1.0, 1.0))
         self._context_builders = collections.defaultdict(MorphContextBuilder)
 
+        self._contexts_per_iter = 50000  # FIXME customizable
+
         # Cache for memoized feature-based conditional class probabilities
         self._condprob_cache = collections.defaultdict(float)
         self._marginalizer = None
 
-    def clear(self):
+    def calculate_usage_features(self, seg_func):
+        import resource     # FIXME
+        foo = 0             # FIXME
+        self._clear()
+        count_sum = 0
+        while True:
+            _logger.info('Loop of calculate_usage_features')    # FIXME
+            # If risk of running out of memory, perform calculations in
+            # multiple loops over the data
+            conserving_memory = False
+            for rcount, segments in seg_func():
+                count_sum += rcount
+                if (foo % 1000) == 0:
+                    _logger.info('Mem usage at {}: {}'.format(foo,
+                    resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
+                foo += 1
+
+                if self.use_word_tokens:
+                    pcount = rcount
+                else:
+                    # pcount used for perplexity, rcount is real count
+                    pcount = 1
+
+                for (i, morph) in enumerate(segments):
+                    # Collect information about the contexts in which
+                    # the morphs occur.
+                    if self._add_to_context(morph, pcount, rcount,
+                                            i, segments):
+                        conserving_memory = True
+
+            _logger.info('Ready to compress, conserving_memory = {}'.format(conserving_memory)) # FIXME
+            self._compress_contexts()
+
+            if not conserving_memory:
+                break
+
+        return count_sum
+
+    def _clear(self):
         """Resets the context variables.
         Use before fully reprocessing a segmented corpus."""
         self._contexts.clear()
@@ -274,8 +348,14 @@ class MorphUsageProperties(object):
         self._condprob_cache.clear()
         self._marginalizer = None
 
-    def add_to_context(self, morph, pcount, rcount, i, segments):
+    def _add_to_context(self, morph, pcount, rcount, i, segments):
         """Collect information about the contexts in which the morph occurs"""
+        if morph in self._contexts:
+            return False
+        if (len(self._context_builders) > self._contexts_per_iter and
+                morph not in self._context_builders):
+            return True
+
         # Previous morph.
         if i == 0:
             # Word boundaries are counted as separate contexts
@@ -299,8 +379,9 @@ class MorphUsageProperties(object):
             self._context_builders[morph].right[neighbour] += pcount
 
         self._context_builders[morph].count += rcount
+        return False
 
-    def compress_contexts(self):
+    def _compress_contexts(self):
         """Calculate compact features from the context data collected into
         _context_builders. This is done to save memory."""
         for morph in self._context_builders:

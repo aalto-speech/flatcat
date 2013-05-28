@@ -7,6 +7,7 @@ from .utils import Sparse
 
 _logger = logging.getLogger(__name__)
 
+
 class WordBoundary(object):
     def __repr__(self):
         return '#'
@@ -66,11 +67,13 @@ NON_MORPHEME_PENALTY = 50
 
 
 class HeuristicPostprocessor(object):
-    DEFAULT_OPERATIONS = ['longest-to-stem', 'join-two', 'join-all']
+    DEFAULT_OPERATIONS = ['missing-stem', 'longest-to-stem',
+                          'join-two', 'join-all']
 
     def __init__(self, model, operations=None):
         self.model = model
         self.temporaries = set()
+        self.max_join_stem_len = 4
         if operations is None:
             self.operations = HeuristicPostprocessor.DEFAULT_OPERATIONS
         else:
@@ -92,7 +95,7 @@ class HeuristicPostprocessor(object):
             # If there are no stems, try making the longest morph
             # into a stem.
             # This can also modify the tag of a morph with other than ZZZ
-            if 'longest-to-stem' in self.operations:
+            if 'missing-stem' in self.operations:
                 longest_index = None
                 longest_len = 0
                 for (i, m) in enumerate(analysis):
@@ -108,7 +111,27 @@ class HeuristicPostprocessor(object):
                     tmp[longest_index] = CategorizedMorph(
                                             tmp[longest_index].morph,
                                             'STM')
-                    alternatives.append(tmp)
+                    alternatives.append(AnalysisAlternative(tmp, 0))
+
+            # Otherwise try making the longest nonmorpheme into a stem.
+            # penalized because there is already a stem.
+            if longest_index is None and 'longest-to-stem' in self.operations:
+                longest_index = None
+                longest_len = 0
+                for (i, m) in enumerate(analysis):
+                    if m.category != 'ZZZ':
+                        continue
+                    if len(m) > longest_len:
+                        longest_index = i
+                        longest_len = len(m)
+                if longest_index is not None:
+                    tmp = list(analysis)
+                    tmp[longest_index] = CategorizedMorph(
+                                            tmp[longest_index].morph,
+                                            'STM')
+                    alternatives.append(AnalysisAlternative(
+                        tmp,
+                        NON_MORPHEME_PENALTY / 2))
 
             # Try joining each nonmorpheme in both directions,
             if 'join-two' in self.operations:
@@ -117,9 +140,10 @@ class HeuristicPostprocessor(object):
                             analysis[i + 1].morph in self.model.forcesplit):
                         # Unless forcesplit prevents it
                         continue
-                    if (analysis[i].category == 'ZZZ' or
-                            analysis[i + 1].category == 'ZZZ'):
-                        alternatives.append(self._join_at(analysis, i))
+                    if (self._accept_join(analysis[i], analysis[i + 1]) or
+                            self._accept_join(analysis[i + 1], analysis[i])):
+                        alternatives.append(AnalysisAlternative(
+                            self._join_at(analysis, i), 0))
 
             # Try joining all sequences of 3 or more nonmorphemes
             if 'join-all' in self.operations:
@@ -143,15 +167,14 @@ class HeuristicPostprocessor(object):
                     self.temporaries.add(morph)
                     concatenated = []
                 if len(concatenated) == 0 and len(tmp) > 0:
-                    alternatives.append(tmp)
+                    alternatives.append(AnalysisAlternative(tmp, 0))
 
             if len(alternatives) == 0:
                 return analysis
 
             # Add penalties for number of remaining nonmorphemes
             with_penalties = []
-            for analysis in alternatives:
-                penalty = 0
+            for (analysis, penalty) in alternatives:
                 for cmorph in analysis:
                     if (cmorph.category == 'ZZZ' and
                             cmorph.morph not in self.model.forcesplit):
@@ -185,6 +208,19 @@ class HeuristicPostprocessor(object):
         if len(analysis) > (i + 2):
             out.extend(analysis[(i + 2):])
         return out
+
+    def _accept_join(self, joiner, target):
+        if joiner.category != 'ZZZ':
+            # Only nonmorphemes can be joined
+            return False
+        if target.category == 'ZZZ':
+            # Both parts are nonmorphemes: can join regardless of length
+            return True
+        if target.category == 'STM' and len(target) <= self.max_join_stem_len:
+            # Can join to short enough stems
+            return True
+        # Otherwise don't accept join
+        return False
 
 
 class MorphContextBuilder(object):
@@ -260,7 +296,7 @@ class MorphUsageProperties(object):
         self._contexts = Sparse(default=MorphContext(0, 1.0, 1.0))
         self._context_builders = collections.defaultdict(MorphContextBuilder)
 
-        self._contexts_per_iter = 50000 # FIXME customizable
+        self._contexts_per_iter = 50000  # FIXME customizable
 
         # Cache for memoized feature-based conditional class probabilities
         self._condprob_cache = collections.defaultdict(float)

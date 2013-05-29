@@ -7,6 +7,13 @@ import resource     # FIXME remove this dependency?
 
 _logger = logging.getLogger(__name__)
 
+PY3 = sys.version_info.major == 3
+
+# Log probability of an impossible event approximated by a large number.
+# Sometimes several levels of impossibility are needed:
+# A programmatically legal event deemed impossible by the model should
+# use LOGPROB_ZERO, while a state that is illegal for the program must
+# use a value that is higher than LOGPROB_ZERO.
 LOGPROB_ZERO = 1000000
 
 # Progress bar for generators (length unknown):
@@ -192,3 +199,13 @@ def _nt_zeros(constructor, zero=0):
 def memlog(location):
     _logger.info('Mem usage at "{}": {}'.format(location,
         resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
+
+
+if PY3:
+    from sys import intern as _real_intern
+else:
+    _real_intern = intern
+
+
+def intern(value):
+    _real_intern(value)

@@ -28,6 +28,7 @@ class IterationStatistics(object):
         self.costs = []
         self.corpuscosts = []
         self.lexiconcosts = []
+        self.penaltyfree = []
         self.tag_counts = []
         self.morph_types = []
         self.morph_tokens = []
@@ -67,10 +68,11 @@ class IterationStatistics(object):
         self.epoch_numbers.append(epoch_number)
 
         self.costs.append(model.get_cost())
-        self.corpuscosts.append(model._corpus_coding.get_cost() /
-                                model._corpus_coding.weight)
-        self.lexiconcosts.append(model._lexicon_coding.get_cost() /
-                                 model._lexicon_coding.weight)
+        ccc = model._corpus_coding.get_cost()
+        lcc = model._lexicon_coding.get_cost()
+        self.corpuscosts.append(ccc / model._corpus_coding.weight)
+        self.lexiconcosts.append(lcc / model._lexicon_coding.weight)
+        self.penaltyfree.append(ccc + lcc)
         tcounts = self._extract_tag_counts(model)
         self.tag_counts.append(tcounts)
         self.morph_types.append(len(model._morph_usage.seen_morphs()))
@@ -150,10 +152,11 @@ class IterationStatisticsPlotter(object):
         plt.plot([sum(x) for x in zip(self.stats.corpuscosts,
                                       self.stats.lexiconcosts)],
                  color='black')
+        plt.plot(self.stats.penaltyfree, color='orange')
         self._iteration_grid()
         plt.xlabel('Epoch number')
         plt.ylabel('Unweighted base cost (no penalties)')
-        plt.legend(['Corpus', 'Lexicon (approx)', 'Sum'])
+        plt.legend(['Corpus', 'Lexicon (approx)', 'Sum', 'Penaltyfree'])
         self._title()
 
     def tag_counts(self):

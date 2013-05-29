@@ -850,6 +850,8 @@ def catmap_main(args):
             # Starting from a baseline model
             model.initialize_baseline()
             do_train = True
+        else:
+            model._reestimate_probabilities()
         model.initialize_probabilities(
             min_difference_proportion=args.min_diff_prop)
     elif len(args.baselinefiles) > 0 or len(args.loadsegfiles) > 0:

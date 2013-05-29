@@ -3,7 +3,7 @@ import collections
 import logging
 import math
 
-from .utils import Sparse
+from .utils import Sparse, memlog
 
 _logger = logging.getLogger(__name__)
 
@@ -303,8 +303,6 @@ class MorphUsageProperties(object):
         self._marginalizer = None
 
     def calculate_usage_features(self, seg_func):
-        import resource     # FIXME
-        foo = 0             # FIXME
         self._clear()
         count_sum = 0
         while True:
@@ -314,10 +312,6 @@ class MorphUsageProperties(object):
             conserving_memory = False
             for rcount, segments in seg_func():
                 count_sum += rcount
-                if (foo % 1000) == 0:
-                    _logger.info('Mem usage at {}: {}'.format(foo,
-                    resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
-                foo += 1
 
                 if self.use_word_tokens:
                     pcount = rcount
@@ -332,7 +326,10 @@ class MorphUsageProperties(object):
                                             i, segments):
                         conserving_memory = True
 
-            _logger.info('Ready to compress, conserving_memory = {}'.format(conserving_memory)) # FIXME
+            memlog('before compress')
+            _logger.info('Ready to compress, conserving_memory = {}'.format(
+                conserving_memory))     # FIXME
+            memlog('after compress')
             self._compress_contexts()
 
             if not conserving_memory:

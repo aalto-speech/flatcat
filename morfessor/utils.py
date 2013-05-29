@@ -2,16 +2,17 @@ import logging
 import math
 import sys
 import types
+import resource     # FIXME remove this dependency?
 
+
+_logger = logging.getLogger(__name__)
 
 LOGPROB_ZERO = 1000000
-
 
 # Progress bar for generators (length unknown):
 # Print a dot for every GENERATOR_DOT_FREQ:th dot.
 # Set to <= 0 to disable progress bar.
 GENERATOR_DOT_FREQ = 500
-
 
 show_progress_bar = True
 
@@ -186,3 +187,8 @@ def _nt_zeros(constructor, zero=0):
     without needing to know the number of fields."""
     zeros = [zero] * len(constructor._fields)
     return constructor(*zeros)
+
+
+def memlog(location):
+    _logger.info('Mem usage at "{}": {}'.format(location,
+        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))

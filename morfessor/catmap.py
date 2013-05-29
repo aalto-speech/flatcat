@@ -22,7 +22,7 @@ from .categorizationscheme import MorphUsageProperties, WORD_BOUNDARY
 from .categorizationscheme import ByCategory, get_categories, CategorizedMorph
 from .exception import InvalidOperationError
 from .utils import Sparse, LOGPROB_ZERO, ngrams, minargmin, zlog
-from .utils import _generator_progress, _nt_zeros
+from .utils import _generator_progress, _nt_zeros, memlog
 
 PY3 = sys.version_info.major == 3
 
@@ -172,6 +172,7 @@ class CatmapModel(object):
             for morph in self.detag_word(segmentation.analysis):
                 self.morph_backlinks[morph].add(i)
             i += 1
+        memlog('After adding corpus data')
 
     def initialize_baseline(self):
         """Initialize the model using a previously added
@@ -180,11 +181,17 @@ class CatmapModel(object):
         """
 
         _logger.info('Initializing from baseline segmentation...')
+        memlog('initializing')
         self._calculate_usage_features()
+        memlog('after usage features')
         self._unigram_transition_probs()
+        memlog('after unigram transition')
         self.viterbi_tag_corpus()
+        memlog('after tagging')
         self._calculate_transition_counts()
+        memlog('after real transitiins')
         self._calculate_emission_counts()
+        memlog('after emissions')
 
     def initialize_probabilities(self, min_difference_proportion=0.005):
         """Initialize emission and transition probabilities without
@@ -195,16 +202,16 @@ class CatmapModel(object):
             self._calculate_transition_counts()
             self._calculate_emission_counts()
 
-        self._reestimate_probabilities()
         self.convergence_of_analysis(
             reestimate_with_unchanged_segmentation,
             self.viterbi_tag_corpus,
             min_difference_proportion=min_difference_proportion,
             min_cost_gain=-10.0)     # Cost gain will be ~zero.
-        self._reestimate_probabilities()
 
         for callback in self.epoch_callbacks:
             callback(self)
+
+        if self._iteration_number = 1:
 
     def set_development_annotations(self, annotations, heuristic=None):
         if heuristic is None:
@@ -237,7 +244,7 @@ class CatmapModel(object):
         if self._iteration_number == 0:
             # Zero:th pre-iteration: let probabilities converge
             self.initialize_probabilities(min_difference_proportion)
-            self._iteration_update()
+        self._iteration_update()
 
         self.convergence_of_cost(
             self._train_iteration,
@@ -272,6 +279,7 @@ class CatmapModel(object):
                     self._iteration_number, self._operation_number,
                     self.training_operations[self._operation_number],
                     max_epochs))
+            memlog('see above')
             self.convergence_of_cost(
                 lambda: self._transformation_epoch(operation()),
                 update_func=update_func,
@@ -293,6 +301,7 @@ class CatmapModel(object):
                     force_another = True
             for callback in self.operation_callbacks:
                 callback(self)
+        memlog('after iteration update')
 
         self._operation_number = 0
         self._iteration_number += 1
@@ -342,17 +351,21 @@ class CatmapModel(object):
             cost = self.get_cost()
             cost_diff = cost - previous_cost
 
+            if iteration_name == 'epoch':
+                for callback in self.epoch_callbacks:
+                    callback(self, iteration)
+
             # perform update between optimization iterations
             if update_func is not None:
                 _logger.info('{:24s} Cost: {}'.format(
                     'Before ' + iteration_name + ' update.', cost))
                 force_another = update_func()
+                if iteration_name == 'iteration':   # FIXME
+                    for callback in self.epoch_callbacks:
+                        callback(self, iteration)
+
             else:
                 force_another = False
-
-            if iteration_name == 'epoch':
-                for callback in self.epoch_callbacks:
-                    callback(self, iteration)
 
             limit = min_cost_gain * self._corpus_coding.boundaries
             if (not force_another) and -cost_diff <= limit:
@@ -483,15 +496,20 @@ class CatmapModel(object):
 
         theta(t) = arg min { L( theta, Y(t), D ) }
         """
+        memlog('Reestimate: top')
         self._calculate_usage_features()
+        memlog('Reestimate: after usage')
         self._calculate_transition_counts()
+        memlog('Reestimate: after transitions')
         self._calculate_emission_counts()
+        memlog('Reestimate: after emissions')
         if self._supervised:
             old_cost = self.get_cost()
             self._update_annotation_choices()
             _logger.info('Updated annotation choices, changing cost from '
                          '{} to {}'.format(old_cost, self.get_cost()))
             self._annot_coding.update_weight()
+        memlog('Reestimate: bottom')
 
     def _calculate_usage_features(self):
         """Recalculates the morph usage features (perplexities).

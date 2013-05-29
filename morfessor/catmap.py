@@ -1773,12 +1773,12 @@ class CatmapEncoding(baseline.CorpusEncoding):
         self.tokens = 0
         self.logtokensum = 0.0
         self._emission_counts.clear()
-        self._log_emissionprob_cache.clear()
+        self._log_emissionprob_cache = dict()
 
     def clear_emission_cache(self):
         """Clears the cache for emission probability values.
         Use if an incremental change invalidates cached values."""
-        self._log_emissionprob_cache.clear()
+        self._log_emissionprob_cache = dict()
 
     # General methods
 

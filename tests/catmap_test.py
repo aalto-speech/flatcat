@@ -443,7 +443,6 @@ class TestModelConsistency(unittest.TestCase):
         self._compare_to_stored_state(state_exact, state_approx)
 
         # sanity check: costs should never be negative
-        print(old_cost, mid_cost, new_cost)
         self.assertTrue(old_cost >= 0)
         self.assertTrue(mid_cost >= 0)
         self.assertTrue(new_cost >= 0)

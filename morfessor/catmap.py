@@ -18,11 +18,11 @@ import sys
 import time
 
 from . import baseline
+from . import utils
 from .categorizationscheme import MorphUsageProperties, WORD_BOUNDARY
 from .categorizationscheme import ByCategory, get_categories, CategorizedMorph
 from .exception import InvalidOperationError
-from .utils import Sparse, LOGPROB_ZERO, ngrams, minargmin, zlog
-from .utils import _generator_progress, _nt_zeros, memlog
+from .utils import LOGPROB_ZERO, zlog
 
 PY3 = sys.version_info.major == 3
 
@@ -172,7 +172,7 @@ class CatmapModel(object):
             for morph in self.detag_word(segmentation.analysis):
                 self.morph_backlinks[morph].add(i)
             i += 1
-        memlog('After adding corpus data')
+        utils.memlog('After adding corpus data')
 
     def initialize_baseline(self):
         """Initialize the model using a previously added
@@ -180,18 +180,17 @@ class CatmapModel(object):
         baseline model.
         """
 
-        _logger.info('Initializing from baseline segmentation...')
-        memlog('initializing')
+        utils.memlog('initializing')
         self._calculate_usage_features()
-        memlog('after usage features')
+        utils.memlog('after usage features')
         self._unigram_transition_probs()
-        memlog('after unigram transition')
+        utils.memlog('after unigram transition')
         self.viterbi_tag_corpus()
-        memlog('after tagging')
+        utils.memlog('after tagging')
         self._calculate_transition_counts()
-        memlog('after real transitiins')
+        utils.memlog('after real transitiins')
         self._calculate_emission_counts()
-        memlog('after emissions')
+        utils.memlog('after emissions')
 
     def initialize_probabilities(self, min_difference_proportion=0.005):
         """Initialize emission and transition probabilities without
@@ -211,7 +210,7 @@ class CatmapModel(object):
         for callback in self.epoch_callbacks:
             callback(self)
 
-        if self._iteration_number = 1:
+        self._iteration_number = 1
 
     def set_development_annotations(self, annotations, heuristic=None):
         if heuristic is None:
@@ -279,7 +278,7 @@ class CatmapModel(object):
                     self._iteration_number, self._operation_number,
                     self.training_operations[self._operation_number],
                     max_epochs))
-            memlog('see above')
+            utils.memlog('see above')
             self.convergence_of_cost(
                 lambda: self._transformation_epoch(operation()),
                 update_func=update_func,
@@ -301,7 +300,7 @@ class CatmapModel(object):
                     force_another = True
             for callback in self.operation_callbacks:
                 callback(self)
-        memlog('after iteration update')
+        utils.memlog('after iteration update')
 
         self._operation_number = 0
         self._iteration_number += 1
@@ -496,20 +495,20 @@ class CatmapModel(object):
 
         theta(t) = arg min { L( theta, Y(t), D ) }
         """
-        memlog('Reestimate: top')
+        utils.memlog('Reestimate: top')
         self._calculate_usage_features()
-        memlog('Reestimate: after usage')
+        utils.memlog('Reestimate: after usage')
         self._calculate_transition_counts()
-        memlog('Reestimate: after transitions')
+        utils.memlog('Reestimate: after transitions')
         self._calculate_emission_counts()
-        memlog('Reestimate: after emissions')
+        utils.memlog('Reestimate: after emissions')
         if self._supervised:
             old_cost = self.get_cost()
             self._update_annotation_choices()
             _logger.info('Updated annotation choices, changing cost from '
                          '{} to {}'.format(old_cost, self.get_cost()))
             self._annot_coding.update_weight()
-        memlog('Reestimate: bottom')
+        utils.memlog('Reestimate: bottom')
 
     def _calculate_usage_features(self):
         """Recalculates the morph usage features (perplexities).
@@ -573,7 +572,7 @@ class CatmapModel(object):
             # Include word boundaries
             categories.insert(0, WORD_BOUNDARY)
             categories.append(WORD_BOUNDARY)
-            for (prev_cat, next_cat) in ngrams(categories, 2):
+            for (prev_cat, next_cat) in utils.ngrams(categories, 2):
                 pair = (prev_cat, next_cat)
                 if pair in MorphUsageProperties.zero_transitions:
                     _logger.warning('Impossible transition ' +
@@ -656,7 +655,7 @@ class CatmapModel(object):
                                                          'transform',
                                                          'targets'])
         self._changed_segmentations_op = set()  # FIXME
-        for experiment in _generator_progress(transformation_generator):
+        for experiment in utils._generator_progress(transformation_generator):
             (transform_group, targets, temporaries) = experiment
             if len(transform_group) == 0:
                 continue
@@ -764,7 +763,7 @@ class CatmapModel(object):
         bigram_freqs = collections.Counter()
         for (count, segments) in self.segmentations:
             segments = _wb_wrap(segments)
-            for quad in ngrams(segments, n=4):
+            for quad in utils.ngrams(segments, n=4):
                 prev_morph, prefix, suffix, next_morph = quad
                 if (prefix.morph in self.forcesplit or
                     suffix.morph in self.forcesplit):
@@ -946,7 +945,7 @@ class CatmapModel(object):
                                 self._corpus_coding.transit_emit_cost(
                                     categories[prev_cat],
                                     categories[next_cat], morph))
-                best.append(ViterbiNode(*minargmin(cost)))
+                best.append(ViterbiNode(*utils.minargmin(cost)))
                 cost = []
             # Update grid to prepare for next iteration
             grid.append(best)
@@ -958,7 +957,7 @@ class CatmapModel(object):
             cost = (grid[-1][prev_cat].cost +
                     self._corpus_coding.log_transitionprob(*pair))
             best.append(cost)
-        backtrace = ViterbiNode(*minargmin(best))
+        backtrace = ViterbiNode(*utils.minargmin(best))
 
         # Backtrace for the best category sequence
         result = [CategorizedMorph(segments[-1],
@@ -1174,7 +1173,7 @@ class CatmapModel(object):
             new_detagged = self.detag_word(new_active)
             for morph in new_detagged:
                 constructions_add[morph] += 1
-            for (prefix, suffix) in ngrams(new_detagged, n=2):
+            for (prefix, suffix) in utils.ngrams(new_detagged, n=2):
                 blacklist.add(prefix + suffix)
 
         for (morph, count) in constructions_rm.items():
@@ -1249,7 +1248,7 @@ class CatmapModel(object):
         """Returns breakdown of costs for the given tagged segmentation."""
         wrapped = _wb_wrap(segmentation)
         breakdown = CostBreakdown()
-        for (prefix, suffix) in ngrams(wrapped, n=2):
+        for (prefix, suffix) in utils.ngrams(wrapped, n=2):
             cost = self._corpus_coding.log_transitionprob(prefix.category,
                                                           suffix.category)
             breakdown.transition(cost, prefix.category, suffix.category)
@@ -1389,7 +1388,7 @@ class ChangeCounts(object):
                 elif count > 0:
                     self.backlinks_add[cmorph.morph].add(corpus_index)
         wb_extended = _wb_wrap(analysis)
-        for (prefix, suffix) in ngrams(wb_extended, n=2):
+        for (prefix, suffix) in utils.ngrams(wb_extended, n=2):
             self.transitions[(prefix.category, suffix.category)] += count
         # Make sure that backlinks_remove and backlinks_add are disjoint
         # Removal followed by readding is the same as just adding
@@ -1620,7 +1619,8 @@ class CatmapEncoding(baseline.CorpusEncoding):
 
         # Counts of emissions observed in the tagged corpus.
         # A dict of ByCategory objects indexed by morph. Counts occurences.
-        self._emission_counts = Sparse(default=_nt_zeros(ByCategory))
+        self._emission_counts = utils.Sparse(
+            default=utils._nt_zeros(ByCategory))
 
         # Counts of transitions between categories.
         # P(Category -> Category) can be calculated from these.

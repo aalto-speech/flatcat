@@ -3,7 +3,7 @@ import collections
 import logging
 import math
 
-from .utils import Sparse, memlog
+from . import utils
 
 _logger = logging.getLogger(__name__)
 
@@ -293,7 +293,7 @@ class MorphUsageProperties(object):
             self._ppl_slope = 10.0 / self._ppl_threshold
 
         # Counts of different contexts in which a morph occurs
-        self._contexts = Sparse(default=MorphContext(0, 1.0, 1.0))
+        self._contexts = utils.Sparse(default=MorphContext(0, 1.0, 1.0))
         self._context_builders = collections.defaultdict(MorphContextBuilder)
 
         self._contexts_per_iter = 50000  # FIXME customizable
@@ -326,10 +326,10 @@ class MorphUsageProperties(object):
                                             i, segments):
                         conserving_memory = True
 
-            memlog('before compress')
+            utils.memlog('before compress')
             _logger.info('Ready to compress, conserving_memory = {}'.format(
                 conserving_memory))     # FIXME
-            memlog('after compress')
+            utils.memlog('after compress')
             self._compress_contexts()
 
             if not conserving_memory:

@@ -848,6 +848,7 @@ def catmap_main(args):
         # Need to (re)estimate the probabilities
         if len(args.loadsegfiles) == 0:
             # Starting from a baseline model
+            _logger.info('Initializing from baseline segmentation...')
             model.initialize_baseline()
             do_train = True
         else:

@@ -699,11 +699,9 @@ class CatmapModel(object):
             else:
                 # A real change was the best option
                 best.transform.reset_counts()
-                best.transform.intern()
                 for target in best.targets:
                     for morph in self.detag_word(best.transform.result):
                         # Add the new representation to morph counts
-                        morph = utils.intern(morph)
                         self._modify_morph_count(morph, num_matches)
                     new_analysis = best.transform.apply(
                                         self.segmentations[target],
@@ -1062,7 +1060,6 @@ class CatmapModel(object):
                                     categories[next_cat],
                                     morph))
                             if cost <= best.cost:
-                                morph = utils.intern(morph)
                                 best = ViterbiNode(cost, ((prev_len, prev_cat),
                                     CategorizedMorph(morph,
                                                      categories[next_cat])))
@@ -1417,14 +1414,6 @@ class Transformation(object):
     def __repr__(self):
         return '{}({}, {})'.format(self.__class__.__name__,
                                    self.rule, self.result)
-
-    def intern():
-        """Interns the morphs in the result of this transformation."""
-        for cmorph in self.result:
-            # Technically violates immutability of CategorizedMorph,
-            # but this is acceptable because the object is replaced with
-            # something identical except for memory location.
-            cmorph.morph = utils.intern(cmorph.morph)
 
     def apply(self, word, model, corpus_index=None):
         """Tries to apply this transformation to an analysis.

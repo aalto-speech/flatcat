@@ -39,6 +39,8 @@ WORD_BOUNDARY = WordBoundary()
 ByCategory = collections.namedtuple('ByCategory',
                                     ['PRE', 'STM', 'SUF', 'ZZZ'])
 
+DEFAULT_CATEGORY = 'STM'
+
 
 # The morph usage/context features used to calculate the probability of a
 # morph belonging to a category.

@@ -21,6 +21,7 @@ from . import baseline
 from . import utils
 from .categorizationscheme import MorphUsageProperties, WORD_BOUNDARY
 from .categorizationscheme import ByCategory, get_categories, CategorizedMorph
+from .categorizationscheme import DEFAULT_CATEGORY
 from .exception import InvalidOperationError
 from .utils import LOGPROB_ZERO, zlog
 
@@ -1188,7 +1189,7 @@ class CatmapModel(object):
         if best.cost >= LOGPROB_ZERO:
             #_logger.warning(
             #    'No possible segmentation for word {}'.format(word))
-            return [CategorizedMorph(word, None)], LOGPROB_ZERO
+            return [CategorizedMorph(word, DEFAULT_CATEGORY)], LOGPROB_ZERO
 
         # Backtrace for the best morph-category sequence
         result = []

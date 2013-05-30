@@ -469,7 +469,7 @@ class TestModelConsistency(unittest.TestCase):
 
     def _presplit(self):
         self.model.viterbi_tag_corpus()
-        self.model._reestimate_probabilities()
+        self.model.reestimate_probabilities()
 
     def _initial_state_asserts(self):
         category_totals = self.model._morph_usage.category_token_count

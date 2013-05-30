@@ -146,8 +146,8 @@ class CatmapModel(object):
         If the added data is untagged, you must call viterbi_tag_corpus
         to tag the new data.
 
-        You should also call initialize_probabilities or
-        _reestimate_probabilities.
+        You should also call reestimate_probabilities and consider
+        calling initialize_hmm.
 
         Arguments:
             segmentations -- Segmentations of format:
@@ -192,7 +192,7 @@ class CatmapModel(object):
         self._calculate_emission_counts()
         utils.memlog('after emissions')
 
-    def initialize_probabilities(self, min_difference_proportion=0.005):
+    def initialize_hmm(self, min_difference_proportion=0.005):
         """Initialize emission and transition probabilities without
         changing the segmentation, using Viterbi EM.
         """
@@ -242,8 +242,9 @@ class CatmapModel(object):
 
         if self._iteration_number == 0:
             # Zero:th pre-iteration: let probabilities converge
-            self.initialize_probabilities(min_difference_proportion)
+            self.initialize_hmm(min_difference_proportion)
         self._iteration_update()
+        self._iteration_number = 1
 
         self.convergence_of_cost(
             self._train_iteration,
@@ -269,7 +270,7 @@ class CatmapModel(object):
             min_epoch_cost_gain = self._training_params('min_epoch_cost_gain')
             max_epochs = self._training_params('max_epochs')
             if self._training_params('must_reestimate'):
-                update_func = self._reestimate_probabilities
+                update_func = self.reestimate_probabilities
             else:
                 update_func = None
 
@@ -285,7 +286,7 @@ class CatmapModel(object):
                 min_cost_gain=min_epoch_cost_gain,
                 max_iterations=max_epochs,
                 iteration_name='epoch')
-            self._reestimate_probabilities()
+            self.reestimate_probabilities()
             self._operation_number += 1
             for callback in self.operation_callbacks:
                 callback(self)
@@ -293,14 +294,24 @@ class CatmapModel(object):
     def _iteration_update(self):
         force_another = False
         if self._corpus_weight_updater is not None:
+            # FIXME replace with probe weight learning
             i = max(self._iteration_number, 1.0)
             if self._corpus_weight_updater.update_model(i):
-                self._reestimate_probabilities()
                 if self._iteration_number < self._max_iterations:
                     force_another = True
             for callback in self.operation_callbacks:
                 callback(self)
-        utils.memlog('after iteration update')
+        utils.memlog('after corpus weight update')
+
+        if self._supervised:
+            old_cost = self.get_cost()
+            self._update_annotation_choices()
+            new_cost = self.get_cost()
+            if old_cost != new_cost:
+                _logger.info('Updated annotation choices, changing cost from '
+                            '{} to {}'.format(old_cost, new_cost))
+            self._annot_coding.update_weight()
+            utils.memlog('after annotation choice update')
 
         self._operation_number = 0
         self._iteration_number += 1
@@ -359,10 +370,6 @@ class CatmapModel(object):
                 _logger.info('{:24s} Cost: {}'.format(
                     'Before ' + iteration_name + ' update.', cost))
                 force_another = update_func()
-                if iteration_name == 'iteration':   # FIXME
-                    for callback in self.epoch_callbacks:
-                        callback(self, iteration)
-
             else:
                 force_another = False
 
@@ -490,7 +497,7 @@ class CatmapModel(object):
             return (self.training_operations[self._operation_number] ==
                     'resegment')
 
-    def _reestimate_probabilities(self):
+    def reestimate_probabilities(self):
         """Re-estimates model parameters from a segmented, tagged corpus.
 
         theta(t) = arg min { L( theta, Y(t), D ) }
@@ -502,13 +509,6 @@ class CatmapModel(object):
         utils.memlog('Reestimate: after transitions')
         self._calculate_emission_counts()
         utils.memlog('Reestimate: after emissions')
-        if self._supervised:
-            old_cost = self.get_cost()
-            self._update_annotation_choices()
-            _logger.info('Updated annotation choices, changing cost from '
-                         '{} to {}'.format(old_cost, self.get_cost()))
-            self._annot_coding.update_weight()
-        utils.memlog('Reestimate: bottom')
 
     def _calculate_usage_features(self):
         """Recalculates the morph usage features (perplexities).
@@ -1104,7 +1104,7 @@ class CatmapModel(object):
                 self.viterbi_segment(word.analysis)[0])
             if word != self.segmentations[i]:
                 num_changed_words += 1
-        self._reestimate_probabilities()
+        self.reestimate_probabilities()
         self._calculate_morph_backlinks()
         return num_changed_words
 

@@ -793,9 +793,11 @@ def catmap_main(args):
                   category_separator=args.catseparator)
 
     # Load exisiting model or create a new one
+    model_initialized = False
     training_ops = args.training_operations.split(',')
     if args.loadfile is not None:
         model = io.read_binary_model_file(args.loadfile)
+        model_initialized = True
     else:
         m_usage = MorphUsageProperties(
             ppl_threshold=args.ppl_threshold,
@@ -807,7 +809,34 @@ def catmap_main(args):
         model = CatmapModel(m_usage, forcesplit=args.forcesplit,
                             corpusweight=args.corpusweight)
 
-    for f in args.baselinefiles + args.loadsegfiles:
+    # Set up statistics logging
+    stats = None
+    if args.stats_file is not None:
+        stats = IterationStatistics()
+        model.epoch_callbacks.append(stats.callback)
+        stats.set_names(model, training_ops)
+
+        if args.statsannotfile is not None:
+            stats.set_gold_standard(
+                io.read_annotations_file(args.statsannotfile,
+                    analysis_sep=args.analysisseparator))
+
+    # Load data
+    for f in args.loadsegfiles:
+        _logger.info('Calling model.add_corpus_data')
+        model.add_corpus_data(io.read_segmentation_file(f),
+                              count_modifier=dampfunc,
+                              freqthreshold=args.freqthreshold)
+        _logger.info('Done with model.add_corpus_data')
+    if (not model_initialized and
+            len(args.loadsegfiles) > 0 and
+            len(args.baselinefiles) > 0):
+        # Starting from both tagged and untagged segmentation files,
+        # but no trained model: have to initialize from the tagging.
+        model.reestimate_probabilities()
+        model.initialize_hmm(min_difference_proportion=args.min_diff_prop)
+        model_initialized = True
+    for f in args.baselinefiles:
         _logger.info('Calling model.add_corpus_data')
         model.add_corpus_data(io.read_segmentation_file(f),
                               count_modifier=dampfunc,
@@ -828,21 +857,9 @@ def catmap_main(args):
     else:
         develannots = None
 
-    # Set up statistics logging
-    stats = None
-    if args.stats_file is not None:
-        stats = IterationStatistics()
-        model.epoch_callbacks.append(stats.callback)
-        stats.set_names(model, training_ops)
-
-        if args.statsannotfile is not None:
-            stats.set_gold_standard(
-                io.read_annotations_file(args.statsannotfile,
-                    analysis_sep=args.analysisseparator))
-
-    # Load data
+    # Initialize the model
     do_train = False
-    if args.loadfile is None:
+    if not model_initialized:
         # Starting from segmentations instead of pickle,
         model.training_operations = training_ops
         # Need to (re)estimate the probabilities
@@ -852,15 +869,12 @@ def catmap_main(args):
             model.initialize_baseline()
             do_train = True
         else:
-            model._reestimate_probabilities()
-        model.initialize_probabilities(
-            min_difference_proportion=args.min_diff_prop)
+            model.reestimate_probabilities()
+        model.initialize_hmm(min_difference_proportion=args.min_diff_prop)
     elif len(args.baselinefiles) > 0 or len(args.loadsegfiles) > 0:
-        # Extending pickled model with new data
+        # Extending initialized model with new data
         model.viterbi_tag_corpus()
-        model.initialize_probabilities(
-            min_difference_proportion=args.min_diff_prop)
-        model.viterbi_tag_corpus()
+        model.initialize_hmm(min_difference_proportion=args.min_diff_prop)
         do_train = True
 
     # Heuristic nonmorpheme removal

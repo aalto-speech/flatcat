@@ -340,9 +340,9 @@ class MorphUsageProperties(object):
     def _clear(self):
         """Resets the context variables.
         Use before fully reprocessing a segmented corpus."""
-        self._contexts = utils.Sparse(default=MorphContext(0, 1.0, 1.0))
-        self._context_builders = collections.defaultdict(MorphContextBuilder)
-        self._condprob_cache = collections.defaultdict(float)
+        self._contexts.clear()
+        self._context_builders.clear()
+        self._condprob_cache.clear()
         self._marginalizer = None
 
     def _add_to_context(self, morph, pcount, rcount, i, segments):

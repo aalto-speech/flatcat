@@ -546,6 +546,11 @@ Simple usage examples (training and testing):
     # Options for training and segmentation
     add_arg = parser.add_argument_group(
         'training and segmentation options').add_argument
+    add_arg('-m', '--mode', dest="trainmode", default='batch',
+            metavar='<mode>',
+            choices=['none', 'batch', 'online', 'online+batch'],
+            help="training mode ('none', 'batch', "
+                 "'online', or 'online+batch'; default '%(default)s')")
     add_arg('-p', '--perplexity-threshold', dest='ppl_threshold', type=float,
             default=100., metavar='<float>',
             help='threshold value for sigmoid used to calculate ' +
@@ -601,6 +606,16 @@ Simple usage examples (training and testing):
     add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
             metavar='<int>',
             help="compound frequency threshold (default %(default)s).")
+    add_arg('--max-shift-distance', dest='max_shift_distance',
+            type=int, default=2, metavar='<int>',
+            help='Maximum number of letters that the break between morphs ' +
+                 'can move in the shift operation. ' +
+                 '(default %(default)s).')
+    add_arg('--min-shift-remainder', dest='min_shift_remainder',
+            type=int, default=2, metavar='<int>',
+            help='Minimum number of letters remaining in the shorter morph ' +
+                 'after a shift operation. ' +
+                 '(default %(default)s).')
 #     add_arg('--viterbi-smoothing', dest="viterbismooth", default=0,
 #             type=float, metavar='<float>',
 #             help="additive smoothing parameter for Viterbi "
@@ -654,16 +669,6 @@ Simple usage examples (training and testing):
                  'The format of the list is a string of (unquoted) ' +
                  'operation names separated by single commas (no space). ' +
                  "(default '%(default)s').")
-    add_arg('--max-shift-distance', dest='max_shift_distance',
-            type=int, default=2, metavar='<int>',
-            help='Maximum number of letters that the break between morphs ' +
-                 'can move in the shift operation. ' +
-                 '(default %(default)s).')
-    add_arg('--min-shift-remainder', dest='min_shift_remainder',
-            type=int, default=2, metavar='<int>',
-            help='Minimum number of letters remaining in the shorter morph ' +
-                 'after a shift operation. ' +
-                 '(default %(default)s).')
 
     # Options for semi-supervised model training
     add_arg = parser.add_argument_group(
@@ -858,7 +863,7 @@ def catmap_main(args):
         develannots = None
 
     # Initialize the model
-    do_train = False
+    must_train = False
     if not model_initialized:
         # Starting from segmentations instead of pickle,
         model.training_operations = training_ops
@@ -867,7 +872,7 @@ def catmap_main(args):
             # Starting from a baseline model
             _logger.info('Initializing from baseline segmentation...')
             model.initialize_baseline()
-            do_train = True
+            must_train = True
         else:
             model.reestimate_probabilities()
         model.initialize_hmm(min_difference_proportion=args.min_diff_prop)
@@ -875,7 +880,7 @@ def catmap_main(args):
         # Extending initialized model with new data
         model.viterbi_tag_corpus()
         model.initialize_hmm(min_difference_proportion=args.min_diff_prop)
-        do_train = True
+        must_train = True
 
     # Heuristic nonmorpheme removal
     heuristic = None
@@ -884,22 +889,33 @@ def catmap_main(args):
         heuristic = HeuristicPostprocessor(model,
                                            operations=heuristic_ops)
 
-    # Train model, if there is new data to train on
-    if do_train:
-        if develannots is not None:
-            model.set_development_annotations(develannots,
-                                              heuristic=heuristic)
+    if develannots is not None:
+        model.set_development_annotations(develannots,
+                                            heuristic=heuristic)
 
+    # Train model, if there is new data to train on
+    if args.trainmode == 'none':
+        if must_train and len(args.testfiles) > 0:
+            raise ArgumentException('Must train before using a model '
+                'for segmenting, if new data is added.')
+        # pass
+    if args.trainmode in ('online', 'online+batch'):
+        # Always reads from stdin
+        data = io.read_corpus_files('-')
+        model.train_online(data, count_modifier=dampfunc,
+                           epoch_interval=10000, max_epochs=args.max_epochs)
+                           # FIXME epoch interval as param
+    if args.trainmode in ('batch', 'online+batch'):
         ts = time.time()
-        model.train(min_epoch_cost_gain=args.min_epoch_cost_gain,
-                    min_iter_cost_gain=args.min_iter_cost_gain,
-                    min_difference_proportion=args.min_diff_prop,
-                    max_iterations=args.max_iterations,
-                    max_epochs_first=args.max_epochs_first,
-                    max_epochs=args.max_epochs,
-                    max_resegment_epochs=args.max_resegment_epochs,
-                    max_shift_distance=args.max_shift_distance,
-                    min_shift_remainder=args.min_shift_remainder)
+        model.train_batch(min_epoch_cost_gain=args.min_epoch_cost_gain,
+                          min_iter_cost_gain=args.min_iter_cost_gain,
+                          min_difference_proportion=args.min_diff_prop,
+                          max_iterations=args.max_iterations,
+                          max_epochs_first=args.max_epochs_first,
+                          max_epochs=args.max_epochs,
+                          max_resegment_epochs=args.max_resegment_epochs,
+                          max_shift_distance=args.max_shift_distance,
+                          min_shift_remainder=args.min_shift_remainder)
         _logger.info('Final cost: {}'.format(model.get_cost()))
         te = time.time()
         _logger.info('Training time: {:.3f}s'.format(te - ts))

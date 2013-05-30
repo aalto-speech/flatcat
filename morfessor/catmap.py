@@ -136,6 +136,7 @@ class CatmapModel(object):
         self._annotations_tagged = False
 
         # Variables for online learning
+        self._online = False
         self.training_corpus_filter = None
 
         self._cost_field_width = 9
@@ -223,12 +224,12 @@ class CatmapModel(object):
         self._corpus_weight_updater = CatmapAnnotationsModelUpdate(
             annotations, self, heuristic_func)
 
-    def train(self, min_epoch_cost_gain=0.0025, min_iter_cost_gain=0.005,
-              min_difference_proportion=0.005,
-              max_iterations=15, max_epochs_first=1, max_epochs=1,
-              max_resegment_epochs=1,
-              max_shift_distance=2,
-              min_shift_remainder=2):
+    def train_batch(self, min_epoch_cost_gain=0.0025, min_iter_cost_gain=0.005,
+                    min_difference_proportion=0.005,
+                    max_iterations=15, max_epochs_first=1, max_epochs=1,
+                    max_resegment_epochs=1,
+                    max_shift_distance=2,
+                    min_shift_remainder=2):
         """Perform Cat-MAP training on the model.
         The model must have been initialized, either by loading a baseline
         segmentation or a pretrained catmap model from pickle or tagged
@@ -242,6 +243,7 @@ class CatmapModel(object):
         self._max_resegment_epochs = max_resegment_epochs
         self._max_shift = max_shift_distance
         self._min_shift_remainder = min_shift_remainder
+        self._online = False
 
         if self._iteration_number == 0:
             # Zero:th pre-iteration: let probabilities converge
@@ -260,6 +262,7 @@ class CatmapModel(object):
                      max_epochs=None):
         """Adapt the model in online fashion."""
 
+        self._online = True
         if count_modifier is not None:
             counts = {}
 
@@ -732,7 +735,10 @@ class CatmapModel(object):
                                                          'transform',
                                                          'targets'])
         self._changed_segmentations_op = set()  # FIXME
-        for experiment in utils._generator_progress(transformation_generator):
+        if not self._online:
+            transformation_generator = utils._generator_progress(
+                transformation_generator)
+        for experiment in transformation_generator:
             (transform_group, targets, temporaries) = experiment
             if len(transform_group) == 0:
                 continue

@@ -903,7 +903,7 @@ def catmap_main(args):
         # Always reads from stdin
         data = io.read_corpus_files('-')
         model.train_online(data, count_modifier=dampfunc,
-                           epoch_interval=10000, max_epochs=args.max_epochs)
+                           epoch_interval=100, max_epochs=args.max_epochs)
                            # FIXME epoch interval as param
     if args.trainmode in ('batch', 'online+batch'):
         ts = time.time()

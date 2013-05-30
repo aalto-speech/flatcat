@@ -265,6 +265,9 @@ class CatmapModel(object):
         self._online = True
         if count_modifier is not None:
             counts = {}
+        word_backlinks = {}
+        for (i, seg) in enumerate(self.segmentations):
+            word_backlinks[''.join(self.detag_word(seg.analysis))] = i
 
         _logger.info("Starting online training")
 
@@ -296,15 +299,25 @@ class CatmapModel(object):
                     addc = 1
                 segments, _ = self.viterbi_segment(w)
                 if addc > 0:
-                    self.add_corpus_data([WordAnalysis(addc, segments)])
+                    if w in word_backlinks:
+                        i_new = word_backlinks[w]
+                        self.segmentations[i_new] = WordAnalysis(
+                            self.segmentations[i_new].count + addc,
+                            self.segmentations[i_new].analysis)
+                    else:
+                        self.add_corpus_data([WordAnalysis(addc, segments)])
+                        i_new = len(self.segmentations) - 1
+                        word_backlinks[w] = i_new
+
+                    # FIXME This is crude and wasteful
                     self.reestimate_probabilities()
 
-                    i_new = len(self.segmentations) - 1
                     self.training_corpus_filter = lambda: (
                         self.segmentations[i_new],)
 
                     for i in range(len(self.training_operations)):
                         if self.training_operations[i] == 'resegment':
+                            # FIXME Need to modify resegment
                             continue
                         operation = self._resolve_operation(i)
                         self._transformation_epoch(operation())

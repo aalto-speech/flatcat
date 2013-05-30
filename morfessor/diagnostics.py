@@ -28,6 +28,7 @@ class IterationStatistics(object):
         self.costs = []
         self.corpuscosts = []
         self.lexiconcosts = []
+        self.penaltyfree = []
         self.tag_counts = []
         self.morph_types = []
         self.morph_tokens = []
@@ -67,10 +68,11 @@ class IterationStatistics(object):
         self.epoch_numbers.append(epoch_number)
 
         self.costs.append(model.get_cost())
-        self.corpuscosts.append(model._corpus_coding.get_cost() /
-                                model._corpus_coding.weight)
-        self.lexiconcosts.append(model._lexicon_coding.get_cost() /
-                                 model._lexicon_coding.weight)
+        ccc = model._corpus_coding.get_cost()
+        lcc = model._lexicon_coding.get_cost()
+        self.corpuscosts.append(ccc / model._corpus_coding.weight)
+        self.lexiconcosts.append(lcc / model._lexicon_coding.weight)
+        self.penaltyfree.append(ccc + lcc)
         tcounts = self._extract_tag_counts(model)
         self.tag_counts.append(tcounts)
         self.morph_types.append(len(model._morph_usage.seen_morphs()))
@@ -138,29 +140,30 @@ class IterationStatisticsPlotter(object):
         plt.show()
 
     def costs(self):
-        plt.plot(self.stats.costs)
+        plt.plot(self.stats.costs, marker='+')
         self._iteration_grid()
         plt.xlabel('Epoch number')
         plt.ylabel('Model cost')
         self._title()
 
     def basecosts(self):
-        plt.plot(self.stats.corpuscosts, color='red')
-        plt.plot(self.stats.lexiconcosts, color='green')
+        plt.plot(self.stats.corpuscosts, color='red', marker='+')
+        plt.plot(self.stats.lexiconcosts, color='green', marker='+')
         plt.plot([sum(x) for x in zip(self.stats.corpuscosts,
                                       self.stats.lexiconcosts)],
-                 color='black')
+                 color='black', marker='+')
+        plt.plot(self.stats.penaltyfree, color='orange', marker='+')
         self._iteration_grid()
         plt.xlabel('Epoch number')
         plt.ylabel('Unweighted base cost (no penalties)')
-        plt.legend(['Corpus', 'Lexicon (approx)', 'Sum'])
+        plt.legend(['Corpus', 'Lexicon (approx)', 'Sum', 'Penaltyfree'])
         self._title()
 
     def tag_counts(self):
         unzipped = zip(*self.stats.tag_counts)
         for (i, series) in enumerate(unzipped):
             plt.plot(series, color=plt.cm.jet(float(i) /
-                float(len(self.stats.categories))))
+                float(len(self.stats.categories))), marker='+')
         self._iteration_grid()
         plt.xlabel('Epoch number')
         plt.ylabel('Category occurence count')
@@ -171,15 +174,15 @@ class IterationStatisticsPlotter(object):
     def avg_morphs(self):
         normalized = [x / self.stats.word_tokens
                       for x in self.stats.morph_tokens]
-        plt.plot(normalized)
+        plt.plot(normalized, marker='+')
         self._iteration_grid()
         plt.xlabel('Epoch number')
         plt.ylabel('Avg number of morphs per word token')
         self._title()
 
     def types_and_tokens(self):
-        plt.plot(self.stats.morph_tokens, color="red")
-        plt.plot(self.stats.morph_types, color="blue")
+        plt.plot(self.stats.morph_tokens, color="red", marker='+')
+        plt.plot(self.stats.morph_types, color="blue", marker='+')
         plt.legend(['Tokens', 'Types'])
         self._iteration_grid()
         plt.xlabel('Epoch number')
@@ -197,7 +200,7 @@ class IterationStatisticsPlotter(object):
             by_epoch[self.stats.epoch_numbers[i]] += self.stats.durations[i]
 
         plt.subplot(2, 2, 1)
-        plt.plot(self.stats.durations)
+        plt.plot(self.stats.durations, marker='+')
         self._iteration_grid()
         plt.xlabel('Epoch number')
         plt.ylabel('Epoch duration [s]')
@@ -238,7 +241,7 @@ class IterationStatisticsPlotter(object):
         self._title()
 
     def gold_bpr(self):
-        plt.plot(self.stats.gold_bpr)
+        plt.plot(self.stats.gold_bpr, marker='+')
         self._iteration_grid()
         plt.xlabel('Epoch number')
         plt.ylabel('Boundary precision recall score')
@@ -246,8 +249,8 @@ class IterationStatisticsPlotter(object):
         self._title()
 
     def changes(self):
-        plt.plot(self.stats.changes, color='blue')
-        plt.plot(self.stats.changes_op, color='red')
+        plt.plot(self.stats.changes, color='blue', marker='+')
+        plt.plot(self.stats.changes_op, color='red', marker='+')
         plt.legend(['cumulative w/in iter', 'in epoch'])
         self._iteration_grid()
         plt.xlabel('Epoch number')

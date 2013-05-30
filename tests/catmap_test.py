@@ -443,7 +443,6 @@ class TestModelConsistency(unittest.TestCase):
         self._compare_to_stored_state(state_exact, state_approx)
 
         # sanity check: costs should never be negative
-        print(old_cost, mid_cost, new_cost)
         self.assertTrue(old_cost >= 0)
         self.assertTrue(mid_cost >= 0)
         self.assertTrue(new_cost >= 0)
@@ -470,7 +469,7 @@ class TestModelConsistency(unittest.TestCase):
 
     def _presplit(self):
         self.model.viterbi_tag_corpus()
-        self.model._reestimate_probabilities()
+        self.model.reestimate_probabilities()
 
     def _initial_state_asserts(self):
         category_totals = self.model._morph_usage.category_token_count

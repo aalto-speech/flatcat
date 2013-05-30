@@ -18,11 +18,11 @@ import sys
 import time
 
 from . import baseline
+from . import utils
 from .categorizationscheme import MorphUsageProperties, WORD_BOUNDARY
 from .categorizationscheme import ByCategory, get_categories, CategorizedMorph
 from .exception import InvalidOperationError
-from .utils import Sparse, LOGPROB_ZERO, ngrams, minargmin, zlog
-from .utils import _progress, _generator_progress, _nt_zeros
+from .utils import LOGPROB_ZERO, zlog
 
 PY3 = sys.version_info.major == 3
 
@@ -149,8 +149,8 @@ class CatmapModel(object):
         If the added data is untagged, you must call viterbi_tag_corpus
         to tag the new data.
 
-        You should also call initialize_probabilities or
-        _reestimate_probabilities.
+        You should also call reestimate_probabilities and consider
+        calling initialize_hmm.
 
         Arguments:
             segmentations -- Segmentations of format:
@@ -175,6 +175,7 @@ class CatmapModel(object):
             for morph in self.detag_word(segmentation.analysis):
                 self.morph_backlinks[morph].add(i)
             i += 1
+        utils.memlog('After adding corpus data')
 
     def initialize_baseline(self):
         """Initialize the model using a previously added
@@ -182,14 +183,19 @@ class CatmapModel(object):
         baseline model.
         """
 
-        _logger.info('Initializing from baseline segmentation...')
+        utils.memlog('initializing')
         self._calculate_usage_features()
+        utils.memlog('after usage features')
         self._unigram_transition_probs()
+        utils.memlog('after unigram transition')
         self.viterbi_tag_corpus()
+        utils.memlog('after tagging')
         self._calculate_transition_counts()
+        utils.memlog('after real transitiins')
         self._calculate_emission_counts()
+        utils.memlog('after emissions')
 
-    def initialize_probabilities(self, min_difference_proportion=0.005):
+    def initialize_hmm(self, min_difference_proportion=0.005):
         """Initialize emission and transition probabilities without
         changing the segmentation, using Viterbi EM.
         """
@@ -198,16 +204,16 @@ class CatmapModel(object):
             self._calculate_transition_counts()
             self._calculate_emission_counts()
 
-        self._reestimate_probabilities()
         self.convergence_of_analysis(
             reestimate_with_unchanged_segmentation,
             self.viterbi_tag_corpus,
             min_difference_proportion=min_difference_proportion,
             min_cost_gain=-10.0)     # Cost gain will be ~zero.
-        self._reestimate_probabilities()
 
         for callback in self.epoch_callbacks:
             callback(self)
+
+        self._iteration_number = 1
 
     def set_development_annotations(self, annotations, heuristic=None):
         if heuristic is None:
@@ -239,8 +245,9 @@ class CatmapModel(object):
 
         if self._iteration_number == 0:
             # Zero:th pre-iteration: let probabilities converge
-            self.initialize_probabilities(min_difference_proportion)
-            self._iteration_update()
+            self.initialize_hmm(min_difference_proportion)
+        self._iteration_update()
+        self._iteration_number = 1
 
         self.convergence_of_cost(
             self._train_iteration,
@@ -261,12 +268,12 @@ class CatmapModel(object):
         epochs = 0
         i = 0
         more_tokens = True
-        self._reestimate_probabilities()
+        self.reestimate_probabilities()
         while more_tokens:
             newcost = self.get_cost()
             _logger.info("Tokens processed: %s\tCost: %s" % (i, newcost))
 
-            for _ in _progress(range(epoch_interval)):
+            for _ in utils._progress(range(epoch_interval)):
                 try:
                     _, _, w = next(data)
                 except StopIteration:
@@ -287,7 +294,7 @@ class CatmapModel(object):
                 segments, _ = self.viterbi_segment(w)
                 if addc > 0:
                     self.add_corpus_data([WordAnalysis(addc, segments)])
-                    self._reestimate_probabilities()
+                    self.reestimate_probabilities()
 
                     i_new = len(self.segmentations) - 1
                     self.training_corpus_filter = lambda: (
@@ -314,7 +321,7 @@ class CatmapModel(object):
                 _logger.info("Max number of epochs reached, stop training")
                 break
 
-        self._reestimate_probabilities()
+        self.reestimate_probabilities()
         newcost = self.get_cost()
         _logger.info("Tokens processed: %s\tCost: %s" % (i, newcost))
         return epochs, newcost
@@ -340,7 +347,7 @@ class CatmapModel(object):
             min_epoch_cost_gain = self._training_params('min_epoch_cost_gain')
             max_epochs = self._training_params('max_epochs')
             if self._training_params('must_reestimate'):
-                update_func = self._reestimate_probabilities
+                update_func = self.reestimate_probabilities
             else:
                 update_func = None
 
@@ -349,13 +356,14 @@ class CatmapModel(object):
                     self._iteration_number, self._operation_number,
                     self.training_operations[self._operation_number],
                     max_epochs))
+            utils.memlog('see above')
             self.convergence_of_cost(
                 lambda: self._transformation_epoch(operation()),
                 update_func=update_func,
                 min_cost_gain=min_epoch_cost_gain,
                 max_iterations=max_epochs,
                 iteration_name='epoch')
-            self._reestimate_probabilities()
+            self.reestimate_probabilities()
             self._operation_number += 1
             for callback in self.operation_callbacks:
                 callback(self)
@@ -363,13 +371,24 @@ class CatmapModel(object):
     def _iteration_update(self):
         force_another = False
         if self._corpus_weight_updater is not None:
+            # FIXME replace with probe weight learning
             i = max(self._iteration_number, 1.0)
             if self._corpus_weight_updater.update_model(i):
-                self._reestimate_probabilities()
                 if self._iteration_number < self._max_iterations:
                     force_another = True
             for callback in self.operation_callbacks:
                 callback(self)
+        utils.memlog('after corpus weight update')
+
+        if self._supervised:
+            old_cost = self.get_cost()
+            self._update_annotation_choices()
+            new_cost = self.get_cost()
+            if old_cost != new_cost:
+                _logger.info('Updated annotation choices, changing cost from '
+                            '{} to {}'.format(old_cost, new_cost))
+            self._annot_coding.update_weight()
+            utils.memlog('after annotation choice update')
 
         self._operation_number = 0
         self._iteration_number += 1
@@ -419,6 +438,10 @@ class CatmapModel(object):
             cost = self.get_cost()
             cost_diff = cost - previous_cost
 
+            if iteration_name == 'epoch':
+                for callback in self.epoch_callbacks:
+                    callback(self, iteration)
+
             # perform update between optimization iterations
             if update_func is not None:
                 _logger.info('{:24s} Cost: {}'.format(
@@ -426,10 +449,6 @@ class CatmapModel(object):
                 force_another = update_func()
             else:
                 force_another = False
-
-            if iteration_name == 'epoch':
-                for callback in self.epoch_callbacks:
-                    callback(self, iteration)
 
             limit = min_cost_gain * self._corpus_coding.boundaries
             if (not force_another) and -cost_diff <= limit:
@@ -555,20 +574,18 @@ class CatmapModel(object):
             return (self.training_operations[self._operation_number] ==
                     'resegment')
 
-    def _reestimate_probabilities(self):
+    def reestimate_probabilities(self):
         """Re-estimates model parameters from a segmented, tagged corpus.
 
         theta(t) = arg min { L( theta, Y(t), D ) }
         """
+        utils.memlog('Reestimate: top')
         self._calculate_usage_features()
+        utils.memlog('Reestimate: after usage')
         self._calculate_transition_counts()
+        utils.memlog('Reestimate: after transitions')
         self._calculate_emission_counts()
-        if self._supervised:
-            old_cost = self.get_cost()
-            self._update_annotation_choices()
-            _logger.info('Updated annotation choices, changing cost from '
-                         '{} to {}'.format(old_cost, self.get_cost()))
-            self._annot_coding.update_weight()
+        utils.memlog('Reestimate: after emissions')
 
     def _calculate_usage_features(self):
         """Recalculates the morph usage features (perplexities).
@@ -632,7 +649,7 @@ class CatmapModel(object):
             # Include word boundaries
             categories.insert(0, WORD_BOUNDARY)
             categories.append(WORD_BOUNDARY)
-            for (prev_cat, next_cat) in ngrams(categories, 2):
+            for (prev_cat, next_cat) in utils.ngrams(categories, 2):
                 pair = (prev_cat, next_cat)
                 if pair in MorphUsageProperties.zero_transitions:
                     _logger.warning('Impossible transition ' +
@@ -715,7 +732,7 @@ class CatmapModel(object):
                                                          'transform',
                                                          'targets'])
         self._changed_segmentations_op = set()  # FIXME
-        for experiment in _generator_progress(transformation_generator):
+        for experiment in utils._generator_progress(transformation_generator):
             (transform_group, targets, temporaries) = experiment
             if len(transform_group) == 0:
                 continue
@@ -834,7 +851,7 @@ class CatmapModel(object):
             source = self.training_corpus_filter()
         for (count, segments) in source:
             segments = _wb_wrap(segments)
-            for quad in ngrams(segments, n=4):
+            for quad in utils.ngrams(segments, n=4):
                 prev_morph, prefix, suffix, next_morph = quad
                 if (prefix.morph in self.forcesplit or
                     suffix.morph in self.forcesplit):
@@ -1017,7 +1034,7 @@ class CatmapModel(object):
                                 self._corpus_coding.transit_emit_cost(
                                     categories[prev_cat],
                                     categories[next_cat], morph))
-                best.append(ViterbiNode(*minargmin(cost)))
+                best.append(ViterbiNode(*utils.minargmin(cost)))
                 cost = []
             # Update grid to prepare for next iteration
             grid.append(best)
@@ -1029,7 +1046,7 @@ class CatmapModel(object):
             cost = (grid[-1][prev_cat].cost +
                     self._corpus_coding.log_transitionprob(*pair))
             best.append(cost)
-        backtrace = ViterbiNode(*minargmin(best))
+        backtrace = ViterbiNode(*utils.minargmin(best))
 
         # Backtrace for the best category sequence
         result = [CategorizedMorph(segments[-1],
@@ -1176,7 +1193,7 @@ class CatmapModel(object):
                 self.viterbi_segment(word.analysis)[0])
             if word != self.segmentations[i]:
                 num_changed_words += 1
-        self._reestimate_probabilities()
+        self.reestimate_probabilities()
         self._calculate_morph_backlinks()
         return num_changed_words
 
@@ -1245,7 +1262,7 @@ class CatmapModel(object):
             new_detagged = self.detag_word(new_active)
             for morph in new_detagged:
                 constructions_add[morph] += 1
-            for (prefix, suffix) in ngrams(new_detagged, n=2):
+            for (prefix, suffix) in utils.ngrams(new_detagged, n=2):
                 blacklist.add(prefix + suffix)
 
         for (morph, count) in constructions_rm.items():
@@ -1320,7 +1337,7 @@ class CatmapModel(object):
         """Returns breakdown of costs for the given tagged segmentation."""
         wrapped = _wb_wrap(segmentation)
         breakdown = CostBreakdown()
-        for (prefix, suffix) in ngrams(wrapped, n=2):
+        for (prefix, suffix) in utils.ngrams(wrapped, n=2):
             cost = self._corpus_coding.log_transitionprob(prefix.category,
                                                           suffix.category)
             breakdown.transition(cost, prefix.category, suffix.category)
@@ -1460,7 +1477,7 @@ class ChangeCounts(object):
                 elif count > 0:
                     self.backlinks_add[cmorph.morph].add(corpus_index)
         wb_extended = _wb_wrap(analysis)
-        for (prefix, suffix) in ngrams(wb_extended, n=2):
+        for (prefix, suffix) in utils.ngrams(wb_extended, n=2):
             self.transitions[(prefix.category, suffix.category)] += count
         # Make sure that backlinks_remove and backlinks_add are disjoint
         # Removal followed by readding is the same as just adding
@@ -1691,7 +1708,8 @@ class CatmapEncoding(baseline.CorpusEncoding):
 
         # Counts of emissions observed in the tagged corpus.
         # A dict of ByCategory objects indexed by morph. Counts occurences.
-        self._emission_counts = Sparse(default=_nt_zeros(ByCategory))
+        self._emission_counts = utils.Sparse(
+            default=utils._nt_zeros(ByCategory))
 
         # Counts of transitions between categories.
         # P(Category -> Category) can be calculated from these.

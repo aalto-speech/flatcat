@@ -138,7 +138,7 @@ class CatmapModel(object):
 
         # Variables for online learning
         self._online = False
-        self.training_corpus_filter = None
+        self.training_focus = None
 
         self._cost_field_width = 9
         self._cost_field_precision = 4
@@ -313,13 +313,9 @@ class CatmapModel(object):
                     # FIXME This is crude and wasteful
                     self.reestimate_probabilities()
 
-                    self.training_corpus_filter = lambda: (
-                        self.segmentations[i_new],)
+                    self.training_focus = set((i_new,))
 
                     for i in range(len(self.training_operations)):
-                        if self.training_operations[i] == 'resegment':
-                            # FIXME Need to modify resegment
-                            continue
                         operation = self._resolve_operation(i)
                         self._transformation_epoch(operation())
 
@@ -818,11 +814,11 @@ class CatmapModel(object):
         Use with _transformation_epoch
         """
         # FIXME random shuffle or sort by length/frequency?
-        if self.training_corpus_filter is None:
+        if self.training_focus is None:
             unsorted = self._morph_usage.seen_morphs()
         else:
             unsorted = set()
-            for (count, segmentation) in self.training_corpus_filter():
+            for (count, segmentation) in self.training_focus_filter():
                 for morph in self.detag_word(segmentation):
                     unsorted.add(morph)
         epoch_morphs = sorted(unsorted, key=len)
@@ -865,11 +861,7 @@ class CatmapModel(object):
 
         # FIXME random shuffle or sort by bigram frequency?
         bigram_freqs = collections.Counter()
-        if self.training_corpus_filter is None:
-            source = self.segmentations
-        else:
-            source = self.training_corpus_filter()
-        for (count, segments) in source:
+        for (count, segments) in self.training_focus_filter():
             segments = _wb_wrap(segments)
             for quad in utils.ngrams(segments, n=4):
                 prev_morph, prefix, suffix, next_morph = quad
@@ -945,8 +937,12 @@ class CatmapModel(object):
         all words in the corpus using viterbi_segment.
         Use with _transformation_epoch
         """
-        # Does not use training_corpus_filter
-        for (i, word) in enumerate(self.segmentations):
+        if self.training_focus is None:
+            source = range(len(self.segmentations))
+        else:
+            source = self.training_focus
+        for i in source:
+            word = self.segmentations[i]
             yield ([ViterbiResegmentTransformation(word, self)],
                    set([i]), set())
 
@@ -1327,6 +1323,15 @@ class CatmapModel(object):
 
     def set_corpus_coding_weight(self, weight):
         self._corpus_coding.weight = weight
+
+    def training_focus_filter(self):
+        if self.training_focus is None:
+            for seg in self.segmentations:
+                yield seg
+        else:
+            ordered = sorted(self.training_focus)
+            for i in ordered:
+                yield self.segmentations[i]
 
     def best_analysis(self, choices):
         """Choose the best analysis of a set of choices.

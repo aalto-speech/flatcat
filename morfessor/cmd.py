@@ -679,6 +679,10 @@ Simple usage examples (training and testing):
     add_arg('-D', '--develset', dest="develfile", default=None,
             metavar='<file>',
             help="Load annotated data for tuning the corpus weight parameter.")
+    add_arg('--checkpoint', dest="checkpointfile",
+            default='model.checkpoint.pickled', metavar='<file>',
+            help="Save initialized model to file before weight learning. "
+            "Has no effect unless --develset is given.")
     add_arg('-w', '--corpusweight', dest="corpusweight", type=float,
             default=1.0, metavar='<float>',
             help="Corpus weight parameter (default %(default)s); "
@@ -886,12 +890,38 @@ def catmap_main(args):
     heuristic = None
     if args.rm_nonmorph:
         heuristic_ops = args.heuristic_ops.split(',')
-        heuristic = HeuristicPostprocessor(model,
-                                           operations=heuristic_ops)
+        heuristic = HeuristicPostprocessor(operations=heuristic_ops)
 
+    # Perform weight learning using development annotations
     if develannots is not None:
         model.set_development_annotations(develannots,
-                                            heuristic=heuristic)
+                                          heuristic=heuristic,
+                                          sample_size=1000)
+                                          # FIXME size as param
+        callbacks = model.toggle_callbacks(None)
+
+        io.write_binary_model_file(args.checkpointfile, model)
+        (prev_cweight, next_cweight, prev_f) = model.train_corpus_weight(1)
+
+        for i in range(args.weightlearn_epochs):
+            model.set_corpus_coding_weight(next_cweight)
+            (_, next_cweight, prev_f) = model.train_corpus_weight(i + 1)
+            if f > prev_f:
+                # Accept the step
+                prev_cweight = next_cweight
+            else:
+                # Revert the changes by reloading the checkpoint model
+                model = io.read_binary_model_file(args.checkpointfile)
+                # Discard the step and try again with a smaller step
+            next_cweight = 
+
+        if args.annofile is not None:
+            for i in range(args.weightlearn_epochs):
+                model.train_annotation_weight(i)
+
+        model.toggle_callbacks(callbacks)
+        model.training_focus = None
+        must_train = True
 
     # Train model, if there is new data to train on
     if args.trainmode == 'none':
@@ -922,12 +952,13 @@ def catmap_main(args):
 
     # Save model
     if args.savefile is not None:
-        model.clear_callbacks()
+        model.toggle_callbacks(None)
         io.write_binary_model_file(args.savefile, model)
 
     if args.savesegfile is not None:
         if heuristic is not None:
-            segs = model.map_segmentations(heuristic.remove_nonmorfemes)
+            segs = model.map_segmentations(
+                lambda x: heuristic.remove_nonmorfemes(x, model))
         else:
             segs = model.segmentations
         io.write_segmentation_file(args.savesegfile, segs)

@@ -72,8 +72,7 @@ class HeuristicPostprocessor(object):
     DEFAULT_OPERATIONS = ['missing-stem', 'longest-to-stem',
                           'join-two', 'join-all']
 
-    def __init__(self, model, operations=None):
-        self.model = model
+    def __init__(self, operations=None):
         self.temporaries = set()
         self.max_join_stem_len = 4
         if operations is None:
@@ -81,7 +80,7 @@ class HeuristicPostprocessor(object):
         else:
             self.operations = operations
 
-    def remove_nonmorfemes(self, analysis):
+    def remove_nonmorfemes(self, analysis, model):
         """Remove nonmorfemes from the analysis by joining or retagging
         morphs, using heuristics."""
         if len(self.operations) == 0:
@@ -138,8 +137,8 @@ class HeuristicPostprocessor(object):
             # Try joining each nonmorpheme in both directions,
             if 'join-two' in self.operations:
                 for i in range(len(analysis) - 1):
-                    if (analysis[i].morph in self.model.forcesplit or
-                            analysis[i + 1].morph in self.model.forcesplit):
+                    if (analysis[i].morph in model.forcesplit or
+                            analysis[i + 1].morph in model.forcesplit):
                         # Unless forcesplit prevents it
                         continue
                     if (self._accept_join(analysis[i], analysis[i + 1]) or
@@ -153,7 +152,7 @@ class HeuristicPostprocessor(object):
                 tmp = []
                 for m in analysis:
                     if (m.category == 'ZZZ' and
-                            m.morph not in self.model.forcesplit):
+                            m.morph not in model.forcesplit):
                         concatenated.append(m.morph)
                     else:
                         if len(concatenated) >= 3:
@@ -179,20 +178,20 @@ class HeuristicPostprocessor(object):
             for (analysis, penalty) in alternatives:
                 for cmorph in analysis:
                     if (cmorph.category == 'ZZZ' and
-                            cmorph.morph not in self.model.forcesplit):
+                            cmorph.morph not in model.forcesplit):
                         penalty += NON_MORPHEME_PENALTY
                 with_penalties.append(AnalysisAlternative(analysis, penalty))
 
             for morph in self.temporaries:
                 # Allow new morphs to be formed by joining
-                self.model._modify_morph_count(morph.morph, 1)
-                self.model._corpus_coding.update_emission_count(
+                model._modify_morph_count(morph.morph, 1)
+                model._corpus_coding.update_emission_count(
                     morph.category, morph.morph, 1)
-            alternatives = self.model.best_analysis(with_penalties)
+            alternatives = model.best_analysis(with_penalties)
             for morph in self.temporaries:
                 # Remove temporary morphs
-                self.model._modify_morph_count(morph.morph, -1)
-                self.model._corpus_coding.update_emission_count(
+                model._modify_morph_count(morph.morph, -1)
+                model._corpus_coding.update_emission_count(
                     morph.category, morph.morph, -1)
 
             analysis = alternatives[0][1]

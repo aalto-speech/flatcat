@@ -218,12 +218,8 @@ class CatmapModel(object):
         self._iteration_number = 1
 
     def set_development_annotations(self, annotations, heuristic=None):
-        if heuristic is None:
-            heuristic_func = lambda x: x
-        else:
-            heuristic_func = heuristic.remove_nonmorfemes
         self._corpus_weight_updater = CatmapAnnotationsModelUpdate(
-            annotations, self, heuristic_func)
+            annotations, self, heuristic)
 
     def train_batch(self, min_epoch_cost_gain=0.0025, min_iter_cost_gain=0.005,
                     min_difference_proportion=0.005,
@@ -383,15 +379,6 @@ class CatmapModel(object):
 
     def _iteration_update(self):
         force_another = False
-        if self._corpus_weight_updater is not None:
-            # FIXME replace with probe weight learning
-            i = max(self._iteration_number, 1.0)
-            if self._corpus_weight_updater.update_model(i):
-                if self._iteration_number < self._max_iterations:
-                    force_another = True
-            for callback in self.operation_callbacks:
-                callback(self)
-        utils.memlog('after corpus weight update')
 
         if self._supervised:
             old_cost = self.get_cost()
@@ -400,6 +387,7 @@ class CatmapModel(object):
             if old_cost != new_cost:
                 _logger.info('Updated annotation choices, changing cost from '
                             '{} to {}'.format(old_cost, new_cost))
+                force_another = True
             self._annot_coding.update_weight()
             utils.memlog('after annotation choice update')
 
@@ -2025,29 +2013,35 @@ class CatmapAnnotatedCorpusEncoding(object):
 
 
 class CatmapAnnotationsModelUpdate(baseline.AnnotationsModelUpdate):
-    def __init__(self, annotations, model, heuristic_func):
+    def __init__(self, annotations, model, heuristic):
         super(CatmapAnnotationsModelUpdate, self).__init__(annotations, model)
-        self.heuristic_func = heuristic_func
+        self.heuristic = heuristic
 
-    def update_model(self, epochs):
+    def update_model(self, epochs, threshold=0.01):
         """Tune model corpus weight based on the precision and
         recall of the development data, trying to keep them equal"""
         tmp = self.data.items()
         wlist, annotations = zip(*tmp)
+
+        if heuristic is None:
+            heuristic_func = lambda x: x
+        else:
+            heuristic_func = lambda x: heuristic.remove_nonmorfemes(x, model)
+
         segments = [self.heuristic_func(self.model.viterbi_segment(w)[0])
                     for w in wlist]
-        d = self._estimate_segmentation_dir(segments, annotations)
+        pre, rec, f = cls._bpr_evaluation([[x] for x in segments], annotations)
 
-        if d != 0:
-            weight = self.model.get_corpus_coding_weight()
-            if d > 0:
-                weight *= 1 + 2.0 / epochs
-            else:
-                weight *= 1.0 / (1 + 2.0 / epochs)
+        old_weight = self.model.get_corpus_coding_weight()
+        if abs(pre - rec) < threshold:
+            pass
+        elif rec > pre:
+            new_weight = old_weight * (1 + 2.0) / epochs
+        else:
+            weight = old_weight / (1 + 2.0 / epochs)
+        if old_weight != new_weight:
             self.model.set_corpus_coding_weight(weight)
-            _logger.info("Corpus weight set to {}".format(weight))
-            return True
-        return False
+        return (old_weight, new_weight, f)
 
 
 def _log_catprobs(probs):

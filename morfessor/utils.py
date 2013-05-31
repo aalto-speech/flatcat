@@ -1,5 +1,6 @@
 import logging
 import math
+import random
 import sys
 import types
 import resource     # FIXME remove this dependency?
@@ -192,3 +193,28 @@ def _nt_zeros(constructor, zero=0):
 def memlog(location):
     _logger.info('Mem usage at "{}": {}'.format(location,
         resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
+
+
+def weighted_sample(data, num_samples):
+    """Samples with replacement from the data set so that the probability
+    of each data point being selected is proportional to the occurrence count.
+    Arguments:
+        data: A list of tuples (weight, ...)
+        num_samples: The number of samples to return
+    Returns:
+        a sorted list of indices to data
+    """
+    tokens = sum(x[0] for x in data)
+    token_indices = sorted([random.randint(0, tokens - 1)
+                            for x in range(num_samples)])
+    
+    data_indices = []
+    d = enumerate(x[0] for x in data)
+    di = 0
+    ti = -1
+    for sample_token_index in token_indices:
+        while ti < sample_token_index:
+            (di, weight) = d.next()
+            ti += weight
+        data_indices.append(di)
+    return data_indices

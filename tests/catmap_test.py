@@ -268,6 +268,28 @@ class TestBaselineSegmentation(unittest.TestCase):
                 self.assertEqual(r, o, msg=msg)
 
 
+class TestOnline(unittest.TestCase):
+    def setUp(self):
+        self.baseline = _load_baseline()
+        self.model = _load_catmap(self.baseline.get_segmentations(),
+                                  no_emissions=True)
+
+    def test_focus(self):
+        assert self.model.training_focus is None
+        self.assertEqual(len(self.model.segmentations),
+                         len(list(self.model.training_focus_filter())))
+
+        self.model.training_focus = [5, 10, 2]
+        self.assertEqual(len(list(self.model.training_focus_filter())), 3)
+        self.assertEqual(self.model.training_focus_filter().next(),
+                         self.model.segmentations[2])
+
+        self.model.training_focus = [0, len(self.model.segmentations) - 1]
+        self.assertEqual(len(list(self.model.training_focus_filter())), 2)
+        self.assertEqual(self.model.training_focus_filter().next(),
+                         self.model.segmentations[0])
+
+
 class TestModelConsistency(unittest.TestCase):
     dummy_segmentation = (
         (1, ('AA', 'BBBBB')),)

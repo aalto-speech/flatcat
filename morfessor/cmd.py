@@ -898,7 +898,7 @@ def catmap_main(args):
         if must_train and len(args.testfiles) > 0:
             raise ArgumentException('Must train before using a model '
                 'for segmenting, if new data is added.')
-        # pass
+        _logger.info('Using loaded model without training')
     if args.trainmode in ('online', 'online+batch'):
         # Always reads from stdin
         data = io.read_corpus_files('-')
@@ -919,8 +919,6 @@ def catmap_main(args):
         _logger.info('Final cost: {}'.format(model.get_cost()))
         te = time.time()
         _logger.info('Training time: {:.3f}s'.format(te - ts))
-    else:
-        _logger.info('Using loaded model without training')
 
     # Save model
     if args.savefile is not None:

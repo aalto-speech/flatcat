@@ -8,7 +8,7 @@ import time
 
 from . import get_version
 from .baseline import BaselineModel
-from .catmap import CatmapModel
+from .catmap import CatmapModel, CorpusWeightUpdater
 from .categorizationscheme import MorphUsageProperties, HeuristicPostprocessor
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
@@ -894,18 +894,23 @@ def catmap_main(args):
 
     # Perform weight learning using development annotations
     if develannots is not None:
-        model.set_development_annotations(develannots,
-                                          heuristic=heuristic,
-                                          sample_size=1000)
-                                          # FIXME size as param
+        corpus_weight_updater = CorpusWeightUpdater(
+            develannots, heuristic=heuristic)
+        model.set_focus_sample(1000)    # FIXME size as param
         callbacks = model.toggle_callbacks(None)
 
         io.write_binary_model_file(args.checkpointfile, model)
-        (prev_cweight, next_cweight, prev_f) = model.train_corpus_weight(1)
+        prev_weight = model.get_corpus_coding_weight()
+        model.train_corpus_weight()
+        (f_prev, direction) = corpus_weight_updater.calculate_update(
+                                model, threshold=0.01)
 
         for i in range(args.weightlearn_epochs):
-            model.set_corpus_coding_weight(next_cweight)
-            (_, next_cweight, prev_f) = model.train_corpus_weight(i + 1)
+            next_cweight = corpus_weight_updater.update_model(
+                                model, i, direction)
+            model.train_corpus_weight()
+            (f, direction) = corpus_weight_updater.calculate_update(
+                                    model, threshold=0.01)
             if f > prev_f:
                 # Accept the step
                 prev_cweight = next_cweight
@@ -913,7 +918,6 @@ def catmap_main(args):
                 # Revert the changes by reloading the checkpoint model
                 model = io.read_binary_model_file(args.checkpointfile)
                 # Discard the step and try again with a smaller step
-            next_cweight = 
 
         if args.annofile is not None:
             for i in range(args.weightlearn_epochs):

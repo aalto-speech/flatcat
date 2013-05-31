@@ -67,9 +67,6 @@ class CatmapModel(object):
         # The analyzed (segmented and tagged) corpus
         self.segmentations = []
 
-        # The development annotations used to optimize corpus weight
-        self._corpus_weight_updater = None
-
         # Morph occurence backlinks
         # A dict of sets. Keys are morphs, set contents are indices to
         # self.segmentations for words in which the morph occurs
@@ -216,10 +213,6 @@ class CatmapModel(object):
             callback(self)
 
         self._iteration_number = 1
-
-    def set_development_annotations(self, annotations, heuristic=None):
-        self._corpus_weight_updater = CatmapAnnotationsModelUpdate(
-            annotations, self, heuristic)
 
     def train_batch(self, min_epoch_cost_gain=0.0025, min_iter_cost_gain=0.005,
                     min_difference_proportion=0.005,
@@ -2012,15 +2005,15 @@ class CatmapAnnotatedCorpusEncoding(object):
         return -self.penaltysum * self.weight
 
 
-class CatmapAnnotationsModelUpdate(baseline.AnnotationsModelUpdate):
-    def __init__(self, annotations, model, heuristic):
-        super(CatmapAnnotationsModelUpdate, self).__init__(annotations, model)
+class CorpusWeightUpdater(object)
+    def __init__(self, annotations, heuristic):
+        self.annotations = annotations
         self.heuristic = heuristic
 
-    def update_model(self, epochs, threshold=0.01):
+    def calculate_update(self, model, threshold=0.01):
         """Tune model corpus weight based on the precision and
         recall of the development data, trying to keep them equal"""
-        tmp = self.data.items()
+        tmp = self.annotations.items()
         wlist, annotations = zip(*tmp)
 
         if heuristic is None:
@@ -2028,20 +2021,26 @@ class CatmapAnnotationsModelUpdate(baseline.AnnotationsModelUpdate):
         else:
             heuristic_func = lambda x: heuristic.remove_nonmorfemes(x, model)
 
-        segments = [self.heuristic_func(self.model.viterbi_segment(w)[0])
+        segments = [self.heuristic_func(model.viterbi_segment(w)[0])
                     for w in wlist]
         pre, rec, f = cls._bpr_evaluation([[x] for x in segments], annotations)
-
-        old_weight = self.model.get_corpus_coding_weight()
         if abs(pre - rec) < threshold:
-            pass
+            direction = 0
         elif rec > pre:
-            new_weight = old_weight * (1 + 2.0) / epochs
+            direction = 1
         else:
-            weight = old_weight / (1 + 2.0 / epochs)
-        if old_weight != new_weight:
-            self.model.set_corpus_coding_weight(weight)
-        return (old_weight, new_weight, f)
+            direction = -1
+        return (f, direction)
+
+    def update_model(self, model, epochs, direction):
+        if direction != 0:
+            weight = model.get_corpus_coding_weight()
+            if direction > 0:
+                weight *= 1 + 2.0 / epochs
+            else:
+                weight *= 1.0 / (1 + 2.0 / epochs)
+            model.set_corpus_coding_weight(weight)
+        return weight
 
 
 def _log_catprobs(probs):

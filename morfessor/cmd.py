@@ -687,6 +687,10 @@ Simple usage examples (training and testing):
             default=1.0, metavar='<float>',
             help="Corpus weight parameter (default %(default)s); "
             "sets the initial value if --develset is used.")
+    add_arg('--weightlearn-epochs', dest='weightlearn_epochs',
+            type=int, default=5, metavar='<int>',
+            help='Maximum number of epochs of weight learning ' +
+                 '(default %(default)s).')
     add_arg('-W', '--annotationweight', dest="annotationweight",
             type=float, default=None, metavar='<float>',
             help="Corpus weight parameter for annotated data (if unset, the "
@@ -899,30 +903,50 @@ def catmap_main(args):
         model.set_focus_sample(1000)    # FIXME size as param
         callbacks = model.toggle_callbacks(None)
 
+        _logger.info('Performing weight learning')
+        model._iteration_update()
         io.write_binary_model_file(args.checkpointfile, model)
         prev_weight = model.get_corpus_coding_weight()
-        model.train_corpus_weight()
+        model.weightlearn_probe()
         (f_prev, direction) = corpus_weight_updater.calculate_update(
                                 model, threshold=0.01)
+        _logger.info(
+            'Initial corpus weight: ' +
+            '{}, f-measure: {}, direction: {}'.format(
+                prev_weight, f_prev, direction))
 
         for i in range(args.weightlearn_epochs):
-            next_cweight = corpus_weight_updater.update_model(
-                                model, i, direction)
-            model.train_corpus_weight()
+            if direction == 0:
+                break
+            next_weight = corpus_weight_updater.update_model(
+                                model, i + 1, direction)
+            model.weightlearn_probe()
+            prev_direction = direction
             (f, direction) = corpus_weight_updater.calculate_update(
                                     model, threshold=0.01)
-            if f > prev_f:
+            _logger.info(
+                'Weight learning iteration {}: '.format(i) +
+                'corpus weight {}, f-measure: {}, direction: {}'.format(
+                    next_weight, f, direction))
+            if f > f_prev:
                 # Accept the step
-                prev_cweight = next_cweight
+                _logger.info('Accepted the step')
+                prev_weight = next_weight
+                f_prev = f
             else:
                 # Revert the changes by reloading the checkpoint model
+                _logger.info('Reverting to checkpoint and weight {}'.format(
+                    prev_weight))
                 model = io.read_binary_model_file(args.checkpointfile)
                 # Discard the step and try again with a smaller step
+                model.set_corpus_coding_weight(prev_weight)
+                direction = prev_direction
 
-        if args.annofile is not None:
-            for i in range(args.weightlearn_epochs):
-                model.train_annotation_weight(i)
+        #if args.annofile is not None:
+        #    for i in range(args.weightlearn_epochs):
+        #        model.train_annotation_weight(i)
 
+        model._iteration_number = 1
         model.toggle_callbacks(callbacks)
         model.training_focus = None
         must_train = True
@@ -983,7 +1007,7 @@ def catmap_main(args):
                 constructions, logp = model.viterbi_segment(atoms)
                 if heuristic is not None:
                     constructions = heuristic.remove_nonmorfemes(
-                                        constructions)
+                                        constructions, model)
                 if args.test_output_tags:
                     def _output_morph(cmorph):
                         return '{}{}{}'.format(cmorph.morph,

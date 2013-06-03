@@ -303,11 +303,7 @@ class CatmapModel(object):
                     self.reestimate_probabilities()
 
                     self.training_focus = set((i_new,))
-
-                    for i in range(len(self.training_operations)):
-                        operation = self._resolve_operation(i)
-                        self._transformation_epoch(operation())
-
+                    self._single_epoch_iteration()
                     segments = self.segmentations[i_new].analysis
 
                 _logger.debug("#%s: %s -> %s" %
@@ -567,6 +563,18 @@ class CatmapModel(object):
         if param_name == 'must_reestimate':
             return (self.training_operations[self._operation_number] ==
                     'resegment')
+
+    def _single_epoch_iteration(self):
+        """Onel iteration of training, with exactly one epoch of each
+        operation and no convergence checks or update passes."""
+        for i in range(len(self.training_operations)):
+            operation = self._resolve_operation(i)
+            self._transformation_epoch(operation())
+
+    def weightlearn_probe(self):
+        self._single_epoch_iteration()
+        self.reestimate_probabilities()
+        self._iteration_update()
 
     def reestimate_probabilities(self):
         """Re-estimates model parameters from a segmented, tagged corpus.
@@ -1314,6 +1322,10 @@ class CatmapModel(object):
             for i in ordered:
                 yield self.segmentations[i]
 
+    def set_focus_sample(self, num_samples):
+        self.training_focus = set(utils.weighted_sample(
+            self.segmentations, num_samples))
+
     def best_analysis(self, choices):
         """Choose the best analysis of a set of choices.
 
@@ -1397,14 +1409,18 @@ class CatmapModel(object):
             if seg_de not in alts_de:
                 yield (seg_de, alts_de)
 
-    def clear_callbacks(self):
+    def toggle_callbacks(self, callbacks=None):
         """Callbacks are not saved in the pickled model, because pickle is
         unable to restore instance methods. If you need callbacks in a loaded
         model, you have to readd them after loading.
         """
-
-        self.operation_callbacks = []
-        self.epoch_callbacks = []
+        out = (self.operation_callbacks, self.epoch_callbacks)
+        if callbacks is None:
+            self.operation_callbacks = []
+            self.epoch_callbacks = []
+        else:
+            (self.operation_callbacks, self.epoch_callbacks) = callbacks
+        return out
 
     def _cost_field_fmt(self, cost):
         current = len(str(int(cost))) + self._cost_field_precision + 1
@@ -2005,7 +2021,7 @@ class CatmapAnnotatedCorpusEncoding(object):
         return -self.penaltysum * self.weight
 
 
-class CorpusWeightUpdater(object)
+class CorpusWeightUpdater(object):
     def __init__(self, annotations, heuristic):
         self.annotations = annotations
         self.heuristic = heuristic
@@ -2016,14 +2032,16 @@ class CorpusWeightUpdater(object)
         tmp = self.annotations.items()
         wlist, annotations = zip(*tmp)
 
-        if heuristic is None:
+        if self.heuristic is None:
             heuristic_func = lambda x: x
         else:
-            heuristic_func = lambda x: heuristic.remove_nonmorfemes(x, model)
+            heuristic_func = lambda x: self.heuristic.remove_nonmorfemes(x,
+                                                                     model)
 
-        segments = [self.heuristic_func(model.viterbi_segment(w)[0])
+        segments = [heuristic_func(model.viterbi_segment(w)[0])
                     for w in wlist]
-        pre, rec, f = cls._bpr_evaluation([[x] for x in segments], annotations)
+        pre, rec, f = baseline.AnnotationsModelUpdate._bpr_evaluation(
+                         [[x] for x in segments], annotations)
         if abs(pre - rec) < threshold:
             direction = 0
         elif rec > pre:

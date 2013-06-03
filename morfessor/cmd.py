@@ -934,17 +934,48 @@ def catmap_main(args):
                 prev_weight = next_weight
                 f_prev = f
             else:
-                # Revert the changes by reloading the checkpoint model
-                _logger.info('Reverting to checkpoint and weight {}'.format(
-                    prev_weight))
-                model = io.read_binary_model_file(args.checkpointfile)
+                _logger.info('Reverting to weight {}'.format(prev_weight))
                 # Discard the step and try again with a smaller step
-                model.set_corpus_coding_weight(prev_weight)
                 direction = prev_direction
+            # Revert the changes by reloading the checkpoint model.
+            # Good steps are also reverted, to prevent accumulated gains
+            # and make the comparison fair.
+            model = io.read_binary_model_file(args.checkpointfile)
+            model.set_corpus_coding_weight(prev_weight)
 
-        #if args.annofile is not None:
-        #    for i in range(args.weightlearn_epochs):
-        #        model.train_annotation_weight(i)
+        """
+        if args.annofile is not None:
+            model.weightlearn_probe()   # FIXME duplicated effort
+            (anno_f_prev, anno_dir) = anno_weight_updater.calculate_update(
+                                        model, threshold=0.01)
+            prev_weight = model.get_annotation_coding_weight()
+            for i in range(args.weightlearn_epochs):
+                if 1.0 - anno_f_prev > 0.01:
+                    # Annotations are not segmented correctly
+                    anno_step_dir = 1
+                    #if (anno_dir == -1 and
+                    #        direction == -1 and
+                    #        args.annotationsuperpenalty > 0):
+                    #    # Both sets are undersegmented
+                else:
+                    # Annotations are segmented correctly,
+                    # try lower weight
+                    anno_step_dir = -1
+                next_weight = annotation_weight_updater.update_model(
+                                model, i + 1, anno_step_dir)
+                model.weightlearn_probe()
+                (anno_f, anno_dir) = anno_weight_updater.calculate_update(
+                                        model, threshold=0.01)
+                (f, direction) = corpus_weight_updater.calculate_update(
+                                        model, threshold=0.01)
+                _logger.info(
+                    'Annotation weight learning iteration {}: '.format(i) +
+                    'annotation weight {}, devset f-measure: {}, '.format(
+                        next_weight, f) +
+                    'annotation f-measure: {}'.format(anno_f))
+                if f > f_prev:
+                    pass
+        """
 
         model._iteration_number = 1
         model.toggle_callbacks(callbacks)

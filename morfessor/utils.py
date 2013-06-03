@@ -207,7 +207,7 @@ def weighted_sample(data, num_samples):
     tokens = sum(x[0] for x in data)
     token_indices = sorted([random.randint(0, tokens - 1)
                             for x in range(num_samples)])
-    
+
     data_indices = []
     d = enumerate(x[0] for x in data)
     di = 0

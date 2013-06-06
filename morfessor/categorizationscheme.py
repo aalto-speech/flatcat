@@ -72,9 +72,9 @@ class HeuristicPostprocessor(object):
     DEFAULT_OPERATIONS = ['missing-stem', 'longest-to-stem',
                           'join-two', 'join-all']
 
-    def __init__(self, operations=None):
+    def __init__(self, operations=None, max_join_stem_len=4):
         self.temporaries = set()
-        self.max_join_stem_len = 4
+        self.max_join_stem_len = max_join_stem_len
         if operations is None:
             self.operations = HeuristicPostprocessor.DEFAULT_OPERATIONS
         else:
@@ -307,7 +307,6 @@ class MorphUsageProperties(object):
         self._clear()
         count_sum = 0
         while True:
-            _logger.info('Loop of calculate_usage_features')    # FIXME
             # If risk of running out of memory, perform calculations in
             # multiple loops over the data
             conserving_memory = False
@@ -328,10 +327,8 @@ class MorphUsageProperties(object):
                         conserving_memory = True
 
             utils.memlog('before compress')
-            _logger.info('Ready to compress, conserving_memory = {}'.format(
-                conserving_memory))     # FIXME
-            utils.memlog('after compress')
             self._compress_contexts()
+            utils.memlog('after compress')
 
             if not conserving_memory:
                 break

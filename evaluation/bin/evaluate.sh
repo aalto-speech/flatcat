@@ -148,7 +148,7 @@ fi
 
 ### Testing
 # Segment test data using catmap
-${DRY} ${PYTHON} ${CATMAP} ${COMMON_PARAMS} ${COMMON_TEST_PARAMS} ${CATMAP_TEST_PARAMS} -l ${CATMAP_MODEL} -T ${TESTDATA} -o ${CATMAP_TEST_OUTPUT}
+${DRY} ${PYTHON} ${CATMAP} ${COMMON_PARAMS} ${COMMON_TEST_PARAMS} ${CATMAP_TEST_PARAMS} -l ${CATMAP_MODEL} -T ${TESTDATA} -o ${CATMAP_TEST_OUTPUT} -m none
 	check_return
 
 # Calculate boundary precision recall

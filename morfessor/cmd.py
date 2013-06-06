@@ -603,6 +603,11 @@ Simple usage examples (training and testing):
                  'Has no effect unless used together with ' +
                  '--remove-nonmorphemes.' +
                  " (default '%(default)s').")
+    add_arg('--max-heuristic-join-stem-length', dest='max_join_stem_len',
+            type=int, default=4, metavar='<int>',
+            help='Stems longer than this length are ' +
+                 'not considered for heuristic joining with nonmorphemes. ' +
+                 '(default %(default)s).')
     add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
             metavar='<int>',
             help="compound frequency threshold (default %(default)s).")
@@ -643,7 +648,7 @@ Simple usage examples (training and testing):
             help='Stop iterating if proportion of words with changed ' +
                  'segmentation or category tags is below this limit. ' +
                  '(default %(default)s).')
-    add_arg('--max-iterations', dest='max_iterations', type=int, default=15,
+    add_arg('--max-iterations', dest='max_iterations', type=int, default=7,
             metavar='<int>',
             help='Maximum number of iterations. (default %(default)s).')
     add_arg('--max-epochs-first', dest='max_epochs_first', type=int, default=1,
@@ -691,6 +696,14 @@ Simple usage examples (training and testing):
             type=int, default=5, metavar='<int>',
             help='Maximum number of epochs of weight learning ' +
                  '(default %(default)s).')
+    add_arg('--weightlearn-sample-size', dest='wlearn_sample_size', type=int,
+            default=1000, metavar='<int>',
+            help='A subset of this size is sampled (with repetition, ' +
+            'weighting according to occurrence count) from the corpus. ' +
+            'When evaluating a value for the corpus weight during weight '
+            'learning, the local search of the model training is restricted ' +
+            'to this set, to reduce computation time. ' +
+            '(default %(default)s); ')
     add_arg('-W', '--annotationweight', dest="annotationweight",
             type=float, default=None, metavar='<float>',
             help="Corpus weight parameter for annotated data (if unset, the "
@@ -894,13 +907,14 @@ def catmap_main(args):
     heuristic = None
     if args.rm_nonmorph:
         heuristic_ops = args.heuristic_ops.split(',')
-        heuristic = HeuristicPostprocessor(operations=heuristic_ops)
+        heuristic = HeuristicPostprocessor(operations=heuristic_ops,
+                        max_join_stem_len=args.max_join_stem_len)
 
     # Perform weight learning using development annotations
     if develannots is not None:
         corpus_weight_updater = CorpusWeightUpdater(
             develannots, heuristic=heuristic)
-        model.set_focus_sample(1000)    # FIXME size as param
+        model.set_focus_sample(args.wlearn_sample_size)
         callbacks = model.toggle_callbacks(None)
 
         _logger.info('Performing weight learning')

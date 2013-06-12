@@ -195,6 +195,32 @@ class MorfessorIO:
         with open(file_name, 'wb') as fobj:
             pickle.dump(obj, fobj, pickle.HIGHEST_PROTOCOL)
 
+    def write_parameter_file(self, file_name, params):
+        """Write learned or estimated parameters to a file"""
+        with self._open_text_file_write(file_name) as file_obj:
+            d = datetime.datetime.now().replace(microsecond=0)
+            file_obj.write(
+                '# Parameters for Morfessor {}, {}\n'.format(
+                    get_version(), d))
+            for (key, val) in params.items():
+                file_obj.write('{}:\t{}\n'.format(key, val))
+
+    def read_parameter_file(self, file_name):
+        """Read learned or estimated parameters from a file"""
+        params = {}
+        line_re = re.compile(r'^(.*)\s*:\s*(.*)$')
+        for line in self._read_text_file(file_name):
+            m = line_re.match(line.rstrip())
+            if m:
+                key = m.group(1)
+                val = m.group(2)
+                try:
+                    val = float(val)
+                except ValueError:
+                    pass
+                params[key] = val
+        return params
+
     def _split_atoms(self, construction):
         """Split construction to its atoms."""
         if self.atom_separator is None:

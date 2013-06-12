@@ -493,6 +493,9 @@ Simple usage examples (training and testing):
             help="input corpus file(s) to analyze (text or gzipped text;  "
                  "use '-' for standard input; add several times in order to "
                  "append multiple files).")
+    add_arg('--loadparamsfile', dest='loadparamsfile', default=None,
+            metavar='<file>',
+            help='Load learned and estimated parameters from file.')
 
     # Options for output data files
     add_arg = parser.add_argument_group('output data files').add_argument
@@ -504,6 +507,9 @@ Simple usage examples (training and testing):
     add_arg('-S', '--save-segmentation', dest="savesegfile", default=None,
             metavar='<file>',
             help="save model segmentations to file (Morfessor 1.0 format).")
+    add_arg('--saveparamsfile', dest='saveparamsfile', default=None,
+            metavar='<file>',
+            help='Save learned and estimated parameters to file.')
 
     # Options for data formats
     add_arg = parser.add_argument_group(
@@ -886,6 +892,12 @@ def catmap_main(args):
     else:
         develannots = None
 
+    if args.loadparamsfile is not None:
+        _logger.info('Loading learned params from {}'.format(
+            args.loadparamsfile))
+        model.set_learned_params(
+            io.read_parameter_file(args.loadparamsfile))
+
     # Initialize the model
     must_train = False
     if not model_initialized:
@@ -1043,6 +1055,10 @@ def catmap_main(args):
         else:
             segs = model.segmentations
         io.write_segmentation_file(args.savesegfile, segs)
+
+    if args.saveparamsfile is not None:
+        io.write_parameter_file(args.saveparamsfile,
+                                model.get_learned_params())
 
     # Segment test data
     if len(args.testfiles) > 0:

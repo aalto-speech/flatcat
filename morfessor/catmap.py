@@ -1432,6 +1432,23 @@ class CatmapModel(object):
             (self.operation_callbacks, self.epoch_callbacks) = callbacks
         return out
 
+    def get_learned_params(self):
+        """Returns a dict of learned and estimated parameters."""
+        params = {'corpusweight': self.get_corpus_coding_weight()}
+        if self._supervised:
+            params['annotationweight'] = self._annot_coding.weight
+        return params
+
+    def set_learned_params(self, params):
+        if 'corpusweight' in params:
+            _logger.info('Setting corpus coding weight to {}'.format(
+                params['corpusweight']))
+            self.set_corpus_coding_weight(float(params['corpusweight']))
+        if self._supervised and 'annotationweight' in params:
+            _logger.info('Setting annotation weight to {}'.format(
+                params['annotationweight']))
+            self._annot_coding.weight = float(params['annotationweight'])
+
     def _cost_field_fmt(self, cost):
         current = len(str(int(cost))) + self._cost_field_precision + 1
         if current > self._cost_field_width:
@@ -1906,7 +1923,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
     def get_cost(self):
         """Override for the Encoding get_cost function.
 
-        This is P( D_W | theta, Y ) + ???
+        This is P( D_W | theta, Y )
         """
         if self.boundaries == 0:
             return 0.0

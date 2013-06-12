@@ -286,18 +286,31 @@ class CatmapModel(object):
                     addc = 1
                 segments, _ = self.viterbi_segment(w)
                 if addc > 0:
+                    change_counts = ChangeCounts()
                     if w in word_backlinks:
                         i_new = word_backlinks[w]
+                        old_seg = self.segmentations[i_new]
+                        change_counts.update(old_seg.analysis,
+                                             -old_seg.count,
+                                             corpus_index=i_new)
+                        for morph in self.detag_word(old_seg.analysis):
+                            self._modify_morph_count(morph, -old_seg.count)
                         self.segmentations[i_new] = WordAnalysis(
-                            self.segmentations[i_new].count + addc,
-                            self.segmentations[i_new].analysis)
+                            old_seg.count + addc,
+                            segments)
                     else:
                         self.add_corpus_data([WordAnalysis(addc, segments)])
                         i_new = len(self.segmentations) - 1
                         word_backlinks[w] = i_new
+                    new_count = self.segmentations[i_new].count
+                    change_counts.update(self.segmentations[i_new].analysis,
+                                         new_count, corpus_index=i_new)
+                    for morph in self.detag_word(segments):
+                        self._modify_morph_count(morph, new_count)
 
                     # FIXME This is crude and wasteful
-                    self.reestimate_probabilities()
+                    #self.reestimate_probabilities()
+                    self._update_counts(change_counts, 1)
 
                     self.training_focus = set((i_new,))
                     self._single_epoch_iteration()
@@ -578,13 +591,9 @@ class CatmapModel(object):
 
         theta(t) = arg min { L( theta, Y(t), D ) }
         """
-        utils.memlog('Reestimate: top')
         self._calculate_usage_features()
-        utils.memlog('Reestimate: after usage')
         self._calculate_transition_counts()
-        utils.memlog('Reestimate: after transitions')
         self._calculate_emission_counts()
-        utils.memlog('Reestimate: after emissions')
 
     def _calculate_usage_features(self):
         """Recalculates the morph usage features (perplexities).

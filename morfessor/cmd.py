@@ -674,6 +674,9 @@ Simple usage examples (training and testing):
                  'The format of the list is a string of (unquoted) ' +
                  'operation names separated by single commas (no space). ' +
                  "(default '%(default)s').")
+    add_arg('--online-epochint', dest="epochinterval", type=int,
+            default=10000, metavar='<int>',
+            help="epoch interval for online training (default %(default)s)")
 
     # Options for semi-supervised model training
     add_arg = parser.add_argument_group(
@@ -930,6 +933,11 @@ def catmap_main(args):
                 prev_weight, f_prev, direction))
 
         for i in range(args.weightlearn_epochs):
+            # Revert the changes by reloading the checkpoint model.
+            # Good steps are also reverted, to prevent accumulated gains
+            # and make the comparison fair.
+            model = io.read_binary_model_file(args.checkpointfile)
+            model.set_corpus_coding_weight(prev_weight)
             if direction == 0:
                 break
             next_weight = corpus_weight_updater.update_model(
@@ -944,18 +952,18 @@ def catmap_main(args):
                     next_weight, f, direction))
             if f > f_prev:
                 # Accept the step
-                _logger.info('Accepted the step')
+                _logger.info('Accepted the step to {}'.format(next_weight))
                 prev_weight = next_weight
                 f_prev = f
             else:
-                _logger.info('Reverting to weight {}'.format(prev_weight))
+                _logger.info('Rejected the step, ' +
+                    'reverting to weight {}'.format(prev_weight))
                 # Discard the step and try again with a smaller step
                 direction = prev_direction
-            # Revert the changes by reloading the checkpoint model.
-            # Good steps are also reverted, to prevent accumulated gains
-            # and make the comparison fair.
-            model = io.read_binary_model_file(args.checkpointfile)
-            model.set_corpus_coding_weight(prev_weight)
+        # Start normal training from the checkpoint using the optimized weight
+        model = io.read_binary_model_file(args.checkpointfile)
+        model.set_corpus_coding_weight(prev_weight)
+        _logger.info('Final learned corpus weight {}'.format(prev_weight))
 
         """
         if args.annofile is not None:
@@ -1006,8 +1014,8 @@ def catmap_main(args):
         # Always reads from stdin
         data = io.read_corpus_files('-')
         model.train_online(data, count_modifier=dampfunc,
-                           epoch_interval=100, max_epochs=args.max_epochs)
-                           # FIXME epoch interval as param
+                           epoch_interval=args.epochinterval,
+                           max_epochs=args.max_epochs)
     if args.trainmode in ('batch', 'online+batch'):
         ts = time.time()
         model.train_batch(min_epoch_cost_gain=args.min_epoch_cost_gain,

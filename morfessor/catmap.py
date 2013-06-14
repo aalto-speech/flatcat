@@ -1732,7 +1732,7 @@ class CatmapLexiconEncoding(baseline.LexiconEncoding):
                   - self.boundaries * math.log(self.boundaries)
                   - self.logtokensum
                   + self.permutations_cost()
-                  + self.logfeaturesum   # FIXME should it be weighted?
+                  + self.logfeaturesum
                  ) * self.weight
                  + self.frequency_distribution_cost())
 
@@ -1749,7 +1749,6 @@ class CatmapEncoding(baseline.CorpusEncoding):
     tokens: the number of emissions observed.
     boundaries: the number of word tokens observed.
     """
-    # can inherit without change: frequency_distribution_cost,
 
     def __init__(self, morph_usage, lexicon_encoding, weight=1.0):
         self._morph_usage = morph_usage
@@ -1774,6 +1773,8 @@ class CatmapEncoding(baseline.CorpusEncoding):
         # to avoid wasting effort recalculating.
         self._log_transitionprob_cache = dict()
         self._log_emissionprob_cache = dict()
+
+        self.logcondprobsum = 0.0
 
     # Transition count methods
 
@@ -1854,6 +1855,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
     def update_emission_count(self, category, morph, diff_count):
         """Updates the number of observed emissions of a single morph from a
         single category, and the logtokensum (which is category independent).
+        Updates logcondprobsum.
 
         Arguments:
             category -- name of category from which emission occurs.
@@ -1861,17 +1863,24 @@ class CatmapEncoding(baseline.CorpusEncoding):
             diff_count -- the change in the number of occurences.
         """
         cat_index = get_categories().index(category)
+        old_count = self._emission_counts[morph][cat_index]
+        new_count = old_count + diff_count
+        logcondprob = zlog(self._morph_usage.condprobs(morph)[cat_index])
+        if old_count > 0:
+            self.logcondprobsum -= old_count * logcondprob
+        if new_count > 0:
+            self.logcondprobsum += new_count * logcondprob
         new_counts = self._emission_counts[morph]._replace(
-            **{category: (self._emission_counts[morph][cat_index] +
-                          diff_count)})
-        self.set_emission_counts(morph, new_counts)
+            **{category: new_count})
+        self._set_emission_counts(morph, new_counts)
 
         # invalidate cache
         self._log_emissionprob_cache.clear()
 
-    def set_emission_counts(self, morph, new_counts):
+    def _set_emission_counts(self, morph, new_counts):
         """Set the number of emissions of a morph from all categories
         simultaneously.
+        Does not update logcondprobsum.
 
         Arguments:
             morph -- string representation of the morph.
@@ -1899,6 +1908,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
         Use before fully reprocessing a tagged segmented corpus."""
         self.tokens = 0
         self.logtokensum = 0.0
+        self.logcondprobsum = 0.0
         self._emission_counts.clear()
         self._log_emissionprob_cache.clear()
 
@@ -1974,9 +1984,10 @@ class CatmapEncoding(baseline.CorpusEncoding):
         return  ((n * math.log(n)
                   - self.boundaries * math.log(self.boundaries)
                   - self.logtokensum
+                  - self.logcondprobsum
                   + transition_matrix_cost
                  ) * self.weight
-                 #+ self.frequency_distribution_cost())
+                 #+ self.frequency_distribution_cost()
                 )
 
 

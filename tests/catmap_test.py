@@ -529,6 +529,10 @@ class TestModelConsistency(unittest.TestCase):
                 self.model._corpus_coding._transition_counts),
             'cat_tagcount': dict(self.model._corpus_coding._cat_tagcount)}
         state_approx = {
+            'corpus_logtokensum': float(
+                self.model._corpus_coding.logtokensum),
+            'corpus_logcondprobsum': float(
+                self.model._corpus_coding.logcondprobsum),
             'lexicon_logtokensum': float(
                 self.model._lexicon_coding.logtokensum),
             'logfeaturesum': float(self.model._lexicon_coding.logfeaturesum)}
@@ -536,8 +540,8 @@ class TestModelConsistency(unittest.TestCase):
                 self.model._morph_usage.category_token_count):
             state_approx['category_token_count_{}'.format(i)] = float(tmp)
         if self.model._annot_coding is not None:
-            state_approx['annot_penaltysum'] = float(
-                self.model._annot_coding.penaltysum)
+            state_approx['annot_logtokensum'] = float(
+                self.model._annot_coding.logtokensum)
             state_exact['annot_constructions'] = sorted(
                 self.model._annot_coding.constructions)
         return (state_exact, state_approx)

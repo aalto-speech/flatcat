@@ -1984,10 +1984,10 @@ class CatmapEncoding(baseline.CorpusEncoding):
         return  ((n * math.log(n)
                   - self.boundaries * math.log(self.boundaries)
                   - self.logtokensum
-                  - self.logcondprobsum
+                  + self.logcondprobsum
                   + transition_matrix_cost
                  ) * self.weight
-                 #+ self.frequency_distribution_cost()
+                 + self.frequency_distribution_cost()
                 )
 
 

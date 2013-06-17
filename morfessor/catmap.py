@@ -1865,7 +1865,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
         cat_index = get_categories().index(category)
         old_count = self._emission_counts[morph][cat_index]
         new_count = old_count + diff_count
-        logcondprob = zlog(self._morph_usage.condprobs(morph)[cat_index])
+        logcondprob = -zlog(self._morph_usage.condprobs(morph)[cat_index])
         if old_count > 0:
             self.logcondprobsum -= old_count * logcondprob
         if new_count > 0:
@@ -1962,7 +1962,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
                 sum_transitions_to[next_cat] += count
                 total += count
                 if count > 0:
-                    transition_matrix_cost -= math.log(count)
+                    transition_matrix_cost += math.log(count)
         for cat in categories:
             # These hold, because for each incoming transition there is
             # exactly one outgoing transition (except for word boundary,
@@ -1975,17 +1975,15 @@ class CatmapEncoding(baseline.CorpusEncoding):
                 # over all category pairs (which would be len(categories)
                 # times the cat_tagcount, but the -1 is for the numerator
                 # in the category sum, which has been simplified.
-                transition_matrix_cost += ((len(categories) - 1) *
+                transition_matrix_cost -= ((len(categories) + 1) *
                                     math.log(self._cat_tagcount[cat]))
         transition_matrix_cost += len(categories) * math.log(total)
-        assert(transition_matrix_cost >= 0)
+        assert(transition_matrix_cost < 0)
 
-        n = self.tokens + self.boundaries
-        return  ((n * math.log(n)
-                  - self.boundaries * math.log(self.boundaries)
+        return  ((self.tokens * math.log(self.tokens)
                   - self.logtokensum
-                  + self.logcondprobsum
-                  + transition_matrix_cost
+                  - self.logcondprobsum
+                  - transition_matrix_cost
                  ) * self.weight
                  + self.frequency_distribution_cost()
                 )

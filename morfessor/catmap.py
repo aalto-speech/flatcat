@@ -1930,24 +1930,12 @@ class CatmapEncoding(baseline.CorpusEncoding):
     def update_count(self, construction, old_count, new_count):
         raise Exception('Inherited method not appropriate for CatmapEncoding')
 
-    def get_cost(self):
-        """Override for the Encoding get_cost function.
-
-        This is P( D_W | theta, Y )
-        """
-        if self.boundaries == 0:
-            return 0.0
-
-        # transition_matrix_cost is a simplified expression containing
-        # all terms relating to the transition count matrix.
-        # This can't be accumulated in log sum form, due to different total
-        # number of transitions
+    def logtransitionsum(self):
         categories = get_categories(wb=True)
-        transition_matrix_cost = 0.0
-        total = 0.0
+        t_cost = 0.0
         # FIXME: this can be optimized when getting rid of the assertions
         # except if implementing hierarchy: then the incoming == outgoing
-        # assumption doesn't hold anymore
+        # assumption doesn't necessarily hold anymore
         sum_transitions_from = collections.Counter()
         sum_transitions_to = collections.Counter()
         forbidden = MorphUsageProperties.zero_transitions
@@ -1960,9 +1948,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
                     continue
                 sum_transitions_from[prev_cat] += count
                 sum_transitions_to[next_cat] += count
-                total += count
-                if count > 0:
-                    transition_matrix_cost += math.log(count)
+                t_cost += count * math.log(count)
         for cat in categories:
             # These hold, because for each incoming transition there is
             # exactly one outgoing transition (except for word boundary,
@@ -1970,20 +1956,23 @@ class CatmapEncoding(baseline.CorpusEncoding):
             assert sum_transitions_from[cat] == sum_transitions_to[cat]
             assert sum_transitions_to[cat] == self._cat_tagcount[cat]
 
-            if self._cat_tagcount[cat] > 0:
-                # transitionsum itself should be normalized by the sum
-                # over all category pairs (which would be len(categories)
-                # times the cat_tagcount, but the -1 is for the numerator
-                # in the category sum, which has been simplified.
-                transition_matrix_cost -= ((len(categories) + 1) *
-                                    math.log(self._cat_tagcount[cat]))
-        transition_matrix_cost += len(categories) * math.log(total)
-        assert(transition_matrix_cost < 0)
+        assert t_cost >= 0
+        return t_cost
 
+    def get_cost(self):
+        """Override for the Encoding get_cost function.
+
+        This is P( D_W | theta, Y )
+        """
+        if self.boundaries == 0:
+            return 0.0
+
+        n = self.tokens + self.boundaries
         return  ((self.tokens * math.log(self.tokens)
                   - self.logtokensum
                   - self.logcondprobsum
-                  - transition_matrix_cost
+                  - self.logtransitionsum()
+                  + n * math.log(n)
                  ) * self.weight
                  + self.frequency_distribution_cost()
                 )

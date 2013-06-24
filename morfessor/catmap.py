@@ -346,7 +346,7 @@ class CatmapModel(object):
         return operation
 
     def _train_iteration(self):
-        """One iteration of training, which contains several epochs
+        """One iteration of training, which may contain several epochs
         of each operation in sequence.
         """
         self._changed_segmentations = set()  # FIXME: use for convergence
@@ -575,7 +575,7 @@ class CatmapModel(object):
                     'resegment')
 
     def _single_epoch_iteration(self):
-        """Onel iteration of training, with exactly one epoch of each
+        """One iteration of training, with exactly one epoch of each
         operation and no convergence checks or update passes."""
         for i in range(len(self.training_operations)):
             operation = self._resolve_operation(i)

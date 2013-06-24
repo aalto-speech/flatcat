@@ -8,7 +8,7 @@ import time
 
 from . import get_version
 from .baseline import BaselineModel
-from .catmap import CatmapModel, CorpusWeightUpdater
+from .catmap import CatmapModel, CorpusWeightUpdater, train_batch
 from .categorizationscheme import MorphUsageProperties, HeuristicPostprocessor
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
@@ -928,93 +928,17 @@ def catmap_main(args):
     # Perform weight learning using development annotations
     if develannots is not None:
         corpus_weight_updater = CorpusWeightUpdater(
-            develannots, heuristic=heuristic)
+            develannots, heuristic, io, args.checkpointfile)
+        weight_learn_func = corpus_weight_updater.weight_learning
         model.set_focus_sample(args.wlearn_sample_size)
-        callbacks = model.toggle_callbacks(None)
 
-        _logger.info('Performing weight learning')
-        model._iteration_update()
-        io.write_binary_model_file(args.checkpointfile, model)
-        prev_weight = model.get_corpus_coding_weight()
-        model.weightlearn_probe()
-        (f_prev, direction) = corpus_weight_updater.calculate_update(
-                                model, threshold=0.01)
-        _logger.info(
-            'Initial corpus weight: ' +
-            '{}, f-measure: {}, direction: {}'.format(
-                prev_weight, f_prev, direction))
+        _logger.info('Performing initial weight learning')
+        (model, must_train) = corpus_weight_updater.weight_learning(
+            model, args.weightlearn_epochs)
 
-        for i in range(args.weightlearn_epochs):
-            # Revert the changes by reloading the checkpoint model.
-            # Good steps are also reverted, to prevent accumulated gains
-            # and make the comparison fair.
-            model = io.read_binary_model_file(args.checkpointfile)
-            model.set_corpus_coding_weight(prev_weight)
-            if direction == 0:
-                break
-            next_weight = corpus_weight_updater.update_model(
-                                model, i + 1, direction)
-            model.weightlearn_probe()
-            prev_direction = direction
-            (f, direction) = corpus_weight_updater.calculate_update(
-                                    model, threshold=0.01)
-            _logger.info(
-                'Weight learning iteration {}: '.format(i) +
-                'corpus weight {}, f-measure: {}, direction: {}'.format(
-                    next_weight, f, direction))
-            if f > f_prev:
-                # Accept the step
-                _logger.info('Accepted the step to {}'.format(next_weight))
-                prev_weight = next_weight
-                f_prev = f
-            else:
-                _logger.info('Rejected the step, ' +
-                    'reverting to weight {}'.format(prev_weight))
-                # Discard the step and try again with a smaller step
-                direction = prev_direction
-        # Start normal training from the checkpoint using the optimized weight
-        model = io.read_binary_model_file(args.checkpointfile)
-        model.set_corpus_coding_weight(prev_weight)
-        _logger.info('Final learned corpus weight {}'.format(prev_weight))
-
-        """
-        if args.annofile is not None:
-            model.weightlearn_probe()   # FIXME duplicated effort
-            (anno_f_prev, anno_dir) = anno_weight_updater.calculate_update(
-                                        model, threshold=0.01)
-            prev_weight = model.get_annotation_coding_weight()
-            for i in range(args.weightlearn_epochs):
-                if 1.0 - anno_f_prev > 0.01:
-                    # Annotations are not segmented correctly
-                    anno_step_dir = 1
-                    #if (anno_dir == -1 and
-                    #        direction == -1 and
-                    #        args.annotationsuperpenalty > 0):
-                    #    # Both sets are undersegmented
-                else:
-                    # Annotations are segmented correctly,
-                    # try lower weight
-                    anno_step_dir = -1
-                next_weight = annotation_weight_updater.update_model(
-                                model, i + 1, anno_step_dir)
-                model.weightlearn_probe()
-                (anno_f, anno_dir) = anno_weight_updater.calculate_update(
-                                        model, threshold=0.01)
-                (f, direction) = corpus_weight_updater.calculate_update(
-                                        model, threshold=0.01)
-                _logger.info(
-                    'Annotation weight learning iteration {}: '.format(i) +
-                    'annotation weight {}, devset f-measure: {}, '.format(
-                        next_weight, f) +
-                    'annotation f-measure: {}'.format(anno_f))
-                if f > f_prev:
-                    pass
-        """
-
-        model._iteration_number = 1
-        model.toggle_callbacks(callbacks)
         model.training_focus = None
-        must_train = True
+    else:
+        weight_learn_func = None
 
     # Train model, if there is new data to train on
     if args.trainmode == 'none':
@@ -1029,16 +953,16 @@ def catmap_main(args):
                            epoch_interval=args.epochinterval,
                            max_epochs=args.max_epochs)
     if args.trainmode in ('batch', 'online+batch'):
+        model.batch_parameters(min_epoch_cost_gain=args.min_epoch_cost_gain,
+                               min_iter_cost_gain=args.min_iter_cost_gain,
+                               max_iterations=args.max_iterations,
+                               max_epochs_first=args.max_epochs_first,
+                               max_epochs=args.max_epochs,
+                               max_resegment_epochs=args.max_resegment_epochs,
+                               max_shift_distance=args.max_shift_distance,
+                               min_shift_remainder=args.min_shift_remainder)
         ts = time.time()
-        model.train_batch(min_epoch_cost_gain=args.min_epoch_cost_gain,
-                          min_iter_cost_gain=args.min_iter_cost_gain,
-                          min_difference_proportion=args.min_diff_prop,
-                          max_iterations=args.max_iterations,
-                          max_epochs_first=args.max_epochs_first,
-                          max_epochs=args.max_epochs,
-                          max_resegment_epochs=args.max_resegment_epochs,
-                          max_shift_distance=args.max_shift_distance,
-                          min_shift_remainder=args.min_shift_remainder)
+        model = train_batch(model, weight_learn_func)
         _logger.info('Final cost: {}'.format(model.get_cost()))
         te = time.time()
         _logger.info('Training time: {:.3f}s'.format(te - ts))

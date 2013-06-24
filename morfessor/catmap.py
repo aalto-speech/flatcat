@@ -43,6 +43,30 @@ SortedAnalysis = collections.namedtuple('SortedAnalysis',
                                          'index', 'brakdown'])
 
 
+def train_batch(model, weight_learn_func=None):
+    previous_cost = model.get_cost()
+    force_another = False
+    for iteration in range(model._max_iterations):
+        model._train_iteration()
+
+        cost = model.get_cost()
+        cost_diff = cost - previous_cost
+        limit = model._cost_convergence_limit(model._min_iter_cost_gain)
+
+        if weight_learn_func is not None:
+            (model, force_another) = weight_learn_func(model)
+
+        converged = (not force_another) and -cost_diff <= limit
+        model._log_cost(cost_diff, limit, 'iteration',
+                        iteration, model._max_iterations, converged)
+        if converged:
+            _logger.info('{:24s} Cost: {}'.format(
+                'final iteration.', cost))
+            break
+        previous_cost = cost
+    return model
+
+
 class CatmapModel(object):
     """Morfessor Categories-MAP model class."""
 
@@ -179,17 +203,11 @@ class CatmapModel(object):
         baseline model.
         """
 
-        utils.memlog('initializing')
         self._calculate_usage_features()
-        utils.memlog('after usage features')
         self._unigram_transition_probs()
-        utils.memlog('after unigram transition')
         self.viterbi_tag_corpus()
-        utils.memlog('after tagging')
         self._calculate_transition_counts()
-        utils.memlog('after real transitiins')
         self._calculate_emission_counts()
-        utils.memlog('after emissions')
 
     def initialize_hmm(self, min_difference_proportion=0.005):
         """Initialize emission and transition probabilities without
@@ -211,17 +229,13 @@ class CatmapModel(object):
 
         self._iteration_number = 1
 
-    def train_batch(self, min_epoch_cost_gain=0.0025, min_iter_cost_gain=0.005,
-                    min_difference_proportion=0.005,
-                    max_iterations=15, max_epochs_first=1, max_epochs=1,
-                    max_resegment_epochs=1,
-                    max_shift_distance=2,
-                    min_shift_remainder=2):
-        """Perform Cat-MAP training on the model.
-        The model must have been initialized, either by loading a baseline
-        segmentation or a pretrained catmap model from pickle or tagged
-        segmentation file.
-        """
+    def batch_parameters(self, min_epoch_cost_gain=0.0025,
+                         min_iter_cost_gain=0.005,
+                         max_iterations=10, max_epochs_first=1, max_epochs=1,
+                         max_resegment_epochs=1,
+                         max_shift_distance=2,
+                         min_shift_remainder=2):
+        """Set parameters for batch Cat-MAP training of the model."""
         self._min_epoch_cost_gain = min_epoch_cost_gain
         self._min_iter_cost_gain = min_iter_cost_gain
         self._max_iterations = max_iterations
@@ -231,19 +245,6 @@ class CatmapModel(object):
         self._max_shift = max_shift_distance
         self._min_shift_remainder = min_shift_remainder
         self._online = False
-
-        if self._iteration_number == 0:
-            # Zero:th pre-iteration: let probabilities converge
-            self.initialize_hmm(min_difference_proportion)
-        self._iteration_update()
-        self._iteration_number = 1
-
-        self.convergence_of_cost(
-            self._train_iteration,
-            self._iteration_update,
-            max_iterations=max_iterations,
-            min_cost_gain=min_iter_cost_gain,
-            iteration_name='iteration')
 
     def train_online(self, data, count_modifier=None, epoch_interval=10000,
                      max_epochs=None):
@@ -348,7 +349,19 @@ class CatmapModel(object):
     def _train_iteration(self):
         """One iteration of training, which may contain several epochs
         of each operation in sequence.
+
+        The model must have been initialized, either by loading a baseline
+        segmentation or a pretrained catmap model from pickle or tagged
+        segmentation file, and calling initialize_baseline and/or
+        initialize_hmm
         """
+        cost = self.get_cost()
+        msg = ('{:9s} {:2d}/{:<2d}          Cost: {:' +
+                self._cost_field_fmt(cost) + 'f}.')
+        _logger.info(msg.format('iteration',
+                                self._iteration_number + 1,
+                                self._max_iterations,
+                                cost))
         self._changed_segmentations = set()  # FIXME: use for convergence
         while self._operation_number < len(self.training_operations):
             operation = self._resolve_operation(self._operation_number)
@@ -369,8 +382,7 @@ class CatmapModel(object):
                 lambda: self._transformation_epoch(operation()),
                 update_func=update_func,
                 min_cost_gain=min_epoch_cost_gain,
-                max_iterations=max_epochs,
-                iteration_name='epoch')
+                max_iterations=max_epochs)
             self.reestimate_probabilities()
             self._operation_number += 1
             for callback in self.operation_callbacks:
@@ -396,8 +408,7 @@ class CatmapModel(object):
 
     def convergence_of_cost(self, train_func, update_func,
                             min_cost_gain=0.005,
-                            max_iterations=5,
-                            iteration_name='iter'):
+                            max_iterations=5):
         """Iterates the specified training function until the model cost
         no longer improves enough or until maximum number of iterations
         is reached.
@@ -419,8 +430,6 @@ class CatmapModel(object):
                              iterations is below this limit * #boundaries.
                              Default 0.005.
             max_iterations -- Maximum number of iterations (epochs). Default 5.
-            iteration_name -- Name for the level of iteration,
-                              to get meaningful log messages.
         """
 
         previous_cost = self.get_cost()
@@ -428,48 +437,55 @@ class CatmapModel(object):
             cost = self.get_cost()
             msg = ('{:9s} {:2d}/{:<2d}          Cost: {:' +
                    self._cost_field_fmt(cost) + 'f}.')
-            _logger.info(msg.format(iteration_name,
+            _logger.info(msg.format('epoch',
                                     iteration + 1, max_iterations,
                                     cost))
 
             # perform the optimization
             train_func()
 
-            cost = self.get_cost()
-            cost_diff = cost - previous_cost
-
-            if iteration_name == 'epoch':
-                for callback in self.epoch_callbacks:
-                    callback(self, iteration)
-
             # perform update between optimization iterations
             if update_func is not None:
                 _logger.info('{:24s} Cost: {}'.format(
-                    'Before ' + iteration_name + ' update.', cost))
+                    'Before epoch update.', cost))
+
+            # perform update between optimization iterations
+            if update_func is not None:
                 force_another = update_func()
             else:
                 force_another = False
 
-            limit = min_cost_gain * self._corpus_coding.boundaries
-            if (not force_another) and -cost_diff <= limit:
+            for callback in self.epoch_callbacks:
+                callback(self, iteration)
+            
+            cost = self.get_cost()
+            cost_diff = cost - previous_cost
+            limit = self._cost_convergence_limit(min_cost_gain)
+            converged = (not force_another) and -cost_diff <= limit
+            self._log_cost(cost_diff, limit, 'epoch',
+                           iteration, max_iterations, converged)
+            if converged:
                 _logger.info('{:24s} Cost: {}'.format(
-                    iteration_name + ' final.', self.get_cost()))
-                msg = ('Cost difference {:' +
-                            self._cost_field_fmt(cost_diff) + 'f} ' +
-                       '(limit {}) ' +
-                       'in {:9s} {:2d}    (Converged).')
-                _logger.info(msg.format(cost_diff, limit,
-                                        iteration_name, iteration + 1))
-                break
-            else:
-                msg = ('Cost difference {:' +
-                            self._cost_field_fmt(cost_diff) + 'f} ' +
-                       '(limit {}) ' +
-                       'in {:9s} {:2d}/{:<2d}')
-                _logger.info(msg.format(cost_diff, limit,
-                                        iteration_name, iteration + 1,
-                                        max_iterations))
+                    'final epoch.', cost))
+                return
             previous_cost = cost
+
+    def _log_cost(self, cost_diff, limit, iteration_name,
+                  iteration, max_iterations, converged):
+        msg = ('Cost difference {:' +
+                    self._cost_field_fmt(cost_diff) + 'f} ' +
+                '(limit {}) ' +
+                'in {:9s} {:2d}/{:<2d} {}')
+        if converged:
+            conv = '(Converged)'
+        else:
+            conv = ''
+        _logger.info(msg.format(cost_diff, limit,
+                                iteration_name, iteration + 1,
+                                max_iterations, conv))
+        
+    def _cost_convergence_limit(self, min_cost_gain=0.005):
+        limit = min_cost_gain * self._corpus_coding.boundaries
 
     def convergence_of_analysis(self, train_func, resegment_func,
                                 min_difference_proportion=0,
@@ -2018,11 +2034,16 @@ class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
 
 
 class CorpusWeightUpdater(object):
-    def __init__(self, annotations, heuristic):
+    def __init__(self, annotations, heuristic, io, checkpointfile,
+                 max_epochs=2, threshold=0.01):
         self.annotations = annotations
         self.heuristic = heuristic
+        self.io = io
+        self.checkpointfile = checkpointfile
+        self.max_epochs = max_epochs
+        self.threshold = threshold
 
-    def calculate_update(self, model, threshold=0.01):
+    def calculate_update(self, model):
         """Tune model corpus weight based on the precision and
         recall of the development data, trying to keep them equal"""
         tmp = self.annotations.items()
@@ -2038,7 +2059,7 @@ class CorpusWeightUpdater(object):
                     for w in wlist]
         pre, rec, f = baseline.AnnotationsModelUpdate._bpr_evaluation(
                          [[x] for x in segments], annotations)
-        if abs(pre - rec) < threshold:
+        if abs(pre - rec) < self.threshold:
             direction = 0
         elif rec > pre:
             direction = 1
@@ -2055,6 +2076,61 @@ class CorpusWeightUpdater(object):
                 weight *= 1.0 / (1 + 2.0 / epochs)
             model.set_corpus_coding_weight(weight)
         return weight
+
+    def weight_learning(self, model, max_epochs=None):
+        if max_epochs is None:
+            max_epochs = self.max_epochs
+        real_iteration_number = model._iteration_number
+        callbacks = model.toggle_callbacks(None)
+        model._iteration_update()
+        self.io.write_binary_model_file(self.checkpointfile, model)
+        first_weight = model.get_corpus_coding_weight()
+        prev_weight = first_weight
+        model.weightlearn_probe()
+        (f_prev, direction) = self.calculate_update(model)
+
+        _logger.info(
+            'Initial corpus weight: ' +
+            '{}, f-measure: {}, direction: {}'.format(
+                prev_weight, f_prev, direction))
+
+        for i in range(max_epochs):
+            # Revert the changes by reloading the checkpoint model.
+            # Good steps are also reverted, to prevent accumulated gains
+            # and make the comparison fair.
+            model = self.io.read_binary_model_file(self.checkpointfile)
+            model.set_corpus_coding_weight(prev_weight)
+            if direction == 0:
+                break
+            next_weight = self.update_model(model,
+                                            i + real_iteration_number,
+                                            direction)
+            model.weightlearn_probe()
+            prev_direction = direction
+            (f, direction) = self.calculate_update(model)
+            _logger.info(
+                'Weight learning iteration {}: '.format(i) +
+                'corpus weight {}, f-measure: {}, direction: {}'.format(
+                    next_weight, f, direction))
+            if f > f_prev:
+                # Accept the step
+                _logger.info('Accepted the step to {}'.format(next_weight))
+                prev_weight = next_weight
+                f_prev = f
+            else:
+                _logger.info('Rejected the step, ' +
+                    'reverting to weight {}'.format(prev_weight))
+                # Discard the step and try again with a smaller step
+                direction = prev_direction
+        # Start normal training from the checkpoint using the optimized weight
+        model = self.io.read_binary_model_file(self.checkpointfile)
+        model._iteration_number = real_iteration_number
+        model.training_focus = None
+        model.toggle_callbacks(callbacks)
+        model.set_corpus_coding_weight(prev_weight)
+        _logger.info('Final learned corpus weight {}'.format(prev_weight))
+
+        return (model, model.get_corpus_coding_weight() != first_weight)
 
 
 def _log_catprobs(probs):

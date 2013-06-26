@@ -55,10 +55,12 @@ def train_batch(model, weight_learn_func=None):
         limit = model._cost_convergence_limit(model._min_iter_cost_gain)
 
         if weight_learn_func is not None:
-            (model, force_another) = weight_learn_func(model)
-        force_another = force_another or model._iteration_update()
+            (model, wl_force_another) = weight_learn_func(model)
+        u_force_another = model._iteration_update()
 
-        converged = (not force_another) and -cost_diff <= limit
+        converged = ((not wl_force_another) and
+                     (not u_force_another) and
+                     (-cost_diff <= limit))
         model._log_cost(cost_diff, limit, 'iteration',
                         iteration, model._max_iterations, converged)
         if converged:
@@ -405,7 +407,7 @@ class CatmapModel(object):
             utils.memlog('after annotation choice update')
 
         self._operation_number = 0
-        if no_increment:
+        if not no_increment:
             self._iteration_number += 1
         return force_another
 

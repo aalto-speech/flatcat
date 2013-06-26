@@ -44,6 +44,7 @@ SortedAnalysis = collections.namedtuple('SortedAnalysis',
 
 
 def train_batch(model, weight_learn_func=None):
+    model._iteration_update(no_increment=True)
     previous_cost = model.get_cost()
     force_another = False
     for iteration in range(model._max_iterations):
@@ -55,6 +56,7 @@ def train_batch(model, weight_learn_func=None):
 
         if weight_learn_func is not None:
             (model, force_another) = weight_learn_func(model)
+        force_another = force_another or model._iteration_update()
 
         converged = (not force_another) and -cost_diff <= limit
         model._log_cost(cost_diff, limit, 'iteration',
@@ -359,7 +361,7 @@ class CatmapModel(object):
         msg = ('{:9s} {:2d}/{:<2d}          Cost: {:' +
                 self._cost_field_fmt(cost) + 'f}.')
         _logger.info(msg.format('iteration',
-                                self._iteration_number + 1,
+                                self._iteration_number,
                                 self._max_iterations,
                                 cost))
         self._changed_segmentations = set()  # FIXME: use for convergence
@@ -388,7 +390,7 @@ class CatmapModel(object):
             for callback in self.operation_callbacks:
                 callback(self)
 
-    def _iteration_update(self):
+    def _iteration_update(self, no_increment=False):
         force_another = False
 
         if self._supervised:
@@ -403,7 +405,8 @@ class CatmapModel(object):
             utils.memlog('after annotation choice update')
 
         self._operation_number = 0
-        self._iteration_number += 1
+        if no_increment:
+            self._iteration_number += 1
         return force_another
 
     def convergence_of_cost(self, train_func, update_func,
@@ -485,7 +488,7 @@ class CatmapModel(object):
                                 max_iterations, conv))
         
     def _cost_convergence_limit(self, min_cost_gain=0.005):
-        limit = min_cost_gain * self._corpus_coding.boundaries
+        return min_cost_gain * self._corpus_coding.boundaries
 
     def convergence_of_analysis(self, train_func, resegment_func,
                                 min_difference_proportion=0,
@@ -600,7 +603,7 @@ class CatmapModel(object):
     def weightlearn_probe(self):
         self._single_epoch_iteration()
         self.reestimate_probabilities()
-        self._iteration_update()
+        self._iteration_update(no_increment=True)
 
     def reestimate_probabilities(self):
         """Re-estimates model parameters from a segmented, tagged corpus.
@@ -696,7 +699,6 @@ class CatmapModel(object):
         for (i, segmentation) in enumerate(self.segmentations):
             for morph in self.detag_word(segmentation.analysis):
                 self.morph_backlinks[morph].add(i)
-            i += 1
 
     def _find_in_corpus(self, rule, targets=None):
         """Returns the indices of words in the corpus segmentation
@@ -1259,10 +1261,13 @@ class CatmapModel(object):
         """Update the selection of alternative analyses in annotations."""
         if not self._supervised:
             return
+        # Will need to check for proper expansion when introducing
+        # hierarchical morphs
 
         constructions_add = collections.Counter()
-        constructions_rm = collections.Counter()
         blacklist = set()
+        # changes to the normal corpus counts
+        constructions_rm = collections.Counter()
         changes = ChangeCounts()
         for (i, annotation) in enumerate(self.annotations):
             (_, alternatives) = annotation
@@ -1276,8 +1281,8 @@ class CatmapModel(object):
             new_active = sorted_alts[0].analysis
 
             if old_active is not None:
-                changes.update(old_active, -1)
-            changes.update(new_active, 1)
+                changes.update(old_active, -1, corpus_index=i)
+            changes.update(new_active, 1, corpus_index=i)
 
             # Active segmentation is changed before removal/adding of morphs
             self.segmentations[i] = WordAnalysis(1, new_active)
@@ -1303,10 +1308,8 @@ class CatmapModel(object):
             self._annot_coding.set_count(supermorph,
                                          self._morph_usage.count(supermorph))
         for morph in constructions_add:
-            # Will need to check for proper expansion when introducing
-            # hierarchical morphs
-            self._annot_coding.set_count(morph,
-                                         self._morph_usage.count(morph))
+            count = self._morph_usage.count(morph)
+            self._annot_coding.set_count(morph, count)
 
     def add_annotations(self, annotations, annotatedcorpusweight=None,
         penalty=-999999, blacklist_penalty=-999999):
@@ -2026,6 +2029,7 @@ class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
         super(CatmapAnnotatedCorpusEncoding, self).update_count(construction,
                                                                 old_count,
                                                                 new_count)
+        assert new_count >= 0
         if construction in self.blacklist:
             if old_count > 0:
                 self.logtokensum -= self.blacklist_penalty
@@ -2082,7 +2086,7 @@ class CorpusWeightUpdater(object):
             max_epochs = self.max_epochs
         real_iteration_number = model._iteration_number
         callbacks = model.toggle_callbacks(None)
-        model._iteration_update()
+        model._iteration_update(no_increment=True)
         self.io.write_binary_model_file(self.checkpointfile, model)
         first_weight = model.get_corpus_coding_weight()
         prev_weight = first_weight

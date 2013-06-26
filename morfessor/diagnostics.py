@@ -26,9 +26,7 @@ class IterationStatistics(object):
         self.epoch_numbers = []
 
         self.costs = []
-        self.corpuscosts = []
-        self.lexiconcosts = []
-        self.penaltyfree = []
+        self.cost_parts = []
         self.tag_counts = []
         self.morph_types = []
         self.morph_tokens = []
@@ -70,9 +68,17 @@ class IterationStatistics(object):
         self.costs.append(model.get_cost())
         ccc = model._corpus_coding.get_cost()
         lcc = model._lexicon_coding.get_cost()
-        self.corpuscosts.append(ccc / model._corpus_coding.weight)
-        self.lexiconcosts.append(lcc / model._lexicon_coding.weight)
-        self.penaltyfree.append(ccc + lcc)
+        if model._supervised:
+            acc = model._annot_coding.get_cost()
+        else:
+            acc = 0
+        self.cost_parts.append([(ccc / model._corpus_coding.weight),
+                                (lcc / model._lexicon_coding.weight),
+                                (acc / model._annot_coding.weight),
+                                model._lexicon_coding.permutations_cost(),
+                                model._lexicon_coding.logfeaturesum,
+                                model._corpus_coding.logcondprobsum,
+                                model._corpus_coding.logtransitionsum()])
         tcounts = self._extract_tag_counts(model)
         self.tag_counts.append(tcounts)
         self.morph_types.append(len(model._morph_usage.seen_morphs()))
@@ -147,23 +153,20 @@ class IterationStatisticsPlotter(object):
         self._title()
 
     def basecosts(self):
-        plt.plot(self.stats.corpuscosts, color='red', marker='+')
-        plt.plot(self.stats.lexiconcosts, color='green', marker='+')
-        plt.plot([sum(x) for x in zip(self.stats.corpuscosts,
-                                      self.stats.lexiconcosts)],
-                 color='black', marker='+')
-        plt.plot(self.stats.penaltyfree, color='orange', marker='+')
+        plt.plot(self.stats.cost_parts, marker='+')
         self._iteration_grid()
         plt.xlabel('Epoch number')
-        plt.ylabel('Unweighted base cost (no penalties)')
-        plt.legend(['Corpus', 'Lexicon (approx)', 'Sum', 'Penaltyfree'])
+        plt.ylabel('Cost component')
+        plt.legend(['Corpus', 'Lexicon', 'Annots',
+                    'L perm', 'L feats', 'C cond', 'C trans'])
         self._title()
 
     def tag_counts(self):
-        unzipped = zip(*self.stats.tag_counts)
-        for (i, series) in enumerate(unzipped):
-            plt.plot(series, color=plt.cm.jet(float(i) /
-                float(len(self.stats.categories))), marker='+')
+        plt.plot(self.stats.tag_counts, marker='+')
+        #unzipped = zip(*self.stats.tag_counts)
+        #for (i, series) in enumerate(unzipped):
+        #    plt.plot(series, color=plt.cm.jet(float(i) /
+        #        float(len(self.stats.categories))), marker='+')
         self._iteration_grid()
         plt.xlabel('Epoch number')
         plt.ylabel('Category occurence count')

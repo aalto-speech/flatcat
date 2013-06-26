@@ -2038,6 +2038,19 @@ class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
             if new_count > 0:
                 self.logtokensum += self.blacklist_penalty
 
+    def update_weight(self):
+        """Update the weight of the Encoding by taking the ratio of the
+        corpus boundaries and annotated boundaries.
+        Does not scale by corpus weight,, unlike Morfessor Baseline.
+        """
+        if not self.do_update_weight:
+            return
+        old = self.weight
+        self.weight = float(self.corpus_coding.boundaries) / self.boundaries
+        if self.weight != old:
+            _logger.info("Corpus weight of annotated data set to %s"
+                         % self.weight)
+
 
 class CorpusWeightUpdater(object):
     def __init__(self, annotations, heuristic, io, checkpointfile,

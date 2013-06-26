@@ -1315,6 +1315,15 @@ class CatmapModel(object):
         penalty=-999999, blacklist_penalty=-999999):
         self._supervised = True
         self._annotations_tagged = True
+        if annotatedcorpusweight is None:
+            annotatedcorpusweight = int((len(self.segmentations) -
+                                         len(self.annotations)) /
+                                        (len(self.annotations) +
+                                         len(annotations)))
+        if annotatedcorpusweight == 0:
+            annotatedcorpusweight = 1
+        _logger.info('Annotated corpus weight rule of thumb: {}'.format(
+            annotatedcorpusweight))
         for (word, alternatives) in annotations.items():
             if alternatives[0][0].category == CategorizedMorph.no_category:
                 self._annotations_tagged = False
@@ -1322,7 +1331,7 @@ class CatmapModel(object):
             # annotations, in the same order as in self.annotations
             self.segmentations.insert(
                 len(self.annotations),
-                WordAnalysis(1, alternatives[0]))
+                WordAnalysis(annotatedcorpusweight, alternatives[0]))
             self.annotations.append((word, alternatives))
         self._calculate_morph_backlinks()
         self._annot_coding = CatmapAnnotatedCorpusEncoding(
@@ -2001,10 +2010,11 @@ class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
     def __init__(self, corpus_coding, weight=None,
                  penalty=-999999, blacklist_penalty=-999999):
         super(CatmapAnnotatedCorpusEncoding, self).__init__(corpus_coding,
-                                                            weight=weight,
+                                                            weight=1.0,
                                                             penalty=penalty)
         self.blacklist = set()
         self.blacklist_penalty = blacklist_penalty
+        self.realweight = weight
 
     def add_to_blacklist(self, morph):
         """Blacklist to prevent supermorphs of annotation parts from

@@ -46,7 +46,8 @@ SortedAnalysis = collections.namedtuple('SortedAnalysis',
 def train_batch(model, weight_learn_func=None):
     model._iteration_update(no_increment=True)
     previous_cost = model.get_cost()
-    force_another = False
+    wl_force_another = False
+    u_force_another = False
     for iteration in range(model._max_iterations):
         model._train_iteration()
 

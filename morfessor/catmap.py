@@ -314,8 +314,6 @@ class CatmapModel(object):
                     for morph in self.detag_word(segments):
                         self._modify_morph_count(morph, new_count)
 
-                    # FIXME This is crude and wasteful
-                    #self.reestimate_probabilities()
                     self._update_counts(change_counts, 1)
 
                     self.training_focus = set((i_new,))
@@ -788,8 +786,12 @@ class CatmapModel(object):
                     # Add the new representation to morph counts
                     self._modify_morph_count(morph, num_matches)
                 for target in matched_targets:
+                    is_annot = (self._supervised and
+                                target <= len(self.annotations))
                     old_analysis = self.segmentations[target]
-                    new_analysis = transform.apply(old_analysis, self)
+                    new_analysis = transform.apply(old_analysis,
+                                                   self,
+                                                   is_annot=is_annot)
 
                 # Apply change to encoding
                 self._update_counts(transform.change_counts, 1)
@@ -812,9 +814,12 @@ class CatmapModel(object):
                     for morph in self.detag_word(best.transform.result):
                         # Add the new representation to morph counts
                         self._modify_morph_count(morph, num_matches)
+                    is_annot = (self._supervised and
+                                target <= len(self.annotations))
                     new_analysis = best.transform.apply(
                                         self.segmentations[target],
-                                        self, corpus_index=target)
+                                        self, corpus_index=target,
+                                        is_annot=is_annot)
                     self.segmentations[target] = new_analysis
                     # any morph used in the best segmentation
                     # is no longer temporary
@@ -974,7 +979,9 @@ class CatmapModel(object):
         elif old_count > 0 and new_count == 0:
             self._lexicon_coding.remove(morph)
         if self._supervised:
-            self._annot_coding.update_count(morph, old_count, new_count)
+            self._annot_coding.update_morph_count(morph,
+                                                  old_count,
+                                                  new_count)
 
     def _update_counts(self, change_counts, multiplier):
         """Updates the model counts according to the pre-calculated
@@ -1308,11 +1315,11 @@ class CatmapModel(object):
         self._annot_coding.set_constructions(constructions_add)
         for supermorph in blacklist:
             self._annot_coding.add_to_blacklist(supermorph)
-            self._annot_coding.set_count(supermorph,
-                                         self._morph_usage.count(supermorph))
+            self._annot_coding.set_morph_count(supermorph,
+                self._morph_usage.count(supermorph))
         for morph in constructions_add:
             count = self._morph_usage.count(morph)
-            self._annot_coding.set_count(morph, count)
+            self._annot_coding.set_morph_count(morph, count)
 
     def add_annotations(self, annotations, annotatedcorpusweight=None,
         multiplier=1, penalty=-999999, blacklist_penalty=-999999):
@@ -1570,12 +1577,13 @@ class Transformation(object):
         else:
             self.result = result
         self.change_counts = ChangeCounts()
+        self.annot_counts = ChangeCounts()
 
     def __repr__(self):
         return '{}({}, {})'.format(self.__class__.__name__,
                                    self.rule, self.result)
 
-    def apply(self, word, model, corpus_index=None):
+    def apply(self, word, model, corpus_index=None, is_annot=False):
         """Tries to apply this transformation to an analysis.
         If the transformation doesn't match, the input is returned unchanged.
         If the transformation matches, changes are made greedily from the
@@ -1612,11 +1620,16 @@ class Transformation(object):
             self.change_counts.update(word.analysis, -word.count,
                                       corpus_index)
             self.change_counts.update(out, word.count, corpus_index)
+            if is_annot:
+                self.annot_counts.update(word.analysis, -word.count,
+                                        corpus_index)
+                self.annot_counts.update(out, word.count, corpus_index)
 
         return WordAnalysis(word.count, out)
 
     def reset_counts(self):
         self.change_counts = ChangeCounts()
+        self.annot_counts = ChangeCounts()
 
 
 class ViterbiResegmentTransformation(object):
@@ -1628,6 +1641,7 @@ class ViterbiResegmentTransformation(object):
         self.rule = TransformationRule(tuple(word.analysis))
         self.result, _ = model.viterbi_segment(word.analysis)
         self.change_counts = ChangeCounts()
+        self.annot_counts = ChangeCounts()
 
     def __repr__(self):
         return '{}({}, {})'.format(self.__class__.__name__,
@@ -1638,11 +1652,16 @@ class ViterbiResegmentTransformation(object):
             return word
         self.change_counts.update(word.analysis, -word.count,
                                     corpus_index)
-        self.change_counts.update(self.result, word.count, corpus_index)
+        self.change_counts.update(out, word.count, corpus_index)
+        if is_annot:
+            self.annot_counts.update(word.analysis, -word.count,
+                                    corpus_index)
+            self.annot_counts.update(out, word.count, corpus_index)
         return WordAnalysis(word.count, self.result)
 
     def reset_counts(self):
         self.change_counts = ChangeCounts()
+        self.annot_counts = ChangeCounts()
 
 
 class TransformationRule(object):
@@ -2025,13 +2044,13 @@ class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
             constructions)
         self.blacklist.clear()
 
-    def set_count(self, construction, count):
+    def set_morph_count(self, construction, count):
         super(CatmapAnnotatedCorpusEncoding, self).set_count(construction,
                                                              count)
         if count > 0 and construction in self.blacklist:
             self.logtokensum += self.blacklist_penalty
 
-    def update_count(self, construction, old_count, new_count):
+    def update_morph_count(self, construction, old_count, new_count):
         super(CatmapAnnotatedCorpusEncoding, self).update_count(construction,
                                                                 old_count,
                                                                 new_count)
@@ -2041,6 +2060,26 @@ class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
                 self.logtokensum -= self.blacklist_penalty
             if new_count > 0:
                 self.logtokensum += self.blacklist_penalty
+
+    def update_counts(self, change_counts, multiplier):
+        """Updates the emission and transition counts
+        according to the pre-calculated
+        ChangeCounts object (e.g. calculated in Transformation).
+
+        Arguments:
+            change_counts -- A ChangeCounts object
+            multiplier -- +1 to apply the change, -1 to revert it.
+        """
+        for cmorph in change_counts.emissions:
+            self._corpus_coding.update_emission_count(
+                cmorph.category,
+                cmorph.morph,
+                change_counts.emissions[cmorph] * multiplier)
+
+        for (prev_cat, next_cat) in change_counts.transitions:
+            self._corpus_coding.update_transition_count(
+                prev_cat, next_cat,
+                change_counts.transitions[(prev_cat, next_cat)] * multiplier)
 
     def set_multiplier(self, multiplier):
         for i in range(len(self.model.annotations)):

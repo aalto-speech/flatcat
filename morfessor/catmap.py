@@ -62,7 +62,7 @@ def train_batch(model, weight_learn_func=None):
         converged = ((not wl_force_another) and
                      (not u_force_another) and
                      (-cost_diff <= limit))
-        model._log_cost(cost_diff, limit, 'iteration',
+        model._display_cost(cost_diff, limit, 'iteration',
                         iteration, model._max_iterations, converged)
         if converged:
             _logger.info('{:24s} Cost: {}'.format(
@@ -468,7 +468,7 @@ class CatmapModel(object):
             cost_diff = cost - previous_cost
             limit = self._cost_convergence_limit(min_cost_gain)
             converged = (not force_another) and -cost_diff <= limit
-            self._log_cost(cost_diff, limit, 'epoch',
+            self._display_cost(cost_diff, limit, 'epoch',
                            iteration, max_iterations, converged)
             if converged:
                 _logger.info('{:24s} Cost: {}'.format(
@@ -476,8 +476,8 @@ class CatmapModel(object):
                 return
             previous_cost = cost
 
-    def _log_cost(self, cost_diff, limit, iteration_name,
-                  iteration, max_iterations, converged):
+    def _display_cost(self, cost_diff, limit, iteration_name,
+                      iteration, max_iterations, converged):
         msg = ('Cost difference {:' +
                     self._cost_field_fmt(cost_diff) + 'f} ' +
                 '(limit {}) ' +

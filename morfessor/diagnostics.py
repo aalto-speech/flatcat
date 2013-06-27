@@ -69,12 +69,12 @@ class IterationStatistics(object):
         ccc = model._corpus_coding.get_cost()
         lcc = model._lexicon_coding.get_cost()
         if model._supervised:
-            acc = model._annot_coding.get_cost()
+            acc = model._annot_coding.get_cost() / model._annot_coding.weight
         else:
             acc = 0
         self.cost_parts.append([(ccc / model._corpus_coding.weight),
                                 (lcc / model._lexicon_coding.weight),
-                                (acc / model._annot_coding.weight),
+                                acc,
                                 model._lexicon_coding.permutations_cost(),
                                 model._lexicon_coding.logfeaturesum,
                                 model._corpus_coding.logcondprobsum,

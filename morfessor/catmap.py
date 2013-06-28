@@ -1863,7 +1863,6 @@ class TokenCount(object):
         # to avoid wasting effort recalculating.
         self._log_transitionprob_cache = dict()
         self._log_emissionprob_cache = dict()
-        self._category_token_cache = dict()
 
     def log_transitionprob(self, prev_cat, next_cat):
         pair = (prev_cat, next_cat)
@@ -1887,7 +1886,7 @@ class TokenCount(object):
                 self._log_emissionprob_cache[pair] = (
                     zlog(self.morph_count(morph)) +
                     zlog(self._morph_usage.condprobs(morph)[cat_index]) -
-                    zlog(self.category_token_count(cat_index)))
+                    zlog(_weightedsum(lambda p: p._cat_token_count[cat_index]))
         msg = 'emission {} -> {} has probability > 1'.format(category, morph)
         assert self._log_emissionprob_cache[pair] >= 0, msg
         return self._log_emissionprob_cache[pair]
@@ -1903,17 +1902,9 @@ class TokenCount(object):
     def morph_count(self, morph):
         return self._weightedsum(lambda p: p.morph_count(morph))
 
-    def category_token_count(self, cat_index):
-        # FIXME redundant?
-        if cat_index not in self._category_token_cache:
-            total = 0
-            for cat2 in range(len(get_categories(wb=True))):
-                total += self._weightedsum(lambda p: p.get_transition_count(
-                    cat_index, cat2))
-            self._category_token_cache[cat_index] = total
-        return self._category_token_cache[cat_index]
-
     def modify_morph_count(self, morph, diff_count, partition):
+        # FIXME this method should not be needed
+        self._partitions['partition'].modify_morph_count(morph, diff_count)
 
     def update_counts(self, change_counts, multiplier):
 
@@ -1922,7 +1913,7 @@ class TokenCount(object):
         Use before fully reprocessing a tagged segmented corpus."""
         for partition in self._partitions:
             partition._transition_counts.clear()
-        self._cat_token_count.clear()
+            partition._cat_token_count.clear()
         self._log_transitionprob_cache.clear()
 
     def clear_emission_counts(self):
@@ -1936,7 +1927,6 @@ class TokenCount(object):
         """Clears the cache for emission probability values.
         Use if an incremental change invalidates cached values."""
         self._log_emissionprob_cache.clear()
-        self._category_token_cache.clear()
 
     def _weightedsum(self, func):
         total = 0

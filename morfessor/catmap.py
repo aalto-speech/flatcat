@@ -1736,6 +1736,27 @@ class TransformationRule(object):
         return matches
 
 
+ByPartition = collections.namedtuple('ByPartition',
+                                     ['total', 'corpus', 'annotations'])
+WithTotal = collections.namedtuple('WithTotal', ['total', 'by_cat'])
+
+class TokenCount(object):
+    def __init__(self, morph_usage):
+        self._morph_usage = morph_usage
+        self._emission_counts = utils.Sparse(
+            default=lambda: ByPartition(
+                total=0,
+                corpus=WithTotal(total=0,
+                                 by_cat=utils._nt_zeros(ByCategory)),
+                annotations=None))
+        self._transition_counts = utils.Sparse(
+            default=lambda: ByPartition(
+                total=0,
+                corpus=WithTotal(total=0,
+                                 by_cat=collections.Counter()),
+                annotations=None))
+
+
 class CatmapLexiconEncoding(baseline.LexiconEncoding):
     """Extends LexiconEncoding to include the coding costs of the
     encoding cost of morph usage (context) features.

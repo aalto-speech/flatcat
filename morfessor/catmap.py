@@ -1736,25 +1736,213 @@ class TransformationRule(object):
         return matches
 
 
-ByPartition = collections.namedtuple('ByPartition',
-                                     ['total', 'corpus', 'annotations'])
-WithTotal = collections.namedtuple('WithTotal', ['total', 'by_cat'])
+class TokenCountPartition(object):
+    def __init__(self, weight):
+        self.weight = weight
+        # Counts of emissions observed in the tagged corpus.
+        # A dict of ByCategory objects indexed by morph. Counts occurences.
+        self._emission_counts = utils.Sparse(
+            default=utils._nt_zeros(ByCategory))
+
+        # Counts of transitions between categories.
+        # P(Category -> Category) can be calculated from these.
+        # A dict of integers indexed by a tuple of categories.
+        # Counts occurences.
+        self._transition_counts = collections.Counter()
+
+        # Counts of observed category tags.
+        # Single Counter object (ByCategory is unsuitable, need break also).
+        self._cat_token_count = collections.Counter()
+
+    # Transition count methods
+
+    def get_transition_count(self, prev_cat, next_cat):
+        return self._transition_counts[(prev_cat, next_cat)]
+
+    def update_transition_count(self, prev_cat, next_cat, diff_count):
+        """Updates the number of observed transitions between
+        categories.
+
+        Arguments:
+            prev_cat -- The name (not index) of the category
+                        transitioned from.
+            next_cat -- The name (not index) of the category
+                        transitioned to.
+            diff_count -- The change in the number of transitions.
+        """
+
+        msg = 'update_transition_count needs category names, not indices'
+        assert not isinstance(prev_cat, int), msg
+        assert not isinstance(next_cat, int), msg
+        pair = (prev_cat, next_cat)
+
+        self._transition_counts[pair] += diff_count
+        self._cat_token_count[prev_cat] += diff_count
+
+        if self._transition_counts[pair] > 0:
+            assert pair not in MorphUsageProperties.zero_transitions
+
+        msg = 'subzero transition count for {}'.format(pair)
+        assert self._transition_counts[pair] >= 0, msg
+        assert self._cat_token_count[prev_cat] >= 0
+
+    def clear_transition_counts(self):
+        """Resets transition counts, costs.
+        Use before fully reprocessing a tagged segmented corpus."""
+        self._transition_counts.clear()
+        self._cat_token_count.clear()
+
+    # Emission count methods
+
+    def morph_count(self, morph):
+        return sum(self._emission_counts[morph])
+
+    def get_emission_counts(self, morph):
+        return self._emission_counts[morph]
+
+    def update_emission_count(self, category, morph, diff_count):
+        """Updates the number of observed emissions of a single morph from a
+        single category, and the logtokensum (which is category independent).
+        Updates logcondprobsum.
+
+        Arguments:
+            category -- name of category from which emission occurs.
+            morph -- string representation of the morph.
+            diff_count -- the change in the number of occurences.
+        """
+        cat_index = get_categories().index(category)
+        old_count = self._emission_counts[morph][cat_index]
+        new_count = old_count + diff_count
+        logcondprob = -zlog(self._morph_usage.condprobs(morph)[cat_index])
+        if old_count > 0:
+            self.logcondprobsum -= old_count * logcondprob
+        if new_count > 0:
+            self.logcondprobsum += new_count * logcondprob
+        new_counts = self._emission_counts[morph]._replace(
+            **{category: new_count})
+        self._set_emission_counts(morph, new_counts)
+
+    def _set_emission_counts(self, morph, new_counts):
+        """Set the number of emissions of a morph from all categories
+        simultaneously.
+        Does not update logcondprobsum.
+
+        Arguments:
+            morph -- string representation of the morph.
+            new_counts -- ByCategory object with new counts.
+        """
+
+        old_total = sum(self._emission_counts[morph])
+        self._emission_counts[morph] = new_counts
+        new_total = sum(new_counts)
+
+        if old_total > 0:
+            if old_total > 1:
+                self.logtokensum -= old_total * math.log(old_total)
+            self.tokens -= old_total
+        if new_total > 0:
+            if new_total > 1:
+                self.logtokensum += new_total * math.log(new_total)
+            self.tokens += new_total
+
+    def clear_emission_counts(self):
+        """Resets emission counts and costs.
+        Use before fully reprocessing a tagged segmented corpus."""
+        self._emission_counts.clear()
+
 
 class TokenCount(object):
-    def __init__(self, morph_usage):
+    def __init__(self, morph_usage, annotationweight=None):
         self._morph_usage = morph_usage
-        self._emission_counts = utils.Sparse(
-            default=lambda: ByPartition(
-                total=0,
-                corpus=WithTotal(total=0,
-                                 by_cat=utils._nt_zeros(ByCategory)),
-                annotations=None))
-        self._transition_counts = utils.Sparse(
-            default=lambda: ByPartition(
-                total=0,
-                corpus=WithTotal(total=0,
-                                 by_cat=collections.Counter()),
-                annotations=None))
+        self._partitions = { 'corpus': TokenCountPartition(1) }
+        if annotationweight is not None:
+            self._partitions['annotations'] = TokenCountPartition(
+                annotationweight)
+
+        # Caches for transition and emission logprobs,
+        # to avoid wasting effort recalculating.
+        self._log_transitionprob_cache = dict()
+        self._log_emissionprob_cache = dict()
+        self._category_token_cache = dict()
+
+    def log_transitionprob(self, prev_cat, next_cat):
+        pair = (prev_cat, next_cat)
+        if pair not in self._log_transitionprob_cache:
+            self._log_transitionprob_cache[pair] = (
+                zlog(_weightedsum(lambda p: p.get_transition_count(
+                    prev_cat, next_cat))) -
+                zlog(_weightedsum(lambda p: p._cat_token_count[prev_cat])))
+        return self._log_transitionprob_cache[pair]
+
+    def log_emissionprob(self, category, morph):
+        """-Log of posterior emission probability P(morph|category)"""
+        pair = (category, morph)
+        if pair not in self._log_emissionprob_cache:
+            cat_index = get_categories().index(category)
+            # Not equal to what you get by:
+            # zlog(self._emission_counts[morph][cat_index]) +
+            if self._cat_token_count[category] == 0:
+                self._log_emissionprob_cache[pair] = LOGPROB_ZERO
+            else:
+                self._log_emissionprob_cache[pair] = (
+                    zlog(self.morph_count(morph)) +
+                    zlog(self._morph_usage.condprobs(morph)[cat_index]) -
+                    zlog(self.category_token_count(cat_index)))
+        msg = 'emission {} -> {} has probability > 1'.format(category, morph)
+        assert self._log_emissionprob_cache[pair] >= 0, msg
+        return self._log_emissionprob_cache[pair]
+
+    def transit_emit_cost(self, prev_cat, next_cat, morph):
+        """Cost of transitioning from prev_cat to next_cat and emitting
+        the morph."""
+        if (prev_cat, next_cat) in MorphUsageProperties.zero_transitions:
+            return LOGPROB_ZERO
+        return (self.log_transitionprob(prev_cat, next_cat) +
+                self.log_emissionprob(next_cat, morph))
+
+    def morph_count(self, morph):
+        return self._weightedsum(lambda p: p.morph_count(morph))
+
+    def category_token_count(self, cat_index):
+        # FIXME redundant?
+        if cat_index not in self._category_token_cache:
+            total = 0
+            for cat2 in range(len(get_categories(wb=True))):
+                total += self._weightedsum(lambda p: p.get_transition_count(
+                    cat_index, cat2))
+            self._category_token_cache[cat_index] = total
+        return self._category_token_cache[cat_index]
+
+    def modify_morph_count(self, morph, diff_count, partition):
+
+    def update_counts(self, change_counts, multiplier):
+
+    def clear_transition_counts(self):
+        """Resets transition counts, costs and cache.
+        Use before fully reprocessing a tagged segmented corpus."""
+        for partition in self._partitions:
+            partition._transition_counts.clear()
+        self._cat_token_count.clear()
+        self._log_transitionprob_cache.clear()
+
+    def clear_emission_counts(self):
+        """Resets emission counts and costs.
+        Use before fully reprocessing a tagged segmented corpus."""
+        for partition in self._partitions:
+            partition._emission_counts.clear()
+        self._log_emissionprob_cache.clear()
+
+    def _clear_emission_cache(self):
+        """Clears the cache for emission probability values.
+        Use if an incremental change invalidates cached values."""
+        self._log_emissionprob_cache.clear()
+        self._category_token_cache.clear()
+
+    def _weightedsum(self, func):
+        total = 0
+        for partition in self._partitions:
+            total += partition.weight * func(partition)
+        return total
 
 
 class CatmapLexiconEncoding(baseline.LexiconEncoding):
@@ -1816,103 +2004,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
         self._morph_usage = morph_usage
         super(CatmapEncoding, self).__init__(lexicon_encoding, weight)
 
-        # Counts of emissions observed in the tagged corpus.
-        # A dict of ByCategory objects indexed by morph. Counts occurences.
-        self._emission_counts = utils.Sparse(
-            default=utils._nt_zeros(ByCategory))
-
-        # Counts of transitions between categories.
-        # P(Category -> Category) can be calculated from these.
-        # A dict of integers indexed by a tuple of categories.
-        # Counts occurences.
-        self._transition_counts = collections.Counter()
-
-        # Counts of observed category tags.
-        # Single Counter object (ByCategory is unsuitable, need break also).
-        self._cat_tagcount = collections.Counter()
-
-        # Caches for transition and emission logprobs,
-        # to avoid wasting effort recalculating.
-        self._log_transitionprob_cache = dict()
-        self._log_emissionprob_cache = dict()
-
         self.logcondprobsum = 0.0
-
-    # Transition count methods
-
-    def get_transition_count(self, prev_cat, next_cat):
-        return self._transition_counts[(prev_cat, next_cat)]
-
-    def log_transitionprob(self, prev_cat, next_cat):
-        pair = (prev_cat, next_cat)
-        if pair not in self._log_transitionprob_cache:
-            if self._cat_tagcount[prev_cat] == 0:
-                self._log_transitionprob_cache[pair] = LOGPROB_ZERO
-            else:
-                self._log_transitionprob_cache[pair] = (
-                    zlog(self._transition_counts[(prev_cat, next_cat)]) -
-                    zlog(self._cat_tagcount[prev_cat]))
-        return self._log_transitionprob_cache[pair]
-
-    def update_transition_count(self, prev_cat, next_cat, diff_count):
-        """Updates the number of observed transitions between
-        categories.
-
-        Arguments:
-            prev_cat -- The name (not index) of the category
-                        transitioned from.
-            next_cat -- The name (not index) of the category
-                        transitioned to.
-            diff_count -- The change in the number of transitions.
-        """
-
-        msg = 'update_transition_count needs category names, not indices'
-        assert not isinstance(prev_cat, int), msg
-        assert not isinstance(next_cat, int), msg
-        pair = (prev_cat, next_cat)
-
-        self._transition_counts[pair] += diff_count
-        self._cat_tagcount[prev_cat] += diff_count
-
-        if self._transition_counts[pair] > 0:
-            assert pair not in MorphUsageProperties.zero_transitions
-
-        msg = 'subzero transition count for {}'.format(pair)
-        assert self._transition_counts[pair] >= 0, msg
-        assert self._cat_tagcount[prev_cat] >= 0
-
-        # invalidate cache
-        self._log_transitionprob_cache.clear()
-
-    def clear_transition_counts(self):
-        """Resets transition counts, costs and cache.
-        Use before fully reprocessing a tagged segmented corpus."""
-        self._transition_counts.clear()
-        self._cat_tagcount.clear()
-        self._log_transitionprob_cache.clear()
-
-    # Emission count methods
-
-    def get_emission_counts(self, morph):
-        return self._emission_counts[morph]
-
-    def log_emissionprob(self, category, morph):
-        """-Log of posterior emission probability P(morph|category)"""
-        pair = (category, morph)
-        if pair not in self._log_emissionprob_cache:
-            cat_index = get_categories().index(category)
-            # Not equal to what you get by:
-            # zlog(self._emission_counts[morph][cat_index]) +
-            if self._cat_tagcount[category] == 0:
-                self._log_emissionprob_cache[pair] = LOGPROB_ZERO
-            else:
-                self._log_emissionprob_cache[pair] = (
-                    zlog(self._morph_usage.count(morph)) +
-                    zlog(self._morph_usage.condprobs(morph)[cat_index]) -
-                    zlog(self._morph_usage.category_token_count[cat_index]))
-        msg = 'emission {} -> {} has probability > 1'.format(category, morph)
-        assert self._log_emissionprob_cache[pair] >= 0, msg
-        return self._log_emissionprob_cache[pair]
 
     def update_emission_count(self, category, morph, diff_count):
         """Updates the number of observed emissions of a single morph from a
@@ -1935,59 +2027,6 @@ class CatmapEncoding(baseline.CorpusEncoding):
         new_counts = self._emission_counts[morph]._replace(
             **{category: new_count})
         self._set_emission_counts(morph, new_counts)
-
-        # invalidate cache
-        self._log_emissionprob_cache.clear()
-
-    def _set_emission_counts(self, morph, new_counts):
-        """Set the number of emissions of a morph from all categories
-        simultaneously.
-        Does not update logcondprobsum.
-
-        Arguments:
-            morph -- string representation of the morph.
-            new_counts -- ByCategory object with new counts.
-        """
-
-        old_total = sum(self._emission_counts[morph])
-        self._emission_counts[morph] = new_counts
-        new_total = sum(new_counts)
-
-        if old_total > 0:
-            if old_total > 1:
-                self.logtokensum -= old_total * math.log(old_total)
-            self.tokens -= old_total
-        if new_total > 0:
-            if new_total > 1:
-                self.logtokensum += new_total * math.log(new_total)
-            self.tokens += new_total
-
-        # invalidate cache
-        self._log_emissionprob_cache.clear()
-
-    def clear_emission_counts(self):
-        """Resets emission counts and costs.
-        Use before fully reprocessing a tagged segmented corpus."""
-        self.tokens = 0
-        self.logtokensum = 0.0
-        self.logcondprobsum = 0.0
-        self._emission_counts.clear()
-        self._log_emissionprob_cache.clear()
-
-    def clear_emission_cache(self):
-        """Clears the cache for emission probability values.
-        Use if an incremental change invalidates cached values."""
-        self._log_emissionprob_cache.clear()
-
-    # General methods
-
-    def transit_emit_cost(self, prev_cat, next_cat, morph):
-        """Cost of transitioning from prev_cat to next_cat and emitting
-        the morph."""
-        if (prev_cat, next_cat) in MorphUsageProperties.zero_transitions:
-            return LOGPROB_ZERO
-        return (self.log_transitionprob(prev_cat, next_cat) +
-                self.log_emissionprob(next_cat, morph))
 
     def update_count(self, construction, old_count, new_count):
         raise Exception('Inherited method not appropriate for CatmapEncoding')
@@ -2016,7 +2055,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
             # exactly one outgoing transition (except for word boundary,
             # of which there are one of each in every word)
             assert sum_transitions_from[cat] == sum_transitions_to[cat]
-            assert sum_transitions_to[cat] == self._cat_tagcount[cat]
+            assert sum_transitions_to[cat] == self._cat_token_count[cat]
 
         assert t_cost >= 0
         return t_cost

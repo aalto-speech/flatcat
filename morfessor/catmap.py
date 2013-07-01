@@ -1214,10 +1214,7 @@ class CatmapModel(object):
 
     def get_cost(self):
         """Return current model encoding cost."""
-        cost = self._corpus_coding.get_cost() + self._lexicon_coding.get_cost()
-        if self._supervised:
-            cost += self._annot_coding.get_cost()
-        return cost
+        return self._token_counts.get_cost()
 
     def _update_annotation_choices(self):
         """Update the selection of alternative analyses in annotations."""
@@ -1248,7 +1245,8 @@ class CatmapModel(object):
             self.segmentations[i] = WordAnalysis(1, new_active)
 
         self._update_counts(changes, 1)
-        self._annot_coding.recalculate_cost()
+        # All analyses have been reset to penaltyfree segmentations
+        self._annot_coding.clear_penaltysum()
 
     def add_annotations(self, annotations, annotatedcorpusweight=None,
         multiplier=1, penalty=-999999):
@@ -1671,8 +1669,9 @@ class TransformationRule(object):
 
 
 class TokenCountPartition(object):
-    def __init__(self, weight):
+    def __init__(self, weight, coding):
         self.weight = weight
+        self.coding = coding
         # Counts of emissions observed in the tagged corpus.
         # A dict of ByCategory objects indexed by morph. Counts occurences.
         self._emission_counts = utils.Sparse(
@@ -1687,6 +1686,11 @@ class TokenCountPartition(object):
         # Counts of observed category tags.
         # Single Counter object (ByCategory is unsuitable, need break also).
         self._cat_token_count = collections.Counter()
+
+    def get_cost(self, wtm, wcm):
+        return self.coding.get_cost(dict(self._transition_counts), 
+                                    dict(self._cat_token_count),
+                                    wtm, wcm)
 
     # Transition count methods
 
@@ -1833,6 +1837,17 @@ class TokenCount(object):
                 self._partitions[partition].remove_contribution(morph)
         self._update_helper(change_counts, multiplier)
 
+    def _weighted_transition_matrix(self):
+        transitions = collections.Counter()
+        categories = collections.Counter()
+        valid_transitions = MorphUsageProperties.valid_transitions()
+        for (cat1, cat2) in valid_transitions:
+            weighted = self._weightedsum(
+                lambda p: p.get_transition_count(cat1, cat2))
+            transitions[(cat1, cat2)] = weighted
+            categories[cat1] += weighted
+        return (transitions, categories)
+
     def _update_helper(self, change_counts, multiplier):
         for partition in change_counts.emissions:
             for (cmorph, count) in change_counts.emissions[partition].items():
@@ -1862,6 +1877,13 @@ class TokenCount(object):
         for partition in self._partitions:
             partition._coding.clear()
         self._update_helper(change_counts, 1)
+
+    def get_cost(self):
+        cost = 0.0
+        (wtm, wcm) = self._weighted_transition_matrix()
+        for partition in self._partitions:
+            cost += partition.get_cost(wtm, wcm)
+        return cost
 
     def _weightedsum(self, func):
         total = 0
@@ -1918,102 +1940,77 @@ class CatmapLexiconEncoding(baseline.LexiconEncoding):
 
 
 class CatmapEncoding(baseline.CorpusEncoding):
-    """Class for calculating the encoding costs of the grammar and the
-    corpus. Also stores the HMM parameters.
+    """Class for calculating the encoding costs of the corpus.
 
     tokens: the number of emissions observed.
     boundaries: the number of word tokens observed.
     """
 
-    def __init__(self, morph_usage, lexicon_encoding, weight=1.0):
-        self._morph_usage = morph_usage
-        super(CatmapEncoding, self).__init__(lexicon_encoding, weight)
+    def __init__(self, lexicon_coding, weight=1.0):
+        super(CatmapEncoding, self).__init__(lexicon_coding, weight)
 
         self.logcondprobsum = 0.0
-        self.logtransitionsum = 0.0
 
-    def add_contribution(self, morph):
-        # FIXME: the necessary total counts and probabilities
-        #logcondprob = -zlog(self._morph_usage.condprobs(morph)[cat_index])
-        #old_total = sumsum of categories, partitions
-        #t_total = sum of this transition over partitions
+    def modify_contribution(self, count, total, logcondprob):
+        if abs(count) > 0:
+            self.logcondprobsum += count * logcondprob
 
-        # FIXME
-        if old_count > 0:
-            self.logcondprobsum -= old_count * logcondprob
-        if new_count > 0:
-            self.logcondprobsum += new_count * logcondprob
+            if abs(count) > 1:
+                self.logtokensum += count * math.log(total)
+            self.tokens += count
 
-        if old_count > 0:
-            if old_count > 1:
-                self.logtokensum -= old_count * math.log(old_total)
-            self.tokens -= old_count
-        if new_count > 0:
-            if new_count > 1:
-                self.logtokensum += new_count * math.log(new_total)
-            self.tokens += new_total
-
-        self.logtransitionsum += t_count * math.log(t_total)
+    def logtransitionsum(self, counts, totals):
+        t_cost = 0.0
+        valid_transitions = MorphUsageProperties.valid_transitions()
+        for pair in valid_transitions:
+            t_cost += counts[pair] * math.log(totals[pair])
 
     def update_count(self, construction, old_count, new_count):
         raise Exception('Inherited method not appropriate for CatmapEncoding')
 
-    def get_cost(self):
+    def get_cost(self, tm, cm, wtm, wcm):
         """Override for the Encoding get_cost function.
 
         This is P( D_W | theta, Y )
         """
-        if self.boundaries == 0:
+        # FIXME: refactor out cm and wcm
+        boundaries = cm[WORD_BOUNDARY]
+        if boundaries == 0:
             return 0.0
 
-        n = self.tokens + self.boundaries
+        n = self.tokens + boundaries
         return  ((self.tokens * math.log(self.tokens)
                   - self.logtokensum
                   - self.logcondprobsum
-                  - self.logtransitionsum()
+                  - self.logtransitionsum(tm, wtm)
                   + n * math.log(n)
                  ) * self.weight
                  + self.frequency_distribution_cost()
                 )
 
 
-class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
-    # FIXME can't inherit from baseline
-    def __init__(self, model, weight=None, multiplier=1,
+class CatmapAnnotatedCorpusEncoding(CatmapEncoding):
+    def __init__(self, model, weight=None,
                  penalty=-999999):
+        self.do_update_weight = False
+        if weight is None:
+            self.do_update_weight = True
+            weight = 1.0
         super(CatmapAnnotatedCorpusEncoding, self).__init__(
-            model._corpus_coding,
-            weight=weight,
-            penalty=penalty)
+            model._lexicon_coding,
+            weight=weight)
+        self.penalty = penalty
+        self.penaltysum = 0.0
         self.model = model
-        self.multiplier = multiplier
 
-    def update_counts(self, change_counts, multiplier):
-        # FIXME broken
-        """Updates the emission and transition counts
-        according to the pre-calculated
-        ChangeCounts object (e.g. calculated in Transformation).
+    def clear_penaltysum(self):
+        self.penaltysum = 0.0
 
-        Arguments:
-            change_counts -- A ChangeCounts object
-            multiplier -- +1 to apply the change, -1 to revert it.
-        """
-        for cmorph in change_counts.emissions:
-            self._corpus_coding.update_emission_count(
-                cmorph.category,
-                cmorph.morph,
-                change_counts.emissions[cmorph] * multiplier)
-
-        for (prev_cat, next_cat) in change_counts.transitions:
-            self._corpus_coding.update_transition_count(
-                prev_cat, next_cat,
-                change_counts.transitions[(prev_cat, next_cat)] * multiplier)
-
-    def set_multiplier(self, multiplier):
-        for i in range(len(self.model.annotations)):
-            self.model.segmentations[i] = WordAnalysis(
-                self.multiplier, self.model.segmentations[i].analysis)
-        self.model.reestimate_probabilities()
+    def modify_contribution(self, i, count):
+        detagged = self.model.detag_word(self.model.segmentations[i])
+        if detagged in self.model.annotations[i][1]:
+            return  # current analysis in alternatives: no penalty
+        self.penaltysum += count * self.penalty
 
     def update_weight(self):
         """Update the weight of the Encoding by taking the ratio of the
@@ -2026,14 +2023,17 @@ class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
         annotation_counts = 0
         for i in range(len(self.model.annotations)):
             annotation_counts += self.model.segmentations[i].count
-        self.weight = (float(self.corpus_coding.boundaries - annotation_counts)
-            / self.boundaries)
-        #self.set_multiplier(int(math.ceil(math.log(self.weight))))
-        self.weight /= float(self.multiplier)
+        self.weight = (float(self.model.corpus_coding.boundaries -
+                             annotation_counts)
+                            / self.boundaries)
         if self.weight != old:
             _logger.info(
-                'Corpus weight of annotated data set to {} * {}'.format(
-                    self.multiplier, self.weight))
+                'Corpus weight of annotated data set to {}'.format(
+                    self.weight))
+
+    def get_cost(self):
+        return (super(CatmapAnnotatedCorpusEncoding, self).get_cost() +
+                self.weight * self.penaltysum)
 
 
 class CorpusWeightUpdater(object):

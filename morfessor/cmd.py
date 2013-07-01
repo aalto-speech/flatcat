@@ -723,15 +723,6 @@ Simple usage examples (training and testing):
             help='Penalty for removal of morphs used in the currently ' +
             'active annotations. ' +
             '(default %(default)s).')
-    add_arg('--annotation-supermorph-penalty', dest='annotationsuperpenalty',
-            type=float, default=0, metavar='<float>',
-            help='Penalty for adding supermorphs of morph bigrams used in '
-            'the currently active annotations. ' +
-            'If such supermorphs are added, ' +
-            'segmentation is likely to prefer them over the submorphs ' +
-            '(because emissions contribute most of the corpus cost). ' +
-            'Set to zero to disable. ' +
-            '(default %(default)s).')
 
     # Options for logging
     add_arg = parser.add_argument_group('logging options').add_argument
@@ -883,8 +874,8 @@ def catmap_main(args):
             analysis_sep=args.analysisseparator)
         model.add_annotations(annotations,
                               args.annotationweight,
-                              -args.annotationpenalty,
-                              -args.annotationsuperpenalty)
+                              multiplier=1,
+                              penalty=-args.annotationpenalty)
 
     if args.develfile is not None:
         develannots = io.read_annotations_file(args.develfile,

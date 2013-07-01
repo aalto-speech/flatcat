@@ -45,7 +45,7 @@ DEFAULT_CATEGORY = 'STM'
 # The morph usage/context features used to calculate the probability of a
 # morph belonging to a category.
 MorphContext = collections.namedtuple('MorphContext',
-                                      ['count', 'left_perplexity',
+                                      ['left_perplexity',
                                        'right_perplexity'])
 
 AnalysisAlternative = collections.namedtuple('AnalysisAlternative',
@@ -83,6 +83,7 @@ class HeuristicPostprocessor(object):
     def remove_nonmorfemes(self, analysis, model):
         """Remove nonmorfemes from the analysis by joining or retagging
         morphs, using heuristics."""
+        assert False, 'Not yet refactored'  # FIXME
         if len(self.operations) == 0:
             return analysis
 
@@ -227,7 +228,6 @@ class HeuristicPostprocessor(object):
 class MorphContextBuilder(object):
     """Temporary structure used when calculating the MorphContexts."""
     def __init__(self):
-        self.count = 0
         self.left = collections.Counter()
         self.right = collections.Counter()
 
@@ -294,14 +294,13 @@ class MorphUsageProperties(object):
             self._ppl_slope = 10.0 / self._ppl_threshold
 
         # Counts of different contexts in which a morph occurs
-        self._contexts = utils.Sparse(default=MorphContext(0, 1.0, 1.0))
+        self._contexts = utils.Sparse(default=MorphContext(1.0, 1.0))
         self._context_builders = collections.defaultdict(MorphContextBuilder)
 
         self._contexts_per_iter = 50000  # FIXME customizable
 
         # Cache for memoized feature-based conditional class probabilities
         self._condprob_cache = collections.defaultdict(float)
-        self._marginalizer = None
 
     def calculate_usage_features(self, seg_func):
         self._clear()
@@ -322,7 +321,7 @@ class MorphUsageProperties(object):
                 for (i, morph) in enumerate(segments):
                     # Collect information about the contexts in which
                     # the morphs occur.
-                    if self._add_to_context(morph, pcount, rcount,
+                    if self._add_to_context(morph, pcount,
                                             i, segments):
                         conserving_memory = True
 
@@ -341,9 +340,8 @@ class MorphUsageProperties(object):
         self._contexts.clear()
         self._context_builders.clear()
         self._condprob_cache.clear()
-        self._marginalizer = None
 
-    def _add_to_context(self, morph, pcount, rcount, i, segments):
+    def _add_to_context(self, morph, pcount, i, segments):
         """Collect information about the contexts in which the morph occurs"""
         if morph in self._contexts:
             return False
@@ -373,7 +371,6 @@ class MorphUsageProperties(object):
         if neighbour is not None:
             self._context_builders[morph].right[neighbour] += pcount
 
-        self._context_builders[morph].count += rcount
         return False
 
     def _compress_contexts(self):
@@ -381,8 +378,7 @@ class MorphUsageProperties(object):
         _context_builders. This is done to save memory."""
         for morph in self._context_builders:
             tmp = self._context_builders[morph]
-            self._contexts[morph] = MorphContext(tmp.count,
-                                                 tmp.left_perplexity,
+            self._contexts[morph] = MorphContext(tmp.left_perplexity,
                                                  tmp.right_perplexity)
         self._context_builders.clear()
 
@@ -422,32 +418,6 @@ class MorphUsageProperties(object):
             self._condprob_cache[morph] = ByCategory(p_pre, p_stm, p_suf,
                                                      p_nonmorpheme)
         return self._condprob_cache[morph]
-
-    @property
-    def marginal_class_probs(self):
-        """True distribution of class probabilities,
-        calculated by marginalizing over the feature based conditional
-        probabilities over all observed morphs.
-        This will not give the same result as the observed count based
-        calculation.
-        """
-        return self._get_marginalizer().normalized()
-
-    @property
-    def category_token_count(self):
-        """Un-normalized distribution of class probabilities,
-        the sum of which is the number of observed morphs.
-        See marginal_class_probs for the normalized version.
-        """
-        return self._get_marginalizer().category_token_count
-
-    def _get_marginalizer(self):
-        if self._marginalizer is None:
-            self._marginalizer = Marginalizer()
-            for morph in self.seen_morphs():
-                self._marginalizer.add(self.count(morph),
-                                       self.condprobs(morph))
-        return self._marginalizer
 
     def feature_cost(self, morph):
         """The cost of encoding the necessary features along with a morph.
@@ -492,8 +462,7 @@ class MorphUsageProperties(object):
                 r_ppl = self._contexts[old_morphs[-1]].right_perplexity
             else:
                 r_ppl = 1.0
-            count = 0   # estimating does not add instances of the morph
-            self._contexts[morph] = MorphContext(count, l_ppl, r_ppl)
+            self._contexts[morph] = MorphContext(l_ppl, r_ppl)
             temporaries.append(morph)
         return temporaries
 
@@ -521,30 +490,13 @@ class MorphUsageProperties(object):
         for morph in temporaries:
             if morph not in self:
                 continue
-            msg = '{}: {}'.format(morph, self._contexts[morph].count)
-            assert self._contexts[morph].count == 0, msg
-            del self._contexts[morph]
-            if morph in self._condprob_cache:
-                del self._condprob_cache[morph]
-
-    def remove_zeros(self):
-        """Remove context information for all morphs contexts with zero
-        count. This can save a bit more memory than just removing estimated
-        temporary contexts. Estimated context will be used for the removed
-        morphs for the rest of the iteration."""
-        remove_list = []
-        for morph in self._contexts.keys():
-            if self._contexts[morph].count == 0:
-                remove_list.append(morph)
-        for morph in remove_list:
             del self._contexts[morph]
             if morph in self._condprob_cache:
                 del self._condprob_cache[morph]
 
     def seen_morphs(self):
         """All morphs that have defined contexts."""
-        return [morph for morph in self._contexts.keys()
-                if self._contexts[morph].count > 0]
+        return self._contexts.keys()
 
     def __contains__(self, morph):
         return morph in self._contexts
@@ -552,26 +504,6 @@ class MorphUsageProperties(object):
     def get(self, morph):
         """Returns the context features of a seen morph."""
         return self._contexts[morph]
-
-    def count(self, morph):
-        """The counts in the corpus of morphs with contexts."""
-        if morph not in self._contexts:
-            return 0
-        return self._contexts[morph].count
-
-    def set_count(self, morph, new_count):
-        """Set the number of observed occurences of a morph.
-        Also updates the true category distribution.
-        """
-
-        if self._marginalizer is not None and self.count(morph) > 0:
-            self._marginalizer.add(-self.count(morph),
-                                   self.condprobs(morph))
-        self._contexts[morph] = self._contexts[morph]._replace(count=new_count)
-        assert self.count(morph) >= 0
-        if self._marginalizer is not None and self.count(morph) > 0:
-            self._marginalizer.add(self.count(morph),
-                                   self.condprobs(morph))
 
     @classmethod
     def valid_transitions(cls):
@@ -649,39 +581,3 @@ def universalprior(positive_number):
     """
 
     return _LOG_C + math.log(positive_number)
-
-
-class Marginalizer(object):
-    """An accumulator for marginalizing the class probabilities
-    P(Category) from all the individual conditional probabilities
-    P(Category|Morph) and observed morph probabilities P(Morph).
-
-    First the unnormalized distribution is obtained by summing over
-    #(Morph) * P(Category|Morph) over each morph, separately for each
-    category. P(Category) is then obtained by normalizing the
-    distribution.
-    """
-
-    def __init__(self):
-        self._counts = [0.0] * len(ByCategory._fields)
-
-    def add(self, rcount, condprobs):
-        """Add the products #(Morph) * P(Category|Morph)
-        for one observed morph."""
-        for i, x in enumerate(condprobs):
-            self._counts[i] += float(rcount) * float(x)
-
-    def normalized(self):
-        """Returns the marginal probabilities for all categories."""
-        total = self.total_token_count
-        return ByCategory(*[x / total for x in self._counts])
-
-    @property
-    def total_token_count(self):
-        """Total number of tokens seen."""
-        return sum(self._counts)
-
-    @property
-    def category_token_count(self):
-        """Tokens seen per category."""
-        return ByCategory(*self._counts)

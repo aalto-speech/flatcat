@@ -99,11 +99,12 @@ class CatmapModel(object):
         self.morph_backlinks = collections.defaultdict(set)
 
         # Cost variables
-        self._token_counts = TokenCount(morph_usage)
         self._lexicon_coding = CatmapLexiconEncoding(morph_usage)
-        # Catmap encoding also stores the HMM parameters
-        self._corpus_coding = CatmapEncoding(morph_usage, self._lexicon_coding,
+        self._corpus_coding = CatmapEncoding(self._lexicon_coding,
                                              weight=corpusweight)
+        self._token_counts = TokenCount(morph_usage,
+                                        self._lexicon_coding,
+                                        self._corpus_coding)
 
         # Counters for the current iteration and operation within
         # that iteration. These describe the stage of training
@@ -812,7 +813,7 @@ class CatmapModel(object):
         """
         # FIXME random shuffle or sort by length/frequency?
         if self.training_focus is None:
-            unsorted = self._morph_usage.seen_morphs()
+            unsorted = self._token_counts.seen_morphs()
         else:
             unsorted = set()
             for (count, segmentation) in self.training_focus_filter():
@@ -822,7 +823,7 @@ class CatmapModel(object):
         for morph in epoch_morphs:
             if len(morph) == 1:
                 continue
-            if self._morph_usage.count(morph) == 0:
+            if self._token_counts.morph_count(morph) == 0:
                 continue
 
             # Match the parent morph with any category
@@ -1115,7 +1116,7 @@ class CatmapModel(object):
                 prev_pos = pos - next_len
                 morph = word[prev_pos:pos]
 
-                if morph not in self._morph_usage:
+                if self._token_counts.morph_count(morph) == 0:
                     # The morph corresponding to this substring has not
                     # been encountered: zero probability for this solution
                     grid[pos][next_len - 1] = zeros
@@ -1441,10 +1442,6 @@ class CatmapModel(object):
     @property
     def word_tokens(self):
         return self._corpus_coding.boundaries
-
-    @property
-    def morph_tokens(self):
-        return sum(self._morph_usage.category_token_count)
 
 
 class ChangeCounts(object):
@@ -1824,6 +1821,12 @@ class TokenCount(object):
             return LOGPROB_ZERO
         return (self.log_transitionprob(prev_cat, next_cat) +
                 self.log_emissionprob(next_cat, morph, virtual=0))
+
+    def seen_morphs(self):
+        morphs = set()
+        for partition in self._partitions.values():
+            morphs.update(partition._emission_counts.keys())
+        return morphs
 
     def morph_count(self, morph):
         return self._weightedsum(lambda p: p.morph_count(morph))

@@ -301,6 +301,7 @@ class MorphUsageProperties(object):
 
         # Cache for memoized feature-based conditional class probabilities
         self._condprob_cache = collections.defaultdict(float)
+        self.category_totals = collections.Counter()
 
     def calculate_usage_features(self, seg_func):
         self._clear()
@@ -331,6 +332,19 @@ class MorphUsageProperties(object):
 
             if not conserving_memory:
                 break
+
+        categories = get_categories()
+        self.category_totals.clear()
+        for count, segments in seg_func():
+            self.category_totals[WORD_BOUNDARY] += count
+            for cmorph in segments:
+                try:
+                    morph = cmorph.morph
+                except AttributeError:
+                    morph = cmorph
+                tmp = self.condprobs(morph)
+                for (i, category) in enumerate(categories):
+                    self.category_totals[category] += count * tmp[i]
 
         return count_sum
 

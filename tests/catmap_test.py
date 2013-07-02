@@ -199,11 +199,10 @@ class TestProbabilityEstimation(unittest.TestCase):
                                                                     *pair))
                 obssum += obsval
                 refsum += reference[pair][0]
-                #self.assertAlmostEqual(obsval, reference[pair][0], places=9,
-                #                       msg=msg % (cat1, cat2,
-                #                                  obsval, reference[pair][0]))
-                #print(msg % (cat1, cat2, obsval, reference[pair][0]))
-        self.assertAlmostEqual(obssum, refsum, places=8, msg='obssum {} refsum {}'.format(obssum, refsum))
+                self.assertAlmostEqual(obsval, reference[pair][0], places=9,
+                                       msg=msg % (cat1, cat2,
+                                                  obsval, reference[pair][0]))
+        self.assertAlmostEqual(obssum, refsum, places=2, msg='obssum {} refsum {}'.format(obssum, refsum))
 
 
 class TestProbabilityReEstimation(TestProbabilityEstimation):
@@ -231,11 +230,11 @@ class TestProbabilityReEstimation(TestProbabilityEstimation):
                             category, morph))
                 except KeyError:
                     raise KeyError('%s not in observed morphs' % (morph,))
-                #self.assertAlmostEqual(observed, reference[i], places=9,
-                #    msg=msg % (morph, category, observed, reference[i]))
+                self.assertAlmostEqual(observed, reference[i], places=9,
+                    msg=msg % (morph, category, observed, reference[i]))
                 obssum += observed
                 refsum += reference[i]
-        self.assertAlmostEqual(obssum, refsum, places=8, msg='obssum {} refsum {}'.format(obssum, refsum))
+        self.assertAlmostEqual(obssum, refsum, places=2, msg='obssum {} refsum {}'.format(obssum, refsum))
 
 
 class TestBaselineSegmentation(unittest.TestCase):

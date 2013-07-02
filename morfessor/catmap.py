@@ -623,8 +623,8 @@ class CatmapModel(object):
             self._morph_usage.calculate_usage_features(
                 lambda: self.detag_list(self.segmentations)))
 
-        for morph in self._morph_usage.seen_morphs():
-            self._lexicon_coding.add(morph)
+        #for morph in self._morph_usage.seen_morphs():
+        #    self._lexicon_coding.add(morph)
 
     def _unigram_transition_probs(self):
         """Initial transition probabilities based on unigram distribution.
@@ -1907,6 +1907,7 @@ class TokenCount(object):
     def set_counts(self, change_counts):
         """Resets transition counts, costs and cache.
         Use before fully reprocessing a tagged segmented corpus."""
+        self._lexicon_coding.clear()
         for partition in self._partitions.values():
             partition.clear()
         self._update_helper(change_counts, 1)

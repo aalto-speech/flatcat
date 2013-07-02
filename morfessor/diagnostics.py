@@ -66,10 +66,13 @@ class IterationStatistics(object):
         self.epoch_numbers.append(epoch_number)
 
         self.costs.append(model.get_cost())
-        ccc = model._corpus_coding.get_cost()
+        (wtm, wcm) = model._token_counts._weighted_transition_matrix()
+        ccc = model._token_counts._partitions['corpus'].get_cost(wtm, wcm)
         lcc = model._lexicon_coding.get_cost()
         if model._supervised:
-            acc = model._annot_coding.get_cost() / model._annot_coding.weight
+            acc = (model._token_counts._partitions['annotations'].get_cost(
+                                                                  wtm, wcm) /
+                   model._annot_coding.weight)
         else:
             acc = 0
         self.cost_parts.append([(ccc / model._corpus_coding.weight),
@@ -77,12 +80,12 @@ class IterationStatistics(object):
                                 acc,
                                 model._lexicon_coding.permutations_cost(),
                                 model._lexicon_coding.logfeaturesum,
-                                model._corpus_coding.logcondprobsum,
-                                model._corpus_coding.logtransitionsum()])
-        tcounts = self._extract_tag_counts(model)
+                                model._corpus_coding.logcondprobsum
+                                ])
+        tcounts = self._extract_tag_counts(wcm)
         self.tag_counts.append(tcounts)
-        self.morph_types.append(len(model._morph_usage.seen_morphs()))
-        self.morph_tokens.append(sum(tcounts))
+        #self.morph_types.append(len(model._morph_usage.seen_morphs()))
+        #self.morph_tokens.append(sum(tcounts))
         self.word_tokens = float(model.word_tokens)
         self.changes.append(len(model._changed_segmentations))
         self.changes_op.append(len(model._changed_segmentations_op))
@@ -108,11 +111,10 @@ class IterationStatistics(object):
         self.morph_lengths.append(current_lengths)
         self.t_prev = t_cur
 
-    def _extract_tag_counts(self, model):
+    def _extract_tag_counts(self, wcm):
         out = []
-        counter = model._corpus_coding._cat_tagcount
         for cat in self.categories:
-            out.append(counter[cat])
+            out.append(wcm[cat])
         return out
 
 
@@ -134,8 +136,8 @@ class IterationStatisticsPlotter(object):
         self.avg_morphs()
         plt.figure()
         self.durations()
-        plt.figure()
-        self.types_and_tokens()
+        #plt.figure()
+        #self.types_and_tokens()
         plt.figure()
         self.morph_lengths()
         plt.figure()
@@ -158,7 +160,7 @@ class IterationStatisticsPlotter(object):
         plt.xlabel('Epoch number')
         plt.ylabel('Cost component')
         plt.legend(['Corpus', 'Lexicon', 'Annots',
-                    'L perm', 'L feats', 'C cond', 'C trans'])
+                    'L perm', 'L feats', 'C cond'])
         self._title()
 
     def tag_counts(self):
@@ -183,6 +185,7 @@ class IterationStatisticsPlotter(object):
         plt.ylabel('Avg number of morphs per word token')
         self._title()
 
+    """
     def types_and_tokens(self):
         plt.plot(self.stats.morph_tokens, color="red", marker='+')
         plt.plot(self.stats.morph_types, color="blue", marker='+')
@@ -191,6 +194,7 @@ class IterationStatisticsPlotter(object):
         plt.xlabel('Epoch number')
         plt.ylabel('Count of morph tokens / types')
         self._title()
+    """
 
     def durations(self):
         by_iter = [0.0] * (max(self.stats.iteration_numbers) + 1)

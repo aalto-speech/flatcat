@@ -314,8 +314,6 @@ class CatmapModel(object):
                     for morph in self.detag_word(segments):
                         self._modify_morph_count(morph, new_count)
 
-                    # FIXME This is crude and wasteful
-                    #self.reestimate_probabilities()
                     self._update_counts(change_counts, 1)
 
                     self.training_focus = set((i_new,))
@@ -703,6 +701,9 @@ class CatmapModel(object):
             for morph in self.detag_word(segmentation.analysis):
                 self.morph_backlinks[morph].add(i)
 
+    def _is_annotation(self, target):
+        return (self._supervised and target < len(self.annotations))
+
     def _find_in_corpus(self, rule, targets=None):
         """Returns the indices of words in the corpus segmentation
         matching the given rule, and the total number of matches, which
@@ -781,6 +782,10 @@ class CatmapModel(object):
             for morph in self.detag_word(transform_group[0].rule):
                 # Remove the old representation, but only from
                 # morph counts (emissions and transitions updated later)
+                if self._supervised:
+                    # Old contribution to annotation cost needs to be
+                    # removed before the probability changes
+                    self._annot_coding.modify_contribution(morph, -1)
                 self._modify_morph_count(morph, -num_matches)
 
             for transform in transform_group:
@@ -789,14 +794,27 @@ class CatmapModel(object):
                     self._modify_morph_count(morph, num_matches)
                 for target in matched_targets:
                     old_analysis = self.segmentations[target]
-                    new_analysis = transform.apply(old_analysis, self)
+                    new_analysis = transform.apply(
+                        old_analysis, self,
+                        is_annotation=self._is_annotation(target))
 
                 # Apply change to encoding
                 self._update_counts(transform.change_counts, 1)
+                self._annot_coding.update_counts(transform.annot_counts, 1)
+                if self._supervised:
+                    # contribution to annotation cost needs to be readded
+                    # after the emission probability has been updated
+                    # (relevant for ML-estimate)
+                    for morph in self.detag_word(transform.result):
+                        self._annot_coding.modify_contribution(morph, 1)
                 cost = self.get_cost()
                 if cost < best.cost:
                     best = EpochNode(cost, transform, matched_targets)
                 # Revert change to encoding
+                if self._supervised:
+                    for morph in self.detag_word(transform.result):
+                        self._annot_coding.modify_contribution(morph, -1)
+                self._annot_coding.update_counts(transform.annot_counts, -1)
                 self._update_counts(transform.change_counts, -1)
                 for morph in self.detag_word(transform.result):
                     self._modify_morph_count(morph, -num_matches)
@@ -805,6 +823,8 @@ class CatmapModel(object):
                 # Best option was to do nothing. Revert morph count.
                 for morph in self.detag_word(transform_group[0].rule):
                     self._modify_morph_count(morph, num_matches)
+                    if self._supervised:
+                        self._annot_coding.modify_contribution(morph, 1)
             else:
                 # A real change was the best option
                 best.transform.reset_counts()
@@ -813,14 +833,20 @@ class CatmapModel(object):
                         # Add the new representation to morph counts
                         self._modify_morph_count(morph, num_matches)
                     new_analysis = best.transform.apply(
-                                        self.segmentations[target],
-                                        self, corpus_index=target)
+                        self.segmentations[target],
+                        self, corpus_index=target,
+                        is_annotation=self._is_annotation(target))
                     self.segmentations[target] = new_analysis
                     # any morph used in the best segmentation
                     # is no longer temporary
                     temporaries.difference_update(
                         self.detag_word(new_analysis.analysis))
                 self._update_counts(best.transform.change_counts, 1)
+                self._annot_coding.update_counts(
+                    best.transform.annot_counts, 1)
+                if self._supervised:
+                    for morph in self.detag_word(best.transform.result):
+                        self._annot_coding.modify_contribution(morph, 1)
                 self._changed_segmentations.update(best.targets)
                 self._changed_segmentations_op.update(best.targets)
             self._morph_usage.remove_temporaries(temporaries)
@@ -973,8 +999,6 @@ class CatmapModel(object):
             self._lexicon_coding.add(morph)
         elif old_count > 0 and new_count == 0:
             self._lexicon_coding.remove(morph)
-        if self._supervised:
-            self._annot_coding.update_count(morph, old_count, new_count)
 
     def _update_counts(self, change_counts, multiplier):
         """Updates the model counts according to the pre-calculated
@@ -1267,10 +1291,7 @@ class CatmapModel(object):
         # Will need to check for proper expansion when introducing
         # hierarchical morphs
 
-        constructions_add = collections.Counter()
-        blacklist = set()
-        # changes to the normal corpus counts
-        constructions_rm = collections.Counter()
+        count_diff = collections.Counter()
         changes = ChangeCounts()
         for (i, annotation) in enumerate(self.annotations):
             (_, alternatives) = annotation
@@ -1293,26 +1314,18 @@ class CatmapModel(object):
             # which will be cancelled out when adding new_active.
             if old_active is not None:
                 for morph in self.detag_word(old_active):
-                    constructions_rm[morph] += 1
+                    count_diff[morph] -= 1
             new_detagged = self.detag_word(new_active)
             for morph in new_detagged:
-                constructions_add[morph] += 1
-            for (prefix, suffix) in utils.ngrams(new_detagged, n=2):
-                blacklist.add(prefix + suffix)
+                count_diff[morph] += 1
 
-        for (morph, count) in constructions_rm.items():
-            self._modify_morph_count(morph, -count)
-        for (morph, count) in constructions_add.items():
+        for (morph, count) in count_diff.items():
+            if count == 0:
+                continue
             self._modify_morph_count(morph, count)
         self._update_counts(changes, 1)
-        self._annot_coding.set_constructions(constructions_add)
-        for supermorph in blacklist:
-            self._annot_coding.add_to_blacklist(supermorph)
-            self._annot_coding.set_count(supermorph,
-                                         self._morph_usage.count(supermorph))
-        for morph in constructions_add:
-            count = self._morph_usage.count(morph)
-            self._annot_coding.set_count(morph, count)
+        self._annot_coding.update_counts(changes, 1)
+        self._annot_coding.reset_contributions()
 
     def add_annotations(self, annotations, annotatedcorpusweight=None,
         penalty=-999999, blacklist_penalty=-999999):
@@ -1561,7 +1574,7 @@ class Transformation(object):
     """A transformation of a certain pattern of morphs and/or categories,
     to be (partially) replaced by another representation.
     """
-    __slots__ = ['rule', 'result', 'change_counts']
+    __slots__ = ['rule', 'result', 'change_counts', 'anno_counts']
 
     def __init__(self, rule, result):
         self.rule = rule
@@ -1570,12 +1583,13 @@ class Transformation(object):
         else:
             self.result = result
         self.change_counts = ChangeCounts()
+        self.anno_counts = ChangeCounts()
 
     def __repr__(self):
         return '{}({}, {})'.format(self.__class__.__name__,
                                    self.rule, self.result)
 
-    def apply(self, word, model, corpus_index=None):
+    def apply(self, word, model, corpus_index=None, is_annotation=False):
         """Tries to apply this transformation to an analysis.
         If the transformation doesn't match, the input is returned unchanged.
         If the transformation matches, changes are made greedily from the
@@ -1612,11 +1626,16 @@ class Transformation(object):
             self.change_counts.update(word.analysis, -word.count,
                                       corpus_index)
             self.change_counts.update(out, word.count, corpus_index)
+            if is_annotation:
+                self.anno_counts.update(word.analysis, -word.count,
+                                        None)
+                self.anno_counts.update(out, word.count, None)
 
         return WordAnalysis(word.count, out)
 
     def reset_counts(self):
         self.change_counts = ChangeCounts()
+        self.anno_counts = ChangeCounts()
 
 
 class ViterbiResegmentTransformation(object):
@@ -1628,6 +1647,7 @@ class ViterbiResegmentTransformation(object):
         self.rule = TransformationRule(tuple(word.analysis))
         self.result, _ = model.viterbi_segment(word.analysis)
         self.change_counts = ChangeCounts()
+        self.anno_counts = ChangeCounts()
 
     def __repr__(self):
         return '{}({}, {})'.format(self.__class__.__name__,
@@ -1639,10 +1659,15 @@ class ViterbiResegmentTransformation(object):
         self.change_counts.update(word.analysis, -word.count,
                                     corpus_index)
         self.change_counts.update(self.result, word.count, corpus_index)
+        if is_annotation:
+            self.anno_counts.update(word.analysis, -word.count,
+                                    None)
+            self.anno_counts.update(out, word.count, None)
         return WordAnalysis(word.count, self.result)
 
     def reset_counts(self):
         self.change_counts = ChangeCounts()
+        self.anno_counts = ChangeCounts()
 
 
 class TransformationRule(object):
@@ -1861,13 +1886,14 @@ class CatmapEncoding(baseline.CorpusEncoding):
         pair = (category, morph)
         if pair not in self._log_emissionprob_cache:
             cat_index = get_categories().index(category)
+            count = self._morph_usage.count(morph)
             # Not equal to what you get by:
             # zlog(self._emission_counts[morph][cat_index]) +
-            if self._cat_tagcount[category] == 0:
+            if self._cat_tagcount[category] == 0 or count == 0:
                 self._log_emissionprob_cache[pair] = LOGPROB_ZERO
             else:
                 self._log_emissionprob_cache[pair] = (
-                    zlog(self._morph_usage.count(morph)) +
+                    zlog(count) +
                     zlog(self._morph_usage.condprobs(morph)[cat_index]) -
                     zlog(self._morph_usage.category_token_count[cat_index]))
         msg = 'emission {} -> {} has probability > 1'.format(category, morph)
@@ -2000,44 +2026,60 @@ class CatmapEncoding(baseline.CorpusEncoding):
                 )
 
 
-class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
+class CatmapAnnotatedCorpusEncoding(object)
     def __init__(self, corpus_coding, weight=None,
-                 penalty=-999999, blacklist_penalty=-999999):
-        super(CatmapAnnotatedCorpusEncoding, self).__init__(corpus_coding,
-                                                            weight=weight,
-                                                            penalty=penalty)
-        self.blacklist = set()
-        self.blacklist_penalty = blacklist_penalty
+                 penalty=-999999):
+        self.corpus_coding = corpus_coding
+        if weight is None:
+            weight = 1.0
+            self.do_update_weight = True
+        else:
+            self.weight = weight
+            self.do_update_weight = False
+        self.penalty = penalty
+        self.logemissionsum = 0.0
+        self.boundaries = 0
 
-    def add_to_blacklist(self, morph):
-        """Blacklist to prevent supermorphs of annotation parts from
-        being added to the lexicon, unless they are separately included
-        in the annotations.
-        """
-        if self.blacklist_penalty != 0 and morph not in self.constructions:
-            self.blacklist.add(morph)
+        # Counts of emissions observed in the tagged corpus.
+        # A dict of ByCategory objects indexed by morph. Counts occurences.
+        self._emission_counts = utils.Sparse(
+            default=utils._nt_zeros(ByCategory))
 
-    def set_constructions(self, constructions):
-        super(CatmapAnnotatedCorpusEncoding, self).set_constructions(
-            constructions)
-        self.blacklist.clear()
+        # Counts of transitions between categories.
+        # P(Category -> Category) can be calculated from these.
+        # A dict of integers indexed by a tuple of categories.
+        # Counts occurences.
+        self._transition_counts = collections.Counter()
 
-    def set_count(self, construction, count):
-        super(CatmapAnnotatedCorpusEncoding, self).set_count(construction,
-                                                             count)
-        if count > 0 and construction in self.blacklist:
-            self.logtokensum += self.blacklist_penalty
+    def update_counts(self, counts, direction):
+        for (cmorph, diff_count) in counts.emissions.items():
+            cat_index = get_categories().index(cmorph.category)
+            old_count = self._emission_counts[cmorph.morph][cat_index]
+            new_count = old_count + (diff_count * direction)
+            new_counts = self._emission_counts[cmorph.morph]._replace(
+                **{category: new_count})
+            self._emission_counts[cmorph.morph] = new_counts
 
-    def update_count(self, construction, old_count, new_count):
-        super(CatmapAnnotatedCorpusEncoding, self).update_count(construction,
-                                                                old_count,
-                                                                new_count)
-        assert new_count >= 0
-        if construction in self.blacklist:
-            if old_count > 0:
-                self.logtokensum -= self.blacklist_penalty
-            if new_count > 0:
-                self.logtokensum += self.blacklist_penalty
+        for (pair, diff_count) in counts.transitions.items():
+            self._transition_counts[pair] += (diff_count * direction)
+
+    def reset_contributions(self):
+        self.logemissionsum = 0.0
+        categories = get_categories()
+        for (morph, counts) in self._emission_counts.items():
+            for (i, category) in enumerate(categories):
+                self._contribution_helper(morph, category, counts[i])
+
+    def modify_contribution(self, morph, direction):
+        categories = get_categories()
+        counts = self._emission_counts[morph]
+        for (i, category) in enumerate(categories):
+            self._contribution_helper(morph, category, counts[i] * direction)
+
+    def get_cost(self):
+        if self.boundaries == 0:
+            return 0.0
+        # FIXME
 
     def update_weight(self):
         """Update the weight of the Encoding by taking the ratio of the
@@ -2049,8 +2091,12 @@ class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
         old = self.weight
         self.weight = float(self.corpus_coding.boundaries) / self.boundaries
         if self.weight != old:
-            _logger.info("Corpus weight of annotated data set to %s"
-                         % self.weight)
+            _logger.info('Corpus weight of annotated data set to {}'.format(
+                         self.weight)
+
+    def _contribution_helper(self, morph, category, count):
+        self.logemissionsum += self._corpus_coding.log_emissionprob(category,
+                                                                    morph)
 
 
 class CorpusWeightUpdater(object):

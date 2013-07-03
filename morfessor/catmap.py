@@ -208,7 +208,6 @@ class CatmapModel(object):
         baseline model.
         """
 
-        # FIXME: all these need to be rewritten for token counts
         self._calculate_usage_features()
         self._unigram_transition_probs()
         self.viterbi_tag_corpus()
@@ -300,7 +299,6 @@ class CatmapModel(object):
                         change_counts.update(old_seg.analysis,
                                              -old_seg.count,
                                              corpus_index=i_new)
-                        # FIXME partition. remove _modify_morph_count
                         for morph in self.detag_word(old_seg.analysis):
                             self._modify_morph_count(morph, -old_seg.count)
                         self.segmentations[i_new] = WordAnalysis(
@@ -778,18 +776,22 @@ class CatmapModel(object):
             if num_matches == 0:
                 continue
 
+            for morph in self.detag_word(transform_group[0].rule):
+                # Remove the old representation, but only from
+                # morph counts (emissions and transitions updated later)
+                self._modify_morph_count(morph, -num_matches)
+
             for transform in transform_group:
+                for morph in self.detag_word(transform.result):
+                    # Add the new representation to morph counts
+                    self._modify_morph_count(morph, num_matches)
                 for target in matched_targets:
-                    # FIXME refactor into separate method
-                    if (self._supervised and
-                        target <= len(self.annotations)):
-                        partition = 'annotations'
-                    else:
-                        partition = 'corpus'
+                    is_annot = (self._supervised and
+                                target <= len(self.annotations))
                     old_analysis = self.segmentations[target]
                     new_analysis = transform.apply(old_analysis,
                                                    self,
-                                                   partition=partition)
+                                                   is_annot=is_annot)
 
                 # Apply change to encoding
                 self._update_counts(transform.change_counts, 1)
@@ -798,24 +800,26 @@ class CatmapModel(object):
                     best = EpochNode(cost, transform, matched_targets)
                 # Revert change to encoding
                 self._update_counts(transform.change_counts, -1)
+                for morph in self.detag_word(transform.result):
+                    self._modify_morph_count(morph, -num_matches)
 
             if best.transform is None:
-                # Best option was to do nothing.
-                pass
+                # Best option was to do nothing. Revert morph count.
+                for morph in self.detag_word(transform_group[0].rule):
+                    self._modify_morph_count(morph, num_matches)
             else:
                 # A real change was the best option
                 best.transform.reset_counts()
                 for target in best.targets:
-                    # FIXME refactor into separate method
-                    if (self._supervised and
-                        target <= len(self.annotations)):
-                        partition = 'annotations'
-                    else:
-                        partition = 'corpus'
+                    for morph in self.detag_word(best.transform.result):
+                        # Add the new representation to morph counts
+                        self._modify_morph_count(morph, num_matches)
+                    is_annot = (self._supervised and
+                                target <= len(self.annotations))
                     new_analysis = best.transform.apply(
                                         self.segmentations[target],
                                         self, corpus_index=target,
-                                        partition=partition)
+                                        is_annot=is_annot)
                     self.segmentations[target] = new_analysis
                     # any morph used in the best segmentation
                     # is no longer temporary
@@ -963,6 +967,22 @@ class CatmapModel(object):
             yield ([ViterbiResegmentTransformation(word, self)],
                    set([i]), set())
 
+    def _modify_morph_count(self, morph, diff_count):
+        """Modifies the count of a morph in the lexicon.
+        Does not affect transitions or emissions."""
+        old_count = self._morph_usage.count(morph)
+        new_count = old_count + diff_count
+        self._morph_usage.set_count(morph, new_count)
+        self._corpus_coding.clear_emission_cache()
+        if old_count == 0 and new_count > 0:
+            self._lexicon_coding.add(morph)
+        elif old_count > 0 and new_count == 0:
+            self._lexicon_coding.remove(morph)
+        if self._supervised:
+            self._annot_coding.update_morph_count(morph,
+                                                  old_count,
+                                                  new_count)
+
     def _update_counts(self, change_counts, multiplier):
         """Updates the model counts according to the pre-calculated
         ChangeCounts object (e.g. calculated in Transformation).
@@ -971,7 +991,16 @@ class CatmapModel(object):
             change_counts -- A ChangeCounts object
             multiplier -- +1 to apply the change, -1 to revert it.
         """
-        self.token_counts.update(change_counts, multiplier)
+        for cmorph in change_counts.emissions:
+            self._corpus_coding.update_emission_count(
+                cmorph.category,
+                cmorph.morph,
+                change_counts.emissions[cmorph] * multiplier)
+
+        for (prev_cat, next_cat) in change_counts.transitions:
+            self._corpus_coding.update_transition_count(
+                prev_cat, next_cat,
+                change_counts.transitions[(prev_cat, next_cat)] * multiplier)
 
         if multiplier > 0:
             bl_rm = change_counts.backlinks_remove
@@ -987,7 +1016,7 @@ class CatmapModel(object):
             self.morph_backlinks[morph].update(
                 change_counts.backlinks_add[morph])
 
-    def viterbi_tag(self, segments, virtual=0):
+    def viterbi_tag(self, segments):
         """Tag a pre-segmented word using the learned model.
 
         Arguments:
@@ -1043,8 +1072,7 @@ class CatmapModel(object):
                     cost.append(grid[i][prev_cat].cost +
                                 self._corpus_coding.transit_emit_cost(
                                     categories[prev_cat],
-                                    categories[next_cat], morph,
-                                    virtual=virtual))
+                                    categories[next_cat], morph))
                 best.append(ViterbiNode(*utils.minargmin(cost)))
                 cost = []
             # Update grid to prepare for next iteration
@@ -1494,13 +1522,19 @@ class ChangeCounts(object):
     __slots__ = ['emissions', 'transitions',
                  'backlinks_remove', 'backlinks_add']
 
-    def __init__(self):
-        self.emissions = collections.defaultdict(default=collections.Counter)
-        self.transitions = collections.defaultdict(default=collections.Counter)
+    def __init__(self, emissions=None, transitions=None):
+        if emissions is None:
+            self.emissions = collections.Counter()
+        else:
+            self.emissions = emissions
+        if transitions is None:
+            self.transitions = collections.Counter()
+        else:
+            self.transitions = transitions
         self.backlinks_remove = collections.defaultdict(set)
         self.backlinks_add = collections.defaultdict(set)
 
-    def update(self, analysis, count, corpus_index=None, partition='corpus'):
+    def update(self, analysis, count, corpus_index=None):
         """Updates the counts to add or remove the effects of an analysis.
 
         Arguments:
@@ -1512,11 +1546,9 @@ class ChangeCounts(object):
                             occur in will be updated. corpus_index is then
                             the index of the current occurence being updated.
         """
-        em = self.emissions[partition]
-        tr = self.transitions[partition]
 
         for cmorph in analysis:
-            em[cmorph] += count
+            self.emissions[cmorph] += count
             if corpus_index is not None:
                 if count < 0:
                     self.backlinks_remove[cmorph.morph].add(corpus_index)
@@ -1524,18 +1556,12 @@ class ChangeCounts(object):
                     self.backlinks_add[cmorph.morph].add(corpus_index)
         wb_extended = _wb_wrap(analysis)
         for (prefix, suffix) in utils.ngrams(wb_extended, n=2):
-            tr[(prefix.category, suffix.category)] += count
+            self.transitions[(prefix.category, suffix.category)] += count
         # Make sure that backlinks_remove and backlinks_add are disjoint
         # Removal followed by readding is the same as just adding
         for morph in self.backlinks_add:
             self.backlinks_remove[morph].difference_update(
                 self.backlinks_add[morph])
-
-    def changed_morphs(self):
-        morphs = set()
-        for partition in self.emissions.values():
-            morphs.update(partition.keys())
-        return morphs
 
 
 class Transformation(object):
@@ -1551,12 +1577,13 @@ class Transformation(object):
         else:
             self.result = result
         self.change_counts = ChangeCounts()
+        self.annot_counts = ChangeCounts()
 
     def __repr__(self):
         return '{}({}, {})'.format(self.__class__.__name__,
                                    self.rule, self.result)
 
-    def apply(self, word, model, corpus_index=None, partition='corpus'):
+    def apply(self, word, model, corpus_index=None, is_annot=False):
         """Tries to apply this transformation to an analysis.
         If the transformation doesn't match, the input is returned unchanged.
         If the transformation matches, changes are made greedily from the
@@ -1588,16 +1615,21 @@ class Transformation(object):
 
         if matches > 0:
             # Only retag if the rule matched something
-            out = model.viterbi_tag(out, virtual=word.count)
+            out = model.viterbi_tag(out)
 
             self.change_counts.update(word.analysis, -word.count,
-                                      corpus_index, partition)
-            self.change_counts.update(out, word.count, corpus_index, partition)
+                                      corpus_index)
+            self.change_counts.update(out, word.count, corpus_index)
+            if is_annot:
+                self.annot_counts.update(word.analysis, -word.count,
+                                        corpus_index)
+                self.annot_counts.update(out, word.count, corpus_index)
 
         return WordAnalysis(word.count, out)
 
     def reset_counts(self):
         self.change_counts = ChangeCounts()
+        self.annot_counts = ChangeCounts()
 
 
 class ViterbiResegmentTransformation(object):
@@ -1609,21 +1641,27 @@ class ViterbiResegmentTransformation(object):
         self.rule = TransformationRule(tuple(word.analysis))
         self.result, _ = model.viterbi_segment(word.analysis)
         self.change_counts = ChangeCounts()
+        self.annot_counts = ChangeCounts()
 
     def __repr__(self):
         return '{}({}, {})'.format(self.__class__.__name__,
                                    self.rule, self.result)
 
-    def apply(self, word, model, corpus_index=None, partition='corpus'):
+    def apply(self, word, model, corpus_index=None):
         if self.rule.num_matches(word.analysis) == 0:
             return word
         self.change_counts.update(word.analysis, -word.count,
-                                    corpus_index, partition)
-        self.change_counts.update(out, word.count, corpus_index, partition)
+                                    corpus_index)
+        self.change_counts.update(out, word.count, corpus_index)
+        if is_annot:
+            self.annot_counts.update(word.analysis, -word.count,
+                                    corpus_index)
+            self.annot_counts.update(out, word.count, corpus_index)
         return WordAnalysis(word.count, self.result)
 
     def reset_counts(self):
         self.change_counts = ChangeCounts()
+        self.annot_counts = ChangeCounts()
 
 
 class TransformationRule(object):
@@ -1830,74 +1868,45 @@ class TokenCount(object):
         pair = (prev_cat, next_cat)
         if pair not in self._log_transitionprob_cache:
             self._log_transitionprob_cache[pair] = (
-                zlog(self._weightedsum(lambda p: p.get_transition_count(
+                zlog(_weightedsum(lambda p: p.get_transition_count(
                     prev_cat, next_cat))) -
-                zlog(self._weightedsum(
-                    lambda p: p._cat_token_count[prev_cat])))
+                zlog(_weightedsum(lambda p: p._cat_token_count[prev_cat])))
         return self._log_transitionprob_cache[pair]
 
-    def log_emissionprob(self, category, morph, virtual=0):
+    def log_emissionprob(self, category, morph):
         """-Log of posterior emission probability P(morph|category)"""
         pair = (category, morph)
         if pair not in self._log_emissionprob_cache:
             cat_index = get_categories().index(category)
             # Not equal to what you get by:
             # zlog(self._emission_counts[morph][cat_index]) +
-            cat_total = self._weightedsum(
-                lambda p: p._cat_token_count[cat_index])
-            if cat_total == 0:
+            if self._cat_token_count[category] == 0:
                 self._log_emissionprob_cache[pair] = LOGPROB_ZERO
             else:
                 self._log_emissionprob_cache[pair] = (
-                    zlog(virtual + self.morph_count(morph)) +
+                    zlog(self.morph_count(morph)) +
                     zlog(self._morph_usage.condprobs(morph)[cat_index]) -
-                    zlog(virtual + cat_total))
+                    zlog(_weightedsum(lambda p: p._cat_token_count[cat_index]))
         msg = 'emission {} -> {} has probability > 1'.format(category, morph)
         assert self._log_emissionprob_cache[pair] >= 0, msg
         return self._log_emissionprob_cache[pair]
 
-    def transit_emit_cost(self, prev_cat, next_cat, morph, virtual=0):
+    def transit_emit_cost(self, prev_cat, next_cat, morph):
         """Cost of transitioning from prev_cat to next_cat and emitting
         the morph."""
         if (prev_cat, next_cat) in MorphUsageProperties.zero_transitions:
             return LOGPROB_ZERO
         return (self.log_transitionprob(prev_cat, next_cat) +
-                self.log_emissionprob(next_cat, morph, virtual=0))
+                self.log_emissionprob(next_cat, morph))
 
     def morph_count(self, morph):
         return self._weightedsum(lambda p: p.morph_count(morph))
 
-    def update_counts(self, change_counts, multiplier):
-        for morph in change_counts.changed_morphs:
-            # FIXME: remove contribution of morph from all cost parts
-            pass
-        for partition in change_counts.emissions:
-            for (cmorph, count) in change_counts.emissions[partition].items():
-                self._partitions[partition].update_emission_count(
-                    cmorph.category,
-                    cmorph.morph,
-                    count * multiplier)
-        for morph in change_counts.changed_morphs:
-            # FIXME: re-add contribution of morph to all cost parts
-            pass
-        self._log_emissionprob_cache.clear()
+    def modify_morph_count(self, morph, diff_count, partition):
+        # FIXME this method should not be needed
+        self._partitions['partition'].modify_morph_count(morph, diff_count)
 
-        for partition in change_counts.transitions:
-            for (pair, count) in change_counts.transitions[partition].items():
-                (prev_cat, next_cat) = pair
-                self._partitions[partition].update_transition_count(
-                    prev_cat, next_cat,
-                    count * multiplier)
-        self._log_transitionprob_cache.clear()
-        # FIXME where should the following go:
-        if old_count == 0 and new_count > 0:
-            self._lexicon_coding.add(morph)
-        elif old_count > 0 and new_count == 0:
-            self._lexicon_coding.remove(morph)
-        if self._supervised:
-            self._annot_coding.update_morph_count(morph,
-                                                  old_count,
-                                                  new_count)
+    def update_counts(self, change_counts, multiplier):
 
     def clear_transition_counts(self):
         """Resets transition counts, costs and cache.
@@ -1912,6 +1921,11 @@ class TokenCount(object):
         Use before fully reprocessing a tagged segmented corpus."""
         for partition in self._partitions:
             partition._emission_counts.clear()
+        self._log_emissionprob_cache.clear()
+
+    def _clear_emission_cache(self):
+        """Clears the cache for emission probability values.
+        Use if an incremental change invalidates cached values."""
         self._log_emissionprob_cache.clear()
 
     def _weightedsum(self, func):

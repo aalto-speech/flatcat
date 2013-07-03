@@ -151,6 +151,8 @@ class TestProbabilityEstimation(unittest.TestCase):
     def test_perplexities(self):
         for morph in self.perplexities:
             reference = self.perplexities[morph]
+            if morph not in self.model._morph_usage.seen_morphs():
+                assert False, '%s not in observed morphs' % (morph,)
             observed = self.model._morph_usage._contexts[morph]
             msg = '%s perplexity of %s, %s not almost equal to %s'
             tmp = observed.right_perplexity
@@ -165,6 +167,8 @@ class TestProbabilityEstimation(unittest.TestCase):
     def test_condprobs(self):
         for morph in self.condprobs:
             reference = self.condprobs[morph]
+            if morph not in self.model._morph_usage.seen_morphs():
+                assert False, '%s not in observed morphs' % (morph,)
             observed = self.model._morph_usage.condprobs(morph)
             msg = 'P(%s | "%s"), %s not almost equal to %s'
 
@@ -524,8 +528,8 @@ class TestModelConsistency(unittest.TestCase):
     def _general_consistency_asserts(self):
         """ These values should be internally consistent at all times."""
         self.assertAlmostEqual(
-            sum(self.model._token_counts._partitions['corpus']._transition_counts.values()),
-            sum(self.model._token_counts._partitions['corpus']._cat_token_count.values()),
+            sum(self.model._corpus_coding._transition_counts.values()),
+            sum(self.model._corpus_coding._cat_token_count.values()),
             places=4)
 
         sum_transitions_from = collections.Counter()
@@ -534,7 +538,7 @@ class TestModelConsistency(unittest.TestCase):
         forbidden = scheme.MorphUsageProperties.zero_transitions
         for prev_cat in categories:
             for next_cat in categories:
-                count = self.model._token_counts._partitions['corpus']._transition_counts[
+                count = self.model._corpus_coding._transition_counts[
                     (prev_cat, next_cat)]
                 if count == 0:
                     continue
@@ -551,7 +555,7 @@ class TestModelConsistency(unittest.TestCase):
             msg = ('Transition counts were not symmetrical. ' +
                    'category {}: {}, {}, {}'.format(cat,
                     sum_transitions_from[cat], sum_transitions_to[cat],
-                    self.model._token_counts._partitions['corpus']._cat_token_count[cat]))
+                    self.model._corpus_coding._cat_token_count[cat]))
 
             self.assertEqual(sum_transitions_from[cat],
                              sum_transitions_to[cat],

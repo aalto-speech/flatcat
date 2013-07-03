@@ -1315,7 +1315,7 @@ class CatmapModel(object):
             self._annot_coding.set_count(morph, count)
 
     def add_annotations(self, annotations, annotatedcorpusweight=None,
-        multiplier=1, penalty=-999999, blacklist_penalty=-999999):
+        penalty=-999999, blacklist_penalty=-999999):
         self._supervised = True
         self._annotations_tagged = True
         for (word, alternatives) in annotations.items():
@@ -1325,7 +1325,7 @@ class CatmapModel(object):
             # annotations, in the same order as in self.annotations
             self.segmentations.insert(
                 len(self.annotations),
-                WordAnalysis(multiplier, alternatives[0]))
+                WordAnalysis(1, alternatives[0]))
             self.annotations.append((word, alternatives))
         self._calculate_morph_backlinks()
         self._annot_coding = CatmapAnnotatedCorpusEncoding(
@@ -2001,14 +2001,14 @@ class CatmapEncoding(baseline.CorpusEncoding):
 
 
 class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
-    def __init__(self, model, weight=None, multiplier=1,
+    def __init__(self, model, weight=None,
                  penalty=-999999, blacklist_penalty=-999999):
         super(CatmapAnnotatedCorpusEncoding, self).__init__(
             model._corpus_coding,
             weight=weight,
             penalty=penalty)
         self.model = model
-        self.multiplier = multiplier
+        self.multiplier = 1
         self.blacklist = set()
         self.blacklist_penalty = blacklist_penalty
 
@@ -2042,17 +2042,12 @@ class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
             if new_count > 0:
                 self.logtokensum += self.blacklist_penalty
 
-    def set_multiplier(self, multiplier):
-        for i in range(len(self.model.annotations)):
-            self.model.segmentations[i] = WordAnalysis(
-                self.multiplier, self.model.segmentations[i].analysis)
-        self.model.reestimate_probabilities()
-
     def update_weight(self):
         """Update the weight of the Encoding by taking the ratio of the
         corpus boundaries and annotated boundaries.
         Does not scale by corpus weight, unlike Morfessor Baseline.
         """
+        # FIXME wrong place: multiplier should be applied also for manual weight
         if not self.do_update_weight:
             return
         old = self.weight
@@ -2061,12 +2056,15 @@ class CatmapAnnotatedCorpusEncoding(baseline.AnnotatedCorpusEncoding):
             annotation_counts += self.model.segmentations[i].count
         self.weight = (float(self.corpus_coding.boundaries - annotation_counts)
             / self.boundaries)
-        #self.set_multiplier(int(math.ceil(math.log(self.weight))))
+        self.multiplier = int(math.ceil(math.log(self.weight)))
         self.weight /= float(self.multiplier)
+        for i in range(len(self.model.annotations)):
+            self.model.segmentations[i] = WordAnalysis(
+                self.multiplier, self.model.segmentations[i].analysis)
+        self.model.reestimate_probabilities()
         if self.weight != old:
-            _logger.info(
-                'Corpus weight of annotated data set to {} * {}'.format(
-                    self.multiplier, self.weight))
+            _logger.info("Corpus weight of annotated data set to %s"
+                         % self.weight)
 
 
 class CorpusWeightUpdater(object):

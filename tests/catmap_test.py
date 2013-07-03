@@ -67,6 +67,7 @@ def _load_catmap(baseline_seg, no_emissions=False):
             model._unigram_transition_probs()
         else:
             model.initialize_baseline()
+            model.reestimate_probabilities()
         return model
 
 
@@ -183,27 +184,36 @@ class TestProbabilityEstimation(unittest.TestCase):
     """
 
     def test_posterior_emission_probs(self):
-        """No longer possible to calculate for semi-initialized model."""
-        pass
+        sumA = 0.0
+        sumB = 0.0
+        for morph in self.posteriors:
+            reference = self.posteriors[morph]
+            msg = 'P(%s | "%s"), %s not almost equal to %s'
+
+            for (i, category) in enumerate(self.model.get_categories()):
+                try:
+                    observed = _zexp(
+                        self.model._token_counts.log_emissionprob(
+                            category, morph))
+                except KeyError:
+                    raise KeyError('%s not in observed morphs' % (morph,))
+                self.assertAlmostEqual(observed, reference[i], places=9,
+                    msg=msg % (morph, category, observed, reference[i]))
+                sumA += observed
+                sumB += reference[i]
 
     def test_transitions(self):
         categories = self.model.get_categories(True)
         msg = 'P(%s -> %s), %s not almost equal to %s'
         reference = self.transitions
-        obssum = 0.0
-        refsum = 0.0
         for cat1 in categories:
             for cat2 in categories:
                 pair = (cat1, cat2)
                 obsval = _zexp(self.model._token_counts.log_transitionprob(
                                                                     *pair))
-                obssum += obsval
-                refsum += reference[pair][0]
-                #self.assertAlmostEqual(obsval, reference[pair][0], places=9,
-                #                       msg=msg % (cat1, cat2,
-                #                                  obsval, reference[pair][0]))
-                #print(msg % (cat1, cat2, obsval, reference[pair][0]))
-        self.assertAlmostEqual(obssum, refsum, places=8, msg='obssum {} refsum {}'.format(obssum, refsum))
+                self.assertAlmostEqual(obsval, reference[pair][0], places=9,
+                                       msg=msg % (cat1, cat2,
+                                                  obsval, reference[pair][0]))
 
 
 class TestProbabilityReEstimation(TestProbabilityEstimation):
@@ -216,26 +226,6 @@ class TestProbabilityReEstimation(TestProbabilityEstimation):
         io = morfessor.MorfessorIO(encoding='latin-1')
         segmentations = io.read_segmentation_file(
             REFERENCE_BASELINE_SEGMENTATION)
-
-    def test_posterior_emission_probs(self):
-        obssum = 0.0
-        refsum = 0.0
-        for morph in self.posteriors:
-            reference = self.posteriors[morph]
-            msg = 'P(%s | "%s"), %s not almost equal to %s'
-
-            for (i, category) in enumerate(self.model.get_categories()):
-                try:
-                    observed = _zexp(
-                        self.model._token_counts.log_emissionprob(
-                            category, morph))
-                except KeyError:
-                    raise KeyError('%s not in observed morphs' % (morph,))
-                #self.assertAlmostEqual(observed, reference[i], places=9,
-                #    msg=msg % (morph, category, observed, reference[i]))
-                obssum += observed
-                refsum += reference[i]
-        self.assertAlmostEqual(obssum, refsum, places=8, msg='obssum {} refsum {}'.format(obssum, refsum))
 
 
 class TestBaselineSegmentation(unittest.TestCase):
@@ -393,8 +383,7 @@ class TestModelConsistency(unittest.TestCase):
                     catmap.CategorizedMorph('AABBBBB', 'STM'): 1}
         cc.transitions['corpus'] = {(catmap.WORD_BOUNDARY, 'ZZZ'): -1,
                         ('ZZZ', 'STM'): -1,
-                        (catmap.WORD_BOUNDARY, 'STM'): 1
-                        }
+                        (catmap.WORD_BOUNDARY, 'STM'): 1}
 
         def apply_update_counts():
             self.model._update_counts(cc, 1)
@@ -495,8 +484,7 @@ class TestModelConsistency(unittest.TestCase):
                 self.model._token_counts._partitions['corpus']._emission_counts),
             'corpus_transition_counts': _remove_zeros(
                 self.model._token_counts._partitions['corpus']._transition_counts),
-            'corpus_cat_token_count': _remove_zeros(
-                self.model._token_counts._partitions['corpus']._cat_token_count)}
+            'corpus_cat_token_count': dict(self.model._token_counts._partitions['corpus']._cat_token_count)}
         state_approx = {
             'corpus_logtokensum': float(
                 self.model._corpus_coding.logtokensum),
@@ -519,7 +507,7 @@ class TestModelConsistency(unittest.TestCase):
                 self.model._token_counts._partitions['annotations']._emission_counts),
             state_exact['anno_transition_counts'] = _remove_zeros(
                 self.model._token_counts._partitions['annotations']._transition_counts),
-            state_exact['anno_cat_token_count'] = _remove_zeros(
+            state_exact['anno_cat_token_count'] = dict(
                 self.model._token_counts._partitions['annotations']._cat_token_count)
         return (state_exact, state_approx)
 

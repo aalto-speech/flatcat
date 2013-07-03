@@ -637,7 +637,7 @@ class CatmapModel(object):
         categories = get_categories()
         category_totals = collections.Counter()
         for (count, analysis) in self.segmentations:
-            category_totals[WORD_BOUNDARY] += count
+            category_totals[WORD_BOUNDARY] += 1
             for cmorph in analysis:
                 if isinstance(cmorph, CategorizedMorph):
                     morph = cmorph.morph
@@ -645,7 +645,7 @@ class CatmapModel(object):
                     morph = cmorph
                 condprobs = self._morph_usage.condprobs(morph)
                 for (i, category) in enumerate(categories):
-                    category_totals[category] += count * condprobs[i]
+                    category_totals[category] += condprobs[i]
 
         num_valid_tokens = 0.0
         for (prev_cat, next_cat) in MorphUsageProperties.valid_transitions():
@@ -1804,15 +1804,11 @@ class TokenCount(object):
     def log_transitionprob(self, prev_cat, next_cat):
         pair = (prev_cat, next_cat)
         if pair not in self._log_transitionprob_cache:
-            cat_total = self._weightedsum(
-                            lambda p: p._cat_token_count[prev_cat])
-            if cat_total == 0:
-                self._log_transitionprob_cache[pair] = LOGPROB_ZERO
-            else:
-                self._log_transitionprob_cache[pair] = (
-                    zlog(self._weightedsum(lambda p: p.get_transition_count(
-                        prev_cat, next_cat))) -
-                    zlog(cat_total))
+            self._log_transitionprob_cache[pair] = (
+                zlog(self._weightedsum(lambda p: p.get_transition_count(
+                    prev_cat, next_cat))) -
+                zlog(self._weightedsum(
+                    lambda p: p._cat_token_count[prev_cat])))
         return self._log_transitionprob_cache[pair]
 
     def log_emissionprob(self, category, morph, virtual=0):
@@ -1824,20 +1820,14 @@ class TokenCount(object):
             # Not equal to what you get by:
             # zlog(self._emission_counts[morph][cat_index]) +
             cat_total = self._weightedsum(
-                lambda p: p._cat_token_count[category])
+                lambda p: p._cat_token_count[cat_index])
             if cat_total == 0:
                 self._log_emissionprob_cache[pair] = LOGPROB_ZERO
             else:
-                count = self.morph_count(morph)
-                if count > 0:
-                    virtual = 0
-                if morph == 'jo':
-                    print(virtual, count, self._morph_usage.condprobs(morph)[cat_index], cat_total)
                 self._log_emissionprob_cache[pair] = (
-                    zlog(virtual + count) +
+                    zlog(virtual + self.morph_count(morph)) +
                     zlog(self._morph_usage.condprobs(morph)[cat_index]) -
-                    zlog(virtual + cat_total))  # bug is here
-            if morph == 'jo': print(pair, self._log_emissionprob_cache[pair])
+                    zlog(virtual + cat_total))
         msg = 'emission {} -> {} has probability > 1'.format(category, morph)
         assert self._log_emissionprob_cache[pair] >= 0, msg
         return self._log_emissionprob_cache[pair]

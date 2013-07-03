@@ -634,7 +634,19 @@ class CatmapModel(object):
         boundaries.
         """
 
-        category_totals = self._morph_usage.category_totals
+        categories = get_categories()
+        category_totals = collections.Counter()
+        for (count, analysis) in self.segmentations:
+            category_totals[WORD_BOUNDARY] += count
+            for cmorph in analysis:
+                if isinstance(cmorph, CategorizedMorph):
+                    morph = cmorph.morph
+                else:
+                    morph = cmorph
+                condprobs = self._morph_usage.condprobs(morph)
+                for (i, category) in enumerate(categories):
+                    category_totals[category] += count * condprobs[i]
+
         num_valid_tokens = 0.0
         for (prev_cat, next_cat) in MorphUsageProperties.valid_transitions():
             num_valid_tokens += category_totals[next_cat]
@@ -1809,20 +1821,23 @@ class TokenCount(object):
         pair = (category, morph)
         if pair not in self._log_emissionprob_cache:
             cat_index = get_categories().index(category)
-            # Not equal to what you get by ML-estimate:
-            # cat_total = self._weightedsum(
-            #    lambda p: p._cat_token_count[category])
-            cat_total = self._morph_usage.category_totals[category]
+            # Not equal to what you get by:
+            # zlog(self._emission_counts[morph][cat_index]) +
+            cat_total = self._weightedsum(
+                lambda p: p._cat_token_count[category])
             if cat_total == 0:
                 self._log_emissionprob_cache[pair] = LOGPROB_ZERO
             else:
                 count = self.morph_count(morph)
                 if count > 0:
                     virtual = 0
+                if morph == 'jo':
+                    print(virtual, count, self._morph_usage.condprobs(morph)[cat_index], cat_total)
                 self._log_emissionprob_cache[pair] = (
                     zlog(virtual + count) +
                     zlog(self._morph_usage.condprobs(morph)[cat_index]) -
-                    zlog(virtual + cat_total))
+                    zlog(virtual + cat_total))  # bug is here
+            if morph == 'jo': print(pair, self._log_emissionprob_cache[pair])
         msg = 'emission {} -> {} has probability > 1'.format(category, morph)
         assert self._log_emissionprob_cache[pair] >= 0, msg
         return self._log_emissionprob_cache[pair]

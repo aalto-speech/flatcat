@@ -5,7 +5,7 @@ Morfessor 2.0 Categories-MAP variant.
 from __future__ import unicode_literals
 
 # Temporarily disabled to enable from catmap import * in interactive shell,
-# Which is a workaround for the pickle namespace problem FIXME
+# Which is a workaround for the pickle namespace problem
 #__all__ = ['CatmapIO', 'CatmapModel']
 
 __author__ = 'Stig-Arne Gronroos'
@@ -214,7 +214,7 @@ class CatmapModel(object):
         self._calculate_usage_features()
         self._unigram_transition_probs()
         self.viterbi_tag_corpus()
-        self._calculate_counts()
+        self._calculate_counts(update_backlinks=False)
 
     def initialize_hmm(self, min_difference_proportion=0.005):
         """Initialize emission and transition probabilities without
@@ -224,7 +224,7 @@ class CatmapModel(object):
         def reestimate_with_unchanged_segmentation():
             """Named function instead of lambda,
             to get prettier log messages"""
-            self._calculate_counts()
+            self._calculate_counts(update_backlinks=False)
 
         self.convergence_of_analysis(
             reestimate_with_unchanged_segmentation,
@@ -385,6 +385,7 @@ class CatmapModel(object):
                 update_func=update_func,
                 min_cost_gain=min_epoch_cost_gain,
                 max_iterations=max_epochs)
+            self.reestimate_probabilities()
             self._operation_number += 1
             for callback in self.operation_callbacks:
                 callback(self)
@@ -402,8 +403,6 @@ class CatmapModel(object):
                 force_another = True
             self._annot_coding.update_weight()
             utils.memlog('after annotation choice update')
-        else:
-            self.reestimate_probabilities()
 
         self._operation_number = 0
         if not no_increment:
@@ -613,7 +612,6 @@ class CatmapModel(object):
         """
         self._calculate_usage_features()
         self._calculate_counts()
-        self._calculate_morph_backlinks()
 
     def _calculate_usage_features(self):
         """Recalculates the morph usage features (perplexities).
@@ -646,7 +644,7 @@ class CatmapModel(object):
                 prev_cat, next_cat,
                 category_totals[next_cat] * normalization)
 
-    def _calculate_counts(self):
+    def _calculate_counts(self, update_backlinks=True):
         """Count the number of emissions and transitions of each type.
         Can be used to estimate probabilities from
         a category-tagged segmented corpus.
@@ -656,9 +654,11 @@ class CatmapModel(object):
         for (i, segmentation) in enumerate(self.segmentations):
             (count, analysis) = segmentation
             partition = self._get_partition(i)
+            if not update_backlinks:
+                i = None
             change_counts.update(analysis,
                                  count,
-                                 corpus_index=None,
+                                 corpus_index=i,
                                  partition=partition)
         self._token_counts.set_counts(change_counts)
 
@@ -1537,7 +1537,7 @@ class Transformation(object):
 
         if matches > 0:
             # Only retag if the rule matched something
-            out = model.viterbi_tag(out, virtual=1)
+            out = model.viterbi_tag(out, virtual=word.count)
 
             self.change_counts.update(word.analysis, -word.count,
                                       corpus_index, partition)
@@ -1823,11 +1823,8 @@ class TokenCount(object):
                     zlog(virtual + count) +
                     zlog(self._morph_usage.condprobs(morph)[cat_index]) -
                     zlog(virtual + cat_total))
-        if self._log_emissionprob_cache[pair] < 0:
-            msg = 'emission {} -> {} has probability > 1'.format(category, morph)
-            #assert self._log_emissionprob_cache[pair] >= 0, msg
-            _logger.warn(msg)
-            self._log_emissionprob_cache[pair] = 0
+        msg = 'emission {} -> {} has probability > 1'.format(category, morph)
+        assert self._log_emissionprob_cache[pair] >= 0, msg
         return self._log_emissionprob_cache[pair]
 
     def transit_emit_cost(self, prev_cat, next_cat, morph, virtual=0):

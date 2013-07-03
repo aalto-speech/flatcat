@@ -461,7 +461,7 @@ class CatmapModel(object):
 
             for callback in self.epoch_callbacks:
                 callback(self, iteration)
-            
+
             cost = self.get_cost()
             cost_diff = cost - previous_cost
             limit = self._cost_convergence_limit(min_cost_gain)
@@ -487,7 +487,7 @@ class CatmapModel(object):
         _logger.info(msg.format(cost_diff, limit,
                                 iteration_name, iteration + 1,
                                 max_iterations, conv))
-        
+
     def _cost_convergence_limit(self, min_cost_gain=0.005):
         return min_cost_gain * self._corpus_coding.boundaries
 
@@ -794,13 +794,13 @@ class CatmapModel(object):
                     self._modify_morph_count(morph, num_matches)
                 for target in matched_targets:
                     old_analysis = self.segmentations[target]
-                    new_analysis = transform.apply(
-                        old_analysis, self,
-                        is_annotation=self._is_annotation(target))
+                    new_analysis = transform.apply(old_analysis, self)
 
                 # Apply change to encoding
                 self._update_counts(transform.change_counts, 1)
-                self._annot_coding.update_counts(transform.annot_counts, 1)
+                # Observe that annotation counts are not updated,
+                # even if the transform targets an annotation,
+                # because that would defeat the purpose of annotations
                 if self._supervised:
                     # contribution to annotation cost needs to be readded
                     # after the emission probability has been updated
@@ -814,7 +814,6 @@ class CatmapModel(object):
                 if self._supervised:
                     for morph in self.detag_word(transform.result):
                         self._annot_coding.modify_contribution(morph, -1)
-                self._annot_coding.update_counts(transform.annot_counts, -1)
                 self._update_counts(transform.change_counts, -1)
                 for morph in self.detag_word(transform.result):
                     self._modify_morph_count(morph, -num_matches)
@@ -834,16 +833,13 @@ class CatmapModel(object):
                         self._modify_morph_count(morph, num_matches)
                     new_analysis = best.transform.apply(
                         self.segmentations[target],
-                        self, corpus_index=target,
-                        is_annotation=self._is_annotation(target))
+                        self, corpus_index=target)
                     self.segmentations[target] = new_analysis
                     # any morph used in the best segmentation
                     # is no longer temporary
                     temporaries.difference_update(
                         self.detag_word(new_analysis.analysis))
                 self._update_counts(best.transform.change_counts, 1)
-                self._annot_coding.update_counts(
-                    best.transform.annot_counts, 1)
                 if self._supervised:
                     for morph in self.detag_word(best.transform.result):
                         self._annot_coding.modify_contribution(morph, 1)
@@ -1327,8 +1323,7 @@ class CatmapModel(object):
         self._annot_coding.update_counts(changes, 1)
         self._annot_coding.reset_contributions()
 
-    def add_annotations(self, annotations, annotatedcorpusweight=None,
-        penalty=-999999, blacklist_penalty=-999999):
+    def add_annotations(self, annotations, annotatedcorpusweight=None):
         self._supervised = True
         self._annotations_tagged = True
         for (word, alternatives) in annotations.items():
@@ -1343,9 +1338,7 @@ class CatmapModel(object):
         self._calculate_morph_backlinks()
         self._annot_coding = CatmapAnnotatedCorpusEncoding(
                                 self._corpus_coding,
-                                weight=annotatedcorpusweight,
-                                penalty=penalty,
-                                blacklist_penalty=blacklist_penalty)
+                                weight=annotatedcorpusweight)
         self._annot_coding.boundaries = len(self.annotations)
 
     def get_corpus_coding_weight(self):
@@ -1574,7 +1567,7 @@ class Transformation(object):
     """A transformation of a certain pattern of morphs and/or categories,
     to be (partially) replaced by another representation.
     """
-    __slots__ = ['rule', 'result', 'change_counts', 'anno_counts']
+    __slots__ = ['rule', 'result', 'change_counts']
 
     def __init__(self, rule, result):
         self.rule = rule
@@ -1583,13 +1576,12 @@ class Transformation(object):
         else:
             self.result = result
         self.change_counts = ChangeCounts()
-        self.anno_counts = ChangeCounts()
 
     def __repr__(self):
         return '{}({}, {})'.format(self.__class__.__name__,
                                    self.rule, self.result)
 
-    def apply(self, word, model, corpus_index=None, is_annotation=False):
+    def apply(self, word, model, corpus_index=None):
         """Tries to apply this transformation to an analysis.
         If the transformation doesn't match, the input is returned unchanged.
         If the transformation matches, changes are made greedily from the
@@ -1626,16 +1618,11 @@ class Transformation(object):
             self.change_counts.update(word.analysis, -word.count,
                                       corpus_index)
             self.change_counts.update(out, word.count, corpus_index)
-            if is_annotation:
-                self.anno_counts.update(word.analysis, -word.count,
-                                        None)
-                self.anno_counts.update(out, word.count, None)
 
         return WordAnalysis(word.count, out)
 
     def reset_counts(self):
         self.change_counts = ChangeCounts()
-        self.anno_counts = ChangeCounts()
 
 
 class ViterbiResegmentTransformation(object):
@@ -1647,7 +1634,6 @@ class ViterbiResegmentTransformation(object):
         self.rule = TransformationRule(tuple(word.analysis))
         self.result, _ = model.viterbi_segment(word.analysis)
         self.change_counts = ChangeCounts()
-        self.anno_counts = ChangeCounts()
 
     def __repr__(self):
         return '{}({}, {})'.format(self.__class__.__name__,
@@ -1659,15 +1645,10 @@ class ViterbiResegmentTransformation(object):
         self.change_counts.update(word.analysis, -word.count,
                                     corpus_index)
         self.change_counts.update(self.result, word.count, corpus_index)
-        if is_annotation:
-            self.anno_counts.update(word.analysis, -word.count,
-                                    None)
-            self.anno_counts.update(out, word.count, None)
         return WordAnalysis(word.count, self.result)
 
     def reset_counts(self):
         self.change_counts = ChangeCounts()
-        self.anno_counts = ChangeCounts()
 
 
 class TransformationRule(object):
@@ -2026,17 +2007,15 @@ class CatmapEncoding(baseline.CorpusEncoding):
                 )
 
 
-class CatmapAnnotatedCorpusEncoding(object)
-    def __init__(self, corpus_coding, weight=None,
-                 penalty=-999999):
+class CatmapAnnotatedCorpusEncoding(object):
+    def __init__(self, corpus_coding, weight=None):
         self.corpus_coding = corpus_coding
         if weight is None:
-            weight = 1.0
+            self.weight = 1.0
             self.do_update_weight = True
         else:
             self.weight = weight
             self.do_update_weight = False
-        self.penalty = penalty
         self.logemissionsum = 0.0
         self.boundaries = 0
 
@@ -2057,7 +2036,7 @@ class CatmapAnnotatedCorpusEncoding(object)
             old_count = self._emission_counts[cmorph.morph][cat_index]
             new_count = old_count + (diff_count * direction)
             new_counts = self._emission_counts[cmorph.morph]._replace(
-                **{category: new_count})
+                **{cmorph.category: new_count})
             self._emission_counts[cmorph.morph] = new_counts
 
         for (pair, diff_count) in counts.transitions.items():
@@ -2076,10 +2055,18 @@ class CatmapAnnotatedCorpusEncoding(object)
         for (i, category) in enumerate(categories):
             self._contribution_helper(morph, category, counts[i] * direction)
 
+    def transition_cost(self):
+        cost = 0.0
+        valid_transitions = MorphUsageProperties.valid_transitions()
+        for pair in valid_transitions:
+            count = self._transition_counts[pair]
+            cost += count * self.corpus_coding.log_transitionprob(*pair)
+        return cost
+
     def get_cost(self):
         if self.boundaries == 0:
             return 0.0
-        # FIXME
+        return (self.logemissionsum + self.transition_cost()) * self.weight
 
     def update_weight(self):
         """Update the weight of the Encoding by taking the ratio of the
@@ -2092,11 +2079,11 @@ class CatmapAnnotatedCorpusEncoding(object)
         self.weight = float(self.corpus_coding.boundaries) / self.boundaries
         if self.weight != old:
             _logger.info('Corpus weight of annotated data set to {}'.format(
-                         self.weight)
+                         self.weight))
 
     def _contribution_helper(self, morph, category, count):
-        self.logemissionsum += self._corpus_coding.log_emissionprob(category,
-                                                                    morph)
+        self.logemissionsum += count * self.corpus_coding.log_emissionprob(
+            category, morph)
 
 
 class CorpusWeightUpdater(object):

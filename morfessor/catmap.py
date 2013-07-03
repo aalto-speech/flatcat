@@ -637,24 +637,16 @@ class CatmapModel(object):
         categories = get_categories()
         category_totals = collections.Counter()
         for (count, analysis) in self.segmentations:
-            category_totals[WORD_BOUNDARY] += 1
             for cmorph in analysis:
-                if isinstance(cmorph, CategorizedMorph):
-                    morph = cmorph.morph
-                else:
-                    morph = cmorph
-                condprobs = self._morph_usage.condprobs(morph)
+                category_totals[WORD_BOUNDARY] += 1
+                condprobs = self._morph_usage.condprobs(cmorph.morph)
                 for (i, category) in enumerate(categories):
                     category_totals[category] += condprobs[i]
 
-        num_valid_tokens = 0.0
-        for (prev_cat, next_cat) in MorphUsageProperties.valid_transitions():
-            num_valid_tokens += category_totals[next_cat]
-        normalization = (sum(category_totals.values()) / num_valid_tokens)
         for (prev_cat, next_cat) in MorphUsageProperties.valid_transitions():
             self._token_counts._partitions['corpus'].update_transition_count(
                 prev_cat, next_cat,
-                category_totals[next_cat] * normalization)
+                category_totals[next_cat])
 
     def _calculate_counts(self, update_backlinks=True):
         """Count the number of emissions and transitions of each type.
@@ -708,8 +700,9 @@ class CatmapModel(object):
         return matched_targets, num_matches
 
     def _get_partition(self, target):
+        # FIXME refactor into separate method
         if (self._supervised and
-            target < len(self.annotations)):
+            target <= len(self.annotations)):
             return 'annotations'
         else:
             return 'corpus'
@@ -766,15 +759,9 @@ class CatmapModel(object):
                 for target in matched_targets:
                     old_analysis = self.segmentations[target]
                     partition = self._get_partition(target)
-                    if partition == 'annotations':
-                        self._annot_coding.modify_penalty_contribution(
-                            target, -old_analysis.count)
                     new_analysis = transform.apply(old_analysis,
                                                    self,
                                                    partition=partition)
-                    if partition == 'annotations':
-                        self._annot_coding.modify_penalty_contribution(
-                            target, new_analysis.count)
 
                 # Apply change to encoding
                 self._update_counts(transform.change_counts, 1)
@@ -1697,11 +1684,6 @@ class TokenCountPartition(object):
                 total,
                 logcondprobs[i])
 
-    def clear(self):
-        self.clear_transition_counts()
-        self.clear_emission_counts()
-        self.coding.clear()
-
     # Transition count methods
 
     def get_transition_count(self, prev_cat, next_cat):
@@ -1908,7 +1890,7 @@ class TokenCount(object):
         """Resets transition counts, costs and cache.
         Use before fully reprocessing a tagged segmented corpus."""
         for partition in self._partitions.values():
-            partition.clear()
+            partition.coding.clear()
         self._update_helper(change_counts, 1)
 
     def get_cost(self):
@@ -2020,23 +2002,11 @@ class CatmapEncoding(baseline.CorpusEncoding):
             return 0.0
 
         n = self.tokens + boundaries
-        total_n = sum(wcm.values())
-        total_tokens = total_n - wcm[WORD_BOUNDARY]
-        """
-        print(self.__class__.__name__)
-        print('({} * {} - {} - {} - {} + {} * {}) * {} + {}'.format(self.tokens, math.log(total_tokens),
-                  self.logtokensum,
-                  self.logcondprobsum,
-                  self.logtransitionsum(tm, wtm),
-                  n, math.log(total_n),
-                  self.weight,
-                  self.frequency_distribution_cost()))
-        """
-        return  ((self.tokens * math.log(total_tokens)
+        return  ((self.tokens * math.log(self.tokens)
                   - self.logtokensum
                   - self.logcondprobsum
                   - self.logtransitionsum(tm, wtm)
-                  + n * math.log(total_n)
+                  + n * math.log(n)
                  ) * self.weight
                  + self.frequency_distribution_cost()
                 )
@@ -2060,6 +2030,7 @@ class CatmapAnnotatedCorpusEncoding(CatmapEncoding):
         self.penaltysum = 0.0
 
     def modify_penalty_contribution(self, i, count):
+        # FIXME not called yet
         detagged = self.model.detag_word(self.model.segmentations[i])
         if detagged in self.model.annotations[i][1]:
             return  # current analysis in alternatives: no penalty
@@ -2085,7 +2056,6 @@ class CatmapAnnotatedCorpusEncoding(CatmapEncoding):
                     self.weight))
 
     def get_cost(self, tm, cm, wtm, wcm):
-        #print('+ {} * {}'.format(self.weight, self.penaltysum))
         return (super(CatmapAnnotatedCorpusEncoding,
                       self).get_cost(tm, cm, wtm, wcm) +
                 self.weight * self.penaltysum)

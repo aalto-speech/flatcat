@@ -58,6 +58,11 @@ def train_batch(model, weight_learn_func=None):
         if weight_learn_func is not None:
             (model, wl_force_another) = weight_learn_func(model)
         u_force_another = model._iteration_update()
+        post_update_cost = model.get_cost()
+        if post_update_cost != cost:
+            _logger.info('cost from {} to {} in iter update'.format(
+                cost, post_update_cost))
+            cost = post_update_cost
 
         converged = ((not wl_force_another) and
                      (not u_force_another) and
@@ -396,6 +401,7 @@ class CatmapModel(object):
 
         if self._supervised:
             old_cost = self.get_cost()
+            _logger.info('Updating annotation choices...')
             self._update_annotation_choices()
             new_cost = self.get_cost()
             if old_cost != new_cost:
@@ -1276,8 +1282,10 @@ class CatmapModel(object):
     def get_cost(self):
         """Return current model encoding cost."""
         cost = self._corpus_coding.get_cost() + self._lexicon_coding.get_cost()
+        assert cost >= 0
         if self._supervised:
             cost += self._annot_coding.get_cost()
+        assert cost >= 0
         return cost
 
     def _update_annotation_choices(self):
@@ -1288,7 +1296,12 @@ class CatmapModel(object):
         # hierarchical morphs
 
         count_diff = collections.Counter()
-        changes = ChangeCounts()
+        # changes to unannotated corpus counts
+        changes_unannot = ChangeCounts()
+        # new annotated corpus counts
+        # (starting from zero, as the analysis in self.segmentations
+        # might no longer match the annotation due to performed operations
+        changes_annot = ChangeCounts()
         for (i, annotation) in enumerate(self.annotations):
             (_, alternatives) = annotation
 
@@ -1301,8 +1314,9 @@ class CatmapModel(object):
             new_active = sorted_alts[0].analysis
 
             if old_active is not None:
-                changes.update(old_active, -1, corpus_index=i)
-            changes.update(new_active, 1, corpus_index=i)
+                changes_unannot.update(old_active, -1, corpus_index=i)
+            changes_unannot.update(new_active, 1, corpus_index=i)
+            changes_annot.update(new_active, 1, corpus_index=i)
 
             # Active segmentation is changed before removal/adding of morphs
             self.segmentations[i] = WordAnalysis(1, new_active)
@@ -1319,8 +1333,8 @@ class CatmapModel(object):
             if count == 0:
                 continue
             self._modify_morph_count(morph, count)
-        self._update_counts(changes, 1)
-        self._annot_coding.update_counts(changes, 1)
+        self._update_counts(changes_unannot, 1)
+        self._annot_coding.set_counts(changes_annot)
         self._annot_coding.reset_contributions()
 
     def add_annotations(self, annotations, annotatedcorpusweight=None):
@@ -1818,6 +1832,9 @@ class CatmapEncoding(baseline.CorpusEncoding):
                 self._log_transitionprob_cache[pair] = (
                     zlog(self._transition_counts[(prev_cat, next_cat)]) -
                     zlog(self._cat_tagcount[prev_cat]))
+        msg = 'transition {} -> {} has probability > 1'.format(
+            prev_cat, next_cat)
+        assert self._log_transitionprob_cache[pair] >= 0, msg
         return self._log_transitionprob_cache[pair]
 
     def update_transition_count(self, prev_cat, next_cat, diff_count):
@@ -2030,23 +2047,30 @@ class CatmapAnnotatedCorpusEncoding(object):
         # Counts occurences.
         self._transition_counts = collections.Counter()
 
-    def update_counts(self, counts, direction):
-        for (cmorph, diff_count) in counts.emissions.items():
+    def set_counts(self, counts):
+        self._emission_counts = utils.Sparse(
+            default=utils._nt_zeros(ByCategory))
+        self._transition_counts = collections.Counter()
+
+        for (cmorph, new_count) in counts.emissions.items():
             cat_index = get_categories().index(cmorph.category)
-            old_count = self._emission_counts[cmorph.morph][cat_index]
-            new_count = old_count + (diff_count * direction)
+            assert new_count >= 0
             new_counts = self._emission_counts[cmorph.morph]._replace(
                 **{cmorph.category: new_count})
             self._emission_counts[cmorph.morph] = new_counts
 
-        for (pair, diff_count) in counts.transitions.items():
-            self._transition_counts[pair] += (diff_count * direction)
+        for (pair, count) in counts.transitions.items():
+            self._transition_counts[pair] = count
+            assert self._transition_counts[pair] >= 0
 
     def reset_contributions(self):
         self.logemissionsum = 0.0
         categories = get_categories()
         for (morph, counts) in self._emission_counts.items():
             for (i, category) in enumerate(categories):
+                msg = 'Annotation emission {} -> {} was subzero {}'.format(
+                    category, morph, counts[i])
+                assert counts[i] >= 0, msg
                 self._contribution_helper(morph, category, counts[i])
 
     def modify_contribution(self, morph, direction):
@@ -2066,7 +2090,10 @@ class CatmapAnnotatedCorpusEncoding(object):
     def get_cost(self):
         if self.boundaries == 0:
             return 0.0
-        return (self.logemissionsum + self.transition_cost()) * self.weight
+        tc = self.transition_cost()
+        assert self.logemissionsum >= 0
+        assert tc >= 0
+        return (self.logemissionsum + tc) * self.weight
 
     def update_weight(self):
         """Update the weight of the Encoding by taking the ratio of the

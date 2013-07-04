@@ -412,39 +412,6 @@ class TestModelConsistency(unittest.TestCase):
                            None)
         self._destructive_backlink_check()
 
-    def test_annotation_blacklist(self):
-        self.model.add_annotations(TestModelConsistency.dummy_annotation,
-                                   blacklist_penalty=-999999)
-        self._presplit()
-        self.model._update_annotation_choices()
-
-        cc = catmap.ChangeCounts(
-            emissions={catmap.CategorizedMorph('H', 'ZZZ'): -1,
-                       catmap.CategorizedMorph('IJKLMN', 'STM'): -1,
-                       catmap.CategorizedMorph('HIJKLMN', 'STM'): 1},
-            transitions={(catmap.WORD_BOUNDARY, 'ZZZ'): -1,
-                         ('ZZZ', 'STM'): -1,
-                         (catmap.WORD_BOUNDARY, 'STM'): 1
-                         })
-
-        def apply_blacklist_violation():
-            self.model._modify_morph_count('H', -1)
-            self.model._modify_morph_count('IJKLMN', -1)
-            self.model._modify_morph_count('HIJKLMN', 1)
-            self.model._update_counts(cc, 1)
-
-        def revert_blacklist_violation():
-            self.model._modify_morph_count('H', 1)
-            self.model._modify_morph_count('IJKLMN', 1)
-            self.model._modify_morph_count('HIJKLMN', -1)
-            self.model._update_counts(cc, -1)
-            self.model._morph_usage.remove_temporaries(set(['HIJKLMN']))
-
-        self._apply_revert(apply_blacklist_violation,
-                           revert_blacklist_violation,
-                           False)   # Not an add, but still a known bad move
-        self._destructive_backlink_check()
-
     def _apply_revert(self, apply_func, revert_func, is_remove):
         state_exact, state_approx = self._store_state()
         old_cost = self.model.get_cost()
@@ -540,10 +507,10 @@ class TestModelConsistency(unittest.TestCase):
                 self.model._morph_usage.category_token_count):
             state_approx['category_token_count_{}'.format(i)] = float(tmp)
         if self.model._annot_coding is not None:
-            state_approx['annot_logtokensum'] = float(
-                self.model._annot_coding.logtokensum)
-            state_exact['annot_constructions'] = sorted(
-                self.model._annot_coding.constructions)
+            state_approx['annot_logemissionsum'] = float(
+                self.model._annot_coding.logemissionsum)
+            state_exact['annot_transition_cost'] = float(
+                self.model._annot_coding.transition_cost())
         return (state_exact, state_approx)
 
     def _compare_to_stored_state(self, state_exact, state_approx):

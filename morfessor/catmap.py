@@ -785,17 +785,26 @@ class CatmapModel(object):
             if num_matches == 0:
                 continue
 
-            for morph in self.detag_word(transform_group[0].rule):
+            detagged = self.detag_word(transform_group[0].rule)
+            if self._supervised:
+                # Old contribution to annotation cost needs to be
+                # removed before the probability changes
+                annot_morphs_old = set(detagged)
+                for morph in annot_morphs_old:
+                    self._annot_coding.modify_contribution(morph, -1)
+            for morph in detagged:
                 # Remove the old representation, but only from
                 # morph counts (emissions and transitions updated later)
-                if self._supervised:
-                    # Old contribution to annotation cost needs to be
-                    # removed before the probability changes
-                    self._annot_coding.modify_contribution(morph, -1)
                 self._modify_morph_count(morph, -num_matches)
 
             for transform in transform_group:
-                for morph in self.detag_word(transform.result):
+                detagged = self.detag_word(transform.result)
+                if self._supervised:
+                    annot_morphs_new = set(detagged).difference(
+                        annot_morphs_old)
+                    for morph in annot_morphs_new:
+                        self._annot_coding.modify_contribution(morph, -1)
+                for morph in detagged:
                     # Add the new representation to morph counts
                     self._modify_morph_count(morph, num_matches)
                 for target in matched_targets:
@@ -810,29 +819,39 @@ class CatmapModel(object):
                 if self._supervised:
                     # contribution to annotation cost needs to be readded
                     # after the emission probability has been updated
-                    # (relevant for ML-estimate)
-                    for morph in self.detag_word(transform.result):
+                    # (ordering with _update_counts relevant for ML-estimate)
+                    annot_morphs_union = annot_morphs_old.union(
+                        annot_morphs_new)
+                    for morph in annot_morphs_union:
                         self._annot_coding.modify_contribution(morph, 1)
                 cost = self.get_cost()
                 if cost < best.cost:
                     best = EpochNode(cost, transform, matched_targets)
                 # Revert change to encoding
                 if self._supervised:
-                    for morph in self.detag_word(transform.result):
+                    for morph in annot_morphs_union:
                         self._annot_coding.modify_contribution(morph, -1)
                 self._update_counts(transform.change_counts, -1)
                 for morph in self.detag_word(transform.result):
                     self._modify_morph_count(morph, -num_matches)
+                if self._supervised:
+                    for morph in annot_morphs_new:
+                        self._annot_coding.modify_contribution(morph, 1)
+
+            if self._supervised:
+                for morph in annot_morphs_old:
+                    self._annot_coding.modify_contribution(morph, 1)
 
             if best.transform is None:
                 # Best option was to do nothing. Revert morph count.
                 for morph in self.detag_word(transform_group[0].rule):
                     self._modify_morph_count(morph, num_matches)
-                    if self._supervised:
-                        self._annot_coding.modify_contribution(morph, 1)
             else:
                 # A real change was the best option
                 best.transform.reset_counts()
+                if self._supervised:
+                    for morph in set(self.detag_word(best.transform.result)):
+                        self._annot_coding.modify_contribution(morph, -1)
                 for target in best.targets:
                     for morph in self.detag_word(best.transform.result):
                         # Add the new representation to morph counts
@@ -847,7 +866,7 @@ class CatmapModel(object):
                         self.detag_word(new_analysis.analysis))
                 self._update_counts(best.transform.change_counts, 1)
                 if self._supervised:
-                    for morph in self.detag_word(best.transform.result):
+                    for morph in set(self.detag_word(best.transform.result)):
                         self._annot_coding.modify_contribution(morph, 1)
                 self._changed_segmentations.update(best.targets)
                 self._changed_segmentations_op.update(best.targets)
@@ -2109,8 +2128,11 @@ class CatmapAnnotatedCorpusEncoding(object):
                          self.weight))
 
     def _contribution_helper(self, morph, category, count):
+        if count == 0:
+            return
         self.logemissionsum += count * self.corpus_coding.log_emissionprob(
             category, morph)
+        print('modifying {}/{} by count {}. Now {}'.format(morph, category, count, self.logemissionsum))
 
 
 class CorpusWeightUpdater(object):

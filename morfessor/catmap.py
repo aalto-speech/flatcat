@@ -772,7 +772,8 @@ class CatmapModel(object):
             transformation_generator = utils._generator_progress(
                 transformation_generator)
         for experiment in transformation_generator:
-            (transform_group, targets, temporaries) = experiment
+            (transform_group, targets,
+             changed_morphs, temporaries) = experiment
             if len(transform_group) == 0:
                 continue
             # Cost of doing nothing
@@ -789,8 +790,7 @@ class CatmapModel(object):
             if self._supervised:
                 # Old contribution to annotation cost needs to be
                 # removed before the probability changes
-                annot_morphs_old = set(detagged)
-                for morph in annot_morphs_old:
+                for morph in changed_morphs:
                     self._annot_coding.modify_contribution(morph, -1)
             for morph in detagged:
                 # Remove the old representation, but only from
@@ -799,11 +799,6 @@ class CatmapModel(object):
 
             for transform in transform_group:
                 detagged = self.detag_word(transform.result)
-                if self._supervised:
-                    annot_morphs_new = set(detagged).difference(
-                        annot_morphs_old)
-                    for morph in annot_morphs_new:
-                        self._annot_coding.modify_contribution(morph, -1)
                 for morph in detagged:
                     # Add the new representation to morph counts
                     self._modify_morph_count(morph, num_matches)
@@ -820,23 +815,18 @@ class CatmapModel(object):
                     # contribution to annotation cost needs to be readded
                     # after the emission probability has been updated
                     # (ordering with _update_counts relevant for ML-estimate)
-                    annot_morphs_union = annot_morphs_old.union(
-                        annot_morphs_new)
-                    for morph in annot_morphs_union:
+                    for morph in changed_morphs:
                         self._annot_coding.modify_contribution(morph, 1)
                 cost = self.get_cost()
                 if cost < best.cost:
                     best = EpochNode(cost, transform, matched_targets)
                 # Revert change to encoding
                 if self._supervised:
-                    for morph in annot_morphs_union:
+                    for morph in changed_morphs:
                         self._annot_coding.modify_contribution(morph, -1)
                 self._update_counts(transform.change_counts, -1)
                 for morph in self.detag_word(transform.result):
                     self._modify_morph_count(morph, -num_matches)
-                if self._supervised:
-                    for morph in annot_morphs_new:
-                        self._annot_coding.modify_contribution(morph, 1)
 
             if best.transform is None:
                 # Best option was to do nothing. Revert morph count.
@@ -845,9 +835,6 @@ class CatmapModel(object):
             else:
                 # A real change was the best option
                 best.transform.reset_counts()
-                if self._supervised:
-                    for morph in set(self.detag_word(best.transform.result)):
-                        self._annot_coding.modify_contribution(morph, -1)
                 for target in best.targets:
                     for morph in self.detag_word(best.transform.result):
                         # Add the new representation to morph counts
@@ -861,14 +848,11 @@ class CatmapModel(object):
                     temporaries.difference_update(
                         self.detag_word(new_analysis.analysis))
                 self._update_counts(best.transform.change_counts, 1)
-                if self._supervised:
-                    for morph in set(self.detag_word(best.transform.result)):
-                        self._annot_coding.modify_contribution(morph, 1)
                 self._changed_segmentations.update(best.targets)
                 self._changed_segmentations_op.update(best.targets)
 
             if self._supervised:
-                for morph in annot_morphs_old:
+                for morph in changed_morphs:
                     self._annot_coding.modify_contribution(morph, 1)
 
             self._morph_usage.remove_temporaries(temporaries)
@@ -895,6 +879,7 @@ class CatmapModel(object):
             # Match the parent morph with any category
             rule = TransformationRule((CategorizedMorph(morph, None),))
             transforms = []
+            changed_morphs = set((morph,))
             # Apply to all words in which the morph occurs
             targets = self.morph_backlinks[morph]
             # Temporary estimated contexts
@@ -902,6 +887,7 @@ class CatmapModel(object):
             for splitloc in range(1, len(morph)):
                 prefix = morph[:splitloc]
                 suffix = morph[splitloc:]
+                changed_morphs.update((prefix, suffix))
                 # Make sure that there are context features available
                 # (real or estimated) for the submorphs
                 tmp = (self._morph_usage.estimate_contexts(morph,
@@ -911,7 +897,7 @@ class CatmapModel(object):
                     Transformation(rule,
                                    (CategorizedMorph(prefix, None),
                                     CategorizedMorph(suffix, None))))
-            yield (transforms, targets, temporaries)
+            yield (transforms, targets, changed_morphs, temporaries)
 
     def _generic_bimorph_generator(self, result_func):
         """The common parts of operation generators that operate on
@@ -945,18 +931,20 @@ class CatmapModel(object):
                                       context_type=context_type)
             temporaries = set()
             transforms = []
+            changed_morphs = set((prefix.morph, suffix.morph))
             results = result_func(prefix, suffix)
             for result in results:
+                detagged = self.detag_word(result)
+                changed_morphs.update(detagged)
                 temporaries.update(self._morph_usage.estimate_contexts(
-                    (prefix.morph, suffix.morph),
-                    self.detag_word(result)))
+                    (prefix.morph, suffix.morph), detagged))
                 transforms.append(Transformation(rule, result))
             # targets will be a subset of the intersection of the
             # occurences of both submorphs
             targets = set(self.morph_backlinks[prefix.morph])
             targets.intersection_update(self.morph_backlinks[suffix.morph])
             if len(targets) > 0:
-                yield(transforms, targets, temporaries)
+                yield(transforms, targets, changed_morphs, temporaries)
 
     def _op_join_generator(self):
         """Generates joins of consecutive morphs into a supermorph.
@@ -1007,8 +995,11 @@ class CatmapModel(object):
             source = self.training_focus
         for i in source:
             word = self.segmentations[i]
-            yield ([ViterbiResegmentTransformation(word, self)],
-                   set([i]), set())
+            changed_morphs = set(self.detag_word(word))
+            vrt = ViterbiResegmentTransformation(word, self)
+            changed_morphs = set(self.detag_word(vrt.result))
+
+            yield ([vrt], set([i]), changed_morphs, set())
 
     def _modify_morph_count(self, morph, diff_count):
         """Modifies the count of a morph in the lexicon.

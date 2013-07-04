@@ -838,10 +838,6 @@ class CatmapModel(object):
                     for morph in annot_morphs_new:
                         self._annot_coding.modify_contribution(morph, 1)
 
-            if self._supervised:
-                for morph in annot_morphs_old:
-                    self._annot_coding.modify_contribution(morph, 1)
-
             if best.transform is None:
                 # Best option was to do nothing. Revert morph count.
                 for morph in self.detag_word(transform_group[0].rule):
@@ -870,6 +866,11 @@ class CatmapModel(object):
                         self._annot_coding.modify_contribution(morph, 1)
                 self._changed_segmentations.update(best.targets)
                 self._changed_segmentations_op.update(best.targets)
+
+            if self._supervised:
+                for morph in annot_morphs_old:
+                    self._annot_coding.modify_contribution(morph, 1)
+
             self._morph_usage.remove_temporaries(temporaries)
 
     def _op_split_generator(self):

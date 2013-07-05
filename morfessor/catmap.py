@@ -995,7 +995,7 @@ class CatmapModel(object):
             source = self.training_focus
         for i in source:
             word = self.segmentations[i]
-            changed_morphs = set(self.detag_word(word))
+            changed_morphs = set(self.detag_word(word.analysis))
             vrt = ViterbiResegmentTransformation(word, self)
             changed_morphs = set(self.detag_word(vrt.result))
 
@@ -2124,7 +2124,6 @@ class CatmapAnnotatedCorpusEncoding(object):
             return
         self.logemissionsum += count * self.corpus_coding.log_emissionprob(
             category, morph)
-        print('modifying {}/{} by count {}. Now {}'.format(morph, category, count, self.logemissionsum))
 
 
 class CorpusWeightUpdater(object):

@@ -55,7 +55,8 @@ def train_batch(model, weight_learn_func=None):
         cost_diff = cost - previous_cost
         limit = model._cost_convergence_limit(model._min_iter_cost_gain)
 
-        if weight_learn_func is not None:
+        if (weight_learn_func is not None and
+                iteration < model._max_iterations - 1):
             (model, wl_force_another) = weight_learn_func(model)
         u_force_another = model._iteration_update()
         post_update_cost = model.get_cost()
@@ -409,7 +410,6 @@ class CatmapModel(object):
                             '{} to {}'.format(old_cost, new_cost))
                 force_another = True
             self._annot_coding.update_weight()
-            utils.memlog('after annotation choice update')
 
         self._operation_number = 0
         if not no_increment:
@@ -1381,13 +1381,24 @@ class CatmapModel(object):
             for i in ordered:
                 yield self.segmentations[i]
 
-    def set_focus_sample(self, num_samples):
+    def set_focus_sample(self, set_index):
+        if self.training_focus_sets is None:
+            self.training_focus = None
+            return
+        else:
+            self.training_focus = self.training_focus_sets[set_index]
+
+    def generate_focus_samples(self, num_sets, num_samples):
         if num_samples > len(self.segmentations):
             # No point sampling a larger set than the corpus
             self.training_focus = None
+            self.training_focus_sets = None
         else:
-            self.training_focus = set(utils.weighted_sample(
-                self.segmentations, num_samples))
+            self.training_focus_sets = []
+            for _ in range(num_sets):
+                self.training_focus_sets.append(
+                    set(utils.weighted_sample(self.segmentations,
+                                              num_samples)))
 
     def best_analysis(self, choices):
         """Choose the best analysis of a set of choices.
@@ -2135,6 +2146,7 @@ class CorpusWeightUpdater(object):
         self.checkpointfile = checkpointfile
         self.max_epochs = max_epochs
         self.threshold = threshold
+        self.num_sets = 0
 
     def calculate_update(self, model):
         """Tune model corpus weight based on the precision and
@@ -2176,43 +2188,41 @@ class CorpusWeightUpdater(object):
         real_iteration_number = model._iteration_number
         callbacks = model.toggle_callbacks(None)
         model._iteration_update(no_increment=True)
+        if model.training_focus_sets is not None:
+            self.num_sets = len(model.training_focus_sets)
+        else:
+            self.num_sets = 1
         self.io.write_binary_model_file(self.checkpointfile, model)
         first_weight = model.get_corpus_coding_weight()
-        prev_weight = first_weight
-        model.weightlearn_probe()
-        (f_prev, direction) = self.calculate_update(model)
+        weight_prev = first_weight
+        (_, _, f_prev, direction) = self._majority_probe(
+            0.0, first_weight, prepare_func=None, first_model=model)
 
         _logger.info(
             'Initial corpus weight: ' +
             '{}, f-measure: {}, direction: {}'.format(
-                prev_weight, f_prev, direction))
+                weight_prev, f_prev, direction))
 
         for i in range(max_epochs):
-            # Revert the changes by reloading the checkpoint model.
-            # Good steps are also reverted, to prevent accumulated gains
-            # and make the comparison fair.
-            model = self.io.read_binary_model_file(self.checkpointfile)
-            model.set_corpus_coding_weight(prev_weight)
             if direction == 0:
                 break
-            next_weight = self.update_model(model,
-                                            i + real_iteration_number,
-                                            direction)
-            model.weightlearn_probe()
+            prepare_func = lambda m: self._prepare_alternative(
+                m, i + real_iteration_number * 2, direction, weight_prev)
             prev_direction = direction
-            (f, direction) = self.calculate_update(model)
+            (accept, weight_next, f, direction) = self._majority_probe(
+                f_prev, weight_prev, prepare_func)
             _logger.info(
                 'Weight learning iteration {}: '.format(i) +
                 'corpus weight {}, f-measure: {}, direction: {}'.format(
-                    next_weight, f, direction))
-            if f > f_prev:
+                    weight_next, f, direction))
+            if accept:
                 # Accept the step
-                _logger.info('Accepted the step to {}'.format(next_weight))
-                prev_weight = next_weight
+                _logger.info('Accepted the step to {}'.format(weight_next))
+                weight_prev = weight_next
                 f_prev = f
             else:
                 _logger.info('Rejected the step, ' +
-                    'reverting to weight {}'.format(prev_weight))
+                    'reverting to weight {}'.format(weight_prev))
                 # Discard the step and try again with a smaller step
                 direction = prev_direction
         # Start normal training from the checkpoint using the optimized weight
@@ -2220,10 +2230,46 @@ class CorpusWeightUpdater(object):
         model._iteration_number = real_iteration_number
         model.training_focus = None
         model.toggle_callbacks(callbacks)
-        model.set_corpus_coding_weight(prev_weight)
-        _logger.info('Final learned corpus weight {}'.format(prev_weight))
+        model.set_corpus_coding_weight(weight_prev)
+        _logger.info('Final learned corpus weight {}'.format(weight_prev))
 
         return (model, model.get_corpus_coding_weight() != first_weight)
+
+    def _prepare_alternative(self, model, i, direction, weight_prev):
+        model.set_corpus_coding_weight(weight_prev)
+        weight_next = self.update_model(model, i, direction)
+        return weight_next
+
+    def _majority_probe(self, f_prev, weight_prev,
+                        prepare_func, first_model=None):
+        fs = []
+        directions = []
+        decisions = []
+        for j in range(self.num_sets):
+            if j == 0 and first_model is not None:
+                model = first_model
+            else:
+                # Revert the changes by reloading the checkpoint model.
+                # Good steps are also reverted, to prevent accumulated gains
+                # and make the comparison fair.
+                model = self.io.read_binary_model_file(self.checkpointfile)
+            model.set_focus_sample(j)
+            weight_next = weight_prev
+            if prepare_func is not None:
+                weight_next = prepare_func(model)
+            model.weightlearn_probe()
+            (f, direction) = self.calculate_update(model)
+            fs.append(f)
+            directions.append(direction)
+            decisions.append(f > f_prev)
+            _logger.info('Weightlearn with set {}: f {}, dir {}'.format(
+                j, f, direction))
+        f_mean = sum(fs) / len(fs)
+        direction = sum(directions)
+        if direction != 0:
+            direction = direction / abs(direction)
+        accept = (sum(decisions) >= (float(len(decisions)) / 2))
+        return (accept, weight_next, f_mean, direction)
 
 
 def _log_catprobs(probs):

@@ -713,6 +713,11 @@ Simple usage examples (training and testing):
             'learning, the local search of the model training is restricted ' +
             'to this set, to reduce computation time. ' +
             '(default %(default)s); ')
+    add_arg('--weightlearn-sample-sets', dest='wlearn_sample_sets', type=int,
+            default=3, metavar='<int>',
+            help='Make a majority decision based on this number of ' +
+            'weightlearning sample sets. ' +
+            '(default %(default)s); ')
     add_arg('-W', '--annotationweight', dest="annotationweight",
             type=float, default=None, metavar='<float>',
             help="Corpus weight parameter for annotated data (if unset, the "
@@ -914,7 +919,9 @@ def catmap_main(args):
         corpus_weight_updater = CorpusWeightUpdater(
             develannots, heuristic, io, args.checkpointfile)
         weight_learn_func = corpus_weight_updater.weight_learning
-        model.set_focus_sample(args.wlearn_sample_size)
+        model.generate_focus_samples(
+            args.wlearn_sample_sets,
+            args.wlearn_sample_size)
 
         _logger.info('Performing initial weight learning')
         (model, must_train) = corpus_weight_updater.weight_learning(

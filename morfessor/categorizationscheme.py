@@ -326,7 +326,6 @@ class MorphUsageProperties(object):
                                             i, segments):
                         conserving_memory = True
 
-            utils.memlog('before compress')
             self._compress_contexts()
             utils.memlog('after compress')
 

@@ -14,6 +14,7 @@ __author_email__ = "morfessor@cis.hut.fi"
 import collections
 import logging
 import math
+import re
 import sys
 import time
 
@@ -85,7 +86,7 @@ class CatmapModel(object):
 
     DEFAULT_TRAIN_OPS = ['split', 'join', 'shift', 'resegment']
 
-    def __init__(self, morph_usage, forcesplit=None,
+    def __init__(self, morph_usage, forcesplit=None, nosplit=None,
                  corpusweight=1.0):
         """Initialize a new model instance.
 
@@ -158,6 +159,11 @@ class CatmapModel(object):
             self.forcesplit = []
         else:
             self.forcesplit = tuple(forcesplit)
+        # Do not allow splitting between a letter pair matching this regex
+        if nosplit is None:
+            self.nosplit_re = None
+        else:
+            self.nosplit_re = re.compile(nosplit, re.UNICODE)
 
         # Variables for semi-supervised training
         self._supervised = False
@@ -885,6 +891,10 @@ class CatmapModel(object):
             # Temporary estimated contexts
             temporaries = set()
             for splitloc in range(1, len(morph)):
+                if (self.nosplit_re and
+                        self.nosplit_re.match(
+                            morph[(splitloc - 1):(splitloc + 1)])):
+                    continue
                 prefix = morph[:splitloc]
                 suffix = morph[splitloc:]
                 changed_morphs.update((prefix, suffix))
@@ -971,15 +981,21 @@ class CatmapModel(object):
                     new_pre = prefix.morph[:-i]
                     shifted = prefix.morph[-i:]
                     new_suf = shifted + suffix.morph
-                    results.append((CategorizedMorph(new_pre, None),
-                                    CategorizedMorph(new_suf, None)))
+                    if (not self.nosplit_re or
+                            not self.nosplit_re.match(
+                                new_pre[-1] + new_suf[0])):
+                        results.append((CategorizedMorph(new_pre, None),
+                                        CategorizedMorph(new_suf, None)))
                 # Move forward
                 if len(suffix) - i >= self._min_shift_remainder:
                     new_suf = suffix.morph[i:]
                     shifted = suffix.morph[:i]
                     new_pre = prefix.morph + shifted
-                    results.append((CategorizedMorph(new_pre, None),
-                                    CategorizedMorph(new_suf, None)))
+                    if (not self.nosplit_re or
+                            not self.nosplit_re.match(
+                                new_pre[-1] + new_suf[0])):
+                        results.append((CategorizedMorph(new_pre, None),
+                                        CategorizedMorph(new_suf, None)))
             return results
 
         return self._generic_bimorph_generator(shift_helper)
@@ -2138,13 +2154,24 @@ class CatmapAnnotatedCorpusEncoding(object):
 
 
 class CorpusWeightUpdater(object):
-    def __init__(self, annotations, heuristic, io, checkpointfile,
-                 max_epochs=2, threshold=0.01):
+    def __init__(self,
+                 annotations,
+                 heuristic,
+                 io,
+                 checkpointfile,
+                 epochs_first=1,
+                 epochs=1,
+                 depth_first=1,
+                 depth=1,
+                 threshold=0.01):
         self.annotations = annotations
         self.heuristic = heuristic
         self.io = io
         self.checkpointfile = checkpointfile
-        self.max_epochs = max_epochs
+        self.epochs_first = epochs_first
+        self.epochs = epochs
+        self.depth_first = depth_first
+        self.depth = depth
         self.threshold = threshold
         self.num_sets = 0
 
@@ -2182,10 +2209,15 @@ class CorpusWeightUpdater(object):
             model.set_corpus_coding_weight(weight)
         return weight
 
-    def weight_learning(self, model, max_epochs=None):
-        if max_epochs is None:
-            max_epochs = self.max_epochs
+    def weight_learning(self, model):
         real_iteration_number = model._iteration_number
+        print('real_iteration_number {}'.format(real_iteration_number))
+        if model._iteration_number == 1:
+            epochs = self.epochs_first
+            depth = self.depth_first
+        else:
+            epochs = self.epochs
+            depth = self.depth
         callbacks = model.toggle_callbacks(None)
         model._iteration_update(no_increment=True)
         if model.training_focus_sets is not None:
@@ -2196,21 +2228,21 @@ class CorpusWeightUpdater(object):
         first_weight = model.get_corpus_coding_weight()
         weight_prev = first_weight
         (_, _, f_prev, direction) = self._majority_probe(
-            0.0, first_weight, prepare_func=None, first_model=model)
+            0.0, first_weight, depth, prepare_func=None, first_model=model)
 
         _logger.info(
             'Initial corpus weight: ' +
             '{}, f-measure: {}, direction: {}'.format(
                 weight_prev, f_prev, direction))
 
-        for i in range(max_epochs):
+        for i in range(epochs):
             if direction == 0:
                 break
             prepare_func = lambda m: self._prepare_alternative(
                 m, i + real_iteration_number * 2, direction, weight_prev)
             prev_direction = direction
             (accept, weight_next, f, direction) = self._majority_probe(
-                f_prev, weight_prev, prepare_func)
+                f_prev, weight_prev, depth, prepare_func)
             _logger.info(
                 'Weight learning iteration {}: '.format(i) +
                 'corpus weight {}, f-measure: {}, direction: {}'.format(
@@ -2240,7 +2272,7 @@ class CorpusWeightUpdater(object):
         weight_next = self.update_model(model, i, direction)
         return weight_next
 
-    def _majority_probe(self, f_prev, weight_prev,
+    def _majority_probe(self, f_prev, weight_prev, depth,
                         prepare_func, first_model=None):
         fs = []
         directions = []
@@ -2257,7 +2289,8 @@ class CorpusWeightUpdater(object):
             weight_next = weight_prev
             if prepare_func is not None:
                 weight_next = prepare_func(model)
-            model.weightlearn_probe()
+            for _ in range(depth):
+                model.weightlearn_probe()
             (f, direction) = self.calculate_update(model)
             fs.append(f)
             directions.append(direction)

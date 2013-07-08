@@ -596,6 +596,10 @@ Simple usage examples (training and testing):
             "Each character in the string will be included as a " +
             "forcesplit atom. " +
             "(default '-').")
+    add_arg('--nosplit-re', dest="nosplit", type=str, default=None,
+            metavar='<regexp>',
+            help="if the expression matches the two surrounding characters, "
+                 "do not allow splitting (default %(default)s)")
     add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
             action='store_true',
             help='use heuristic postprocessing to remove nonmorfemes ' +
@@ -701,9 +705,27 @@ Simple usage examples (training and testing):
             default=1.0, metavar='<float>',
             help="Corpus weight parameter (default %(default)s); "
             "sets the initial value if --develset is used.")
-    add_arg('--weightlearn-epochs', dest='weightlearn_epochs',
+    add_arg('--weightlearn-epochs-first', dest='weightlearn_epochs_first',
             type=int, default=5, metavar='<int>',
-            help='Maximum number of epochs of weight learning ' +
+            help='Number of epochs of weight learning ' +
+                 'in weight learning performed before the first training ' +
+                 'iteration ' +
+                 '(default %(default)s).')
+    add_arg('--weightlearn-epochs', dest='weightlearn_epochs',
+            type=int, default=3, metavar='<int>',
+            help='Number of epochs of weight learning ' +
+                 'in between-iteration weight updates ' +
+                 '(default %(default)s).')
+    add_arg('--weightlearn-depth-first', dest='weightlearn_depth_first',
+            type=int, default=2, metavar='<int>',
+            help='Number of times each training operation is performed' +
+                 'in weight learning performed before the first training ' +
+                 'iteration ' +
+                 '(default %(default)s).')
+    add_arg('--weightlearn-depth', dest='weightlearn_depth',
+            type=int, default=1, metavar='<int>',
+            help='Number of times each training operation is performed' +
+                 'in between-iteration weight updates ' +
                  '(default %(default)s).')
     add_arg('--weightlearn-sample-size', dest='wlearn_sample_size', type=int,
             default=1000, metavar='<int>',
@@ -833,6 +855,7 @@ def catmap_main(args):
             use_word_tokens=not args.type_ppl,
             min_perplexity_length=args.min_ppl_length)
         model = CatmapModel(m_usage, forcesplit=args.forcesplit,
+                            nosplit=args.nosplit,
                             corpusweight=args.corpusweight)
 
     # Set up statistics logging
@@ -917,7 +940,14 @@ def catmap_main(args):
     # Perform weight learning using development annotations
     if develannots is not None:
         corpus_weight_updater = CorpusWeightUpdater(
-            develannots, heuristic, io, args.checkpointfile)
+            develannots,
+            heuristic,
+            io,
+            args.checkpointfile,
+            args.weightlearn_epochs_first,
+            args.weightlearn_epochs,
+            args.weightlearn_depth_first,
+            args.weightlearn_depth)
         weight_learn_func = corpus_weight_updater.weight_learning
         model.generate_focus_samples(
             args.wlearn_sample_sets,
@@ -925,7 +955,7 @@ def catmap_main(args):
 
         _logger.info('Performing initial weight learning')
         (model, must_train) = corpus_weight_updater.weight_learning(
-            model, args.weightlearn_epochs)
+            model)
 
         model.training_focus = None
     else:

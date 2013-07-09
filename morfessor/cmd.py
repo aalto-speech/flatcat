@@ -601,6 +601,9 @@ Simple usage examples (training and testing):
             metavar='<regexp>',
             help="if the expression matches the two surrounding characters, "
                  "do not allow splitting (default %(default)s)")
+    add_arg('--skips', dest="skips", default=False, action='store_true',
+            help="use random skips for frequently seen compounds to speed up "
+                 "online training. Has no effect on batch training.")
     add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
             action='store_true',
             help='use heuristic postprocessing to remove nonmorfemes ' +
@@ -857,7 +860,8 @@ def catmap_main(args):
             min_perplexity_length=args.min_ppl_length)
         model = CatmapModel(m_usage, forcesplit=args.forcesplit,
                             nosplit=args.nosplit,
-                            corpusweight=args.corpusweight)
+                            corpusweight=args.corpusweight,
+                            use_skips=args.skips)
 
     # Set up statistics logging
     stats = None

@@ -14,6 +14,7 @@ __author_email__ = "morfessor@cis.hut.fi"
 import collections
 import logging
 import math
+import random
 import re
 import sys
 import time
@@ -87,7 +88,7 @@ class CatmapModel(object):
     DEFAULT_TRAIN_OPS = ['split', 'join', 'shift', 'resegment']
 
     def __init__(self, morph_usage, forcesplit=None, nosplit=None,
-                 corpusweight=1.0):
+                 corpusweight=1.0, use_skips=False):
         """Initialize a new model instance.
 
         Arguments:
@@ -174,6 +175,8 @@ class CatmapModel(object):
         # Variables for online learning
         self._online = False
         self.training_focus = None
+        self._use_skips = use_skips  # Random skips for frequent constructions
+        self._skipcounter = collections.Counter()
 
         self._cost_field_width = 9
         self._cost_field_precision = 4
@@ -263,11 +266,23 @@ class CatmapModel(object):
         self._min_shift_remainder = min_shift_remainder
         self._online = False
 
+    def _test_skip(self, word):
+        """Return true if word instance should be skipped."""
+        if not self._online:
+            return False
+        if word in self._skipcounter:
+            t = self._skipcounter[word]
+            if random.random() > 1.0 / max(1, t):
+                return True
+        self._skipcounter[word] += 1
+        return False
+
     def train_online(self, data, count_modifier=None, epoch_interval=10000,
                      max_epochs=None):
         """Adapt the model in online fashion."""
 
         self._online = True
+        self._skipcounter = collections.Counter()
         if count_modifier is not None:
             counts = {}
         word_backlinks = {}
@@ -302,8 +317,19 @@ class CatmapModel(object):
                         addc = count_modifier(c + 1) - count_modifier(c)
                 else:
                     addc = 1
-                segments, _ = self.viterbi_segment(w)
                 if addc > 0:
+                    if (self._use_skips and
+                            w in word_backlinks and
+                            self._test_skip(w)):
+                        # Only increase the word count, don't analyze
+                        i_new = word_backlinks[w]
+                        self.segmentations[i_new] = WordAnalysis(
+                            self.segmentations[i_new].count + addc,
+                            self.segmentations[i_new].analysis)
+                        i += 1
+                        continue
+                        
+                    segments, _ = self.viterbi_segment(w)
                     change_counts = ChangeCounts()
                     if w in word_backlinks:
                         i_new = word_backlinks[w]
@@ -330,7 +356,7 @@ class CatmapModel(object):
 
                     self.training_focus = set((i_new,))
                     self._single_epoch_iteration()
-                    segments = self.segmentations[i_new].analysis
+                segments = self.segmentations[i_new].analysis
 
                 _logger.debug("#%s: %s -> %s" %
                               (i, w, segments))
@@ -340,6 +366,7 @@ class CatmapModel(object):
             _logger.info("Epoch reached, resegmenting corpus")
             self.viterbi_segment_corpus()
 
+            self._skipcounter = collections.Counter()
             epochs += 1
             if max_epochs is not None and epochs >= max_epochs:
                 _logger.info("Max number of epochs reached, stop training")
@@ -1211,6 +1238,12 @@ class CatmapModel(object):
                 prev_pos = pos - next_len
                 morph = word[prev_pos:pos]
 
+                if (self.nosplit_re and
+                        pos < len(word) and
+                        self.nosplit_re.match(word[(pos - 1):(pos + 1)])):
+                    # Splitting at this point is forbidden
+                    grid[pos][next_len - 1] = zeros
+                    continue
                 if morph not in self._morph_usage:
                     # The morph corresponding to this substring has not
                     # been encountered: zero probability for this solution

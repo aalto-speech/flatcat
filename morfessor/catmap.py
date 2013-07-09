@@ -796,6 +796,8 @@ class CatmapModel(object):
             if self._supervised:
                 # Old contribution to annotation cost needs to be
                 # removed before the probability changes
+                # (when using ML-estimate, this needs to be done for
+                # corpus cost also)
                 for morph in changed_morphs:
                     self._annot_coding.modify_contribution(morph, -1)
             for morph in detagged:

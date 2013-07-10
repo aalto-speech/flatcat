@@ -318,18 +318,18 @@ class CatmapModel(object):
                 else:
                     addc = 1
                 if addc > 0:
+                    skip_this = False
                     if (self._use_skips and
                             w in word_backlinks and
                             self._test_skip(w)):
                         # Only increase the word count, don't analyze
-                        i_new = word_backlinks[w]
-                        self.segmentations[i_new] = WordAnalysis(
-                            self.segmentations[i_new].count + addc,
-                            self.segmentations[i_new].analysis)
-                        i += 1
-                        continue
+                        skip_this = True
                         
-                    segments, _ = self.viterbi_segment(w)
+                    if skip_this:
+                        segments = self.segmentations[i_new].analysis
+                    else:
+                        segments, _ = self.viterbi_segment(w)
+
                     change_counts = ChangeCounts()
                     if w in word_backlinks:
                         i_new = word_backlinks[w]
@@ -353,9 +353,10 @@ class CatmapModel(object):
                         self._modify_morph_count(morph, new_count)
 
                     self._update_counts(change_counts, 1)
-
-                    self.training_focus = set((i_new,))
-                    self._single_epoch_iteration()
+                    
+                    if not skip_this:
+                        self.training_focus = set((i_new,))
+                        self._single_epoch_iteration()
                 segments = self.segmentations[i_new].analysis
 
                 _logger.debug("#%s: %s -> %s" %

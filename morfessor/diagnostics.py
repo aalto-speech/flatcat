@@ -3,7 +3,7 @@ import logging
 import time
 import sys
 
-_logger = logging.getLogger('morfessor')
+_logger = logging.getLogger(__name__)
 
 PY3 = sys.version_info.major == 3
 

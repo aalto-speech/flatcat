@@ -7,7 +7,7 @@ import re
 from .utils import _progress
 from .exception import MorfessorException
 
-_logger = logging.getLogger('morfessor')
+_logger = logging.getLogger(__name__)
 
 
 def _constructions_to_str(constructions):

@@ -5,7 +5,7 @@ import math
 
 from . import utils
 
-_logger = logging.getLogger('morfessor')
+_logger = logging.getLogger(__name__)
 
 
 class WordBoundary(object):

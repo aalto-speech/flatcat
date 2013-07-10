@@ -327,6 +327,7 @@ class CatmapModel(object):
                         skip_this = True
                         
                     if skip_this:
+                        i_new = word_backlinks[w]
                         segments = self.segmentations[i_new].analysis
                     else:
                         segments, _ = self.viterbi_segment(w)

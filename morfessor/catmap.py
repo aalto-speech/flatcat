@@ -215,6 +215,7 @@ class CatmapModel(object):
             for morph in self.detag_word(segmentation.analysis):
                 self.morph_backlinks[morph].add(i)
             i += 1
+            self._corpus_coding.boundaries += count
         utils.memlog('After adding corpus data')
 
     def initialize_baseline(self):
@@ -342,6 +343,7 @@ class CatmapModel(object):
                         self.segmentations[i_new] = WordAnalysis(
                             old_seg.count + addc,
                             segments)
+                        self._corpus_coding.boundaries += addc
                     else:
                         self.add_corpus_data([WordAnalysis(addc, segments)])
                         i_new = len(self.segmentations) - 1
@@ -661,9 +663,8 @@ class CatmapModel(object):
 
         self._lexicon_coding.clear()
 
-        self._corpus_coding.boundaries = (
-            self._morph_usage.calculate_usage_features(
-                lambda: self.detag_list(self.segmentations)))
+        self._morph_usage.calculate_usage_features(
+            lambda: self.detag_list(self.segmentations))
 
         for morph in self._morph_usage.seen_morphs():
             self._lexicon_coding.add(morph)

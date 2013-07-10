@@ -305,13 +305,11 @@ class MorphUsageProperties(object):
 
     def calculate_usage_features(self, seg_func):
         self._clear()
-        count_sum = 0
         while True:
             # If risk of running out of memory, perform calculations in
             # multiple loops over the data
             conserving_memory = False
             for rcount, segments in seg_func():
-                count_sum += rcount
 
                 if self.use_word_tokens:
                     pcount = rcount
@@ -331,8 +329,6 @@ class MorphUsageProperties(object):
 
             if not conserving_memory:
                 break
-
-        return count_sum
 
     def _clear(self):
         """Resets the context variables.

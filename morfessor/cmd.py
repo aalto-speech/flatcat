@@ -17,7 +17,7 @@ from .utils import _generator_progress, LOGPROB_ZERO
 
 PY3 = sys.version_info.major == 3
 
-_logger = logging.getLogger(__name__)
+_logger = logging.getLogger('morfessor')
 
 
 LICENSE = """

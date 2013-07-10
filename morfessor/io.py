@@ -22,7 +22,7 @@ except ImportError:
 
 PY3 = sys.version_info.major == 3
 
-_logger = logging.getLogger(__name__)
+_logger = logging.getLogger('morfessor')
 
 
 class MorfessorIO:

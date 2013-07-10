@@ -29,7 +29,7 @@ from .utils import LOGPROB_ZERO, zlog
 
 PY3 = sys.version_info.major == 3
 
-_logger = logging.getLogger(__name__)
+_logger = logging.getLogger('morfessor')
 _logger.level = logging.DEBUG   # FIXME development convenience
 
 # Grid node for viterbi algorithm

@@ -14,7 +14,7 @@ __author_email__ = "morfessor@cis.hut.fi"
 
 show_progress_bar = True
 
-_logger = logging.getLogger(__name__)
+_logger = logging.getLogger('morfessor')
 
 
 def get_version():

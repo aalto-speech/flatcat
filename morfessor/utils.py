@@ -6,7 +6,7 @@ import types
 import resource     # FIXME remove this dependency?
 
 
-_logger = logging.getLogger(__name__)
+_logger = logging.getLogger('morfessor')
 
 LOGPROB_ZERO = 1000000
 
@@ -79,7 +79,7 @@ def _progress(iter_func):
     # wrap the functions result in a ProgressBar and return the new function
     if isinstance(iter_func, types.FunctionType):
         def i(*args, **kwargs):
-            if logging.getLogger(__name__).isEnabledFor(logging.INFO):
+            if _logger.isEnabledFor(logging.INFO):
                 return ProgressBar()(iter_func(*args, **kwargs))
             else:
                 return iter_func(*args, **kwargs)

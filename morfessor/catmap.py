@@ -187,6 +187,8 @@ class CatmapModel(object):
         self._cost_field_width = 9
         self._cost_field_precision = 4
 
+    ### Primary public methods
+    #
     def add_corpus_data(self, segmentations, freqthreshold=1,
                         count_modifier=None):
         """Adds the given segmentations (with counts) to the corpus data.
@@ -224,6 +226,25 @@ class CatmapModel(object):
             self._corpus_coding.boundaries += count
         utils.memlog('After adding corpus data')
 
+    def add_annotations(self, annotations, annotatedcorpusweight=None):
+        """Adds data to the annotated corpus."""
+        self._supervised = True
+        self._annotations_tagged = True
+        for (word, alternatives) in annotations.items():
+            if alternatives[0][0].category == CategorizedMorph.no_category:
+                self._annotations_tagged = False
+            # The fist entries in self.segmentations are the currently active
+            # annotations, in the same order as in self.annotations
+            self.segmentations.insert(
+                len(self.annotations),
+                WordAnalysis(1, alternatives[0]))
+            self.annotations.append((word, alternatives))
+        self._calculate_morph_backlinks()
+        self._annot_coding = CatmapAnnotatedCorpusEncoding(
+                                self._corpus_coding,
+                                weight=annotatedcorpusweight)
+        self._annot_coding.boundaries = len(self.annotations)
+
     def initialize_baseline(self):
         """Initialize the model using a previously added
         (see add_corpus_data) segmentation produced by a morfessor
@@ -245,7 +266,7 @@ class CatmapModel(object):
             self._calculate_transition_counts()
             self._calculate_emission_counts()
 
-        self.convergence_of_analysis(
+        self._convergence_of_analysis(
             reestimate_with_unchanged_segmentation,
             self.viterbi_tag_corpus,
             min_difference_proportion=min_difference_proportion,
@@ -272,17 +293,6 @@ class CatmapModel(object):
         self._max_shift = max_shift_distance
         self._min_shift_remainder = min_shift_remainder
         self._online = False
-
-    def _test_skip(self, word):
-        """Return true if word instance should be skipped."""
-        if not self._online:
-            return False
-        if word in self._skipcounter:
-            t = self._skipcounter[word]
-            if random.random() > 1.0 / max(1, t):
-                return True
-        self._skipcounter[word] += 1
-        return False
 
     def train_online(self, data, count_modifier=None, epoch_interval=10000,
                      max_epochs=None):
@@ -374,7 +384,7 @@ class CatmapModel(object):
 
             # also reestimates the probabilities
             _logger.info("Epoch reached, resegmenting corpus")
-            self.viterbi_segment_corpus()
+            self._viterbi_segment_corpus()
 
             self._skipcounter = collections.Counter()
             epochs += 1
@@ -386,822 +396,6 @@ class CatmapModel(object):
         newcost = self.get_cost()
         _logger.info("Tokens processed: %s\tCost: %s" % (i, newcost))
         return epochs, newcost
-
-    def _resolve_operation(self, op_number):
-        """Returns an object method corresponding to the given
-        operation number."""
-        operation_name = '_op_{}_generator'.format(
-            self.training_operations[op_number])
-        try:
-            operation = self.__getattribute__(operation_name)
-        except AttributeError:
-            raise InvalidOperationError(
-                self.training_operations[op_number],
-                operation_name)
-        return operation
-
-    def _train_iteration(self):
-        """One iteration of training, which may contain several epochs
-        of each operation in sequence.
-
-        The model must have been initialized, either by loading a baseline
-        segmentation or a pretrained catmap model from pickle or tagged
-        segmentation file, and calling initialize_baseline and/or
-        initialize_hmm
-        """
-        cost = self.get_cost()
-        msg = ('{:9s} {:2d}/{:<2d}          Cost: {:' +
-                self._cost_field_fmt(cost) + 'f}.')
-        _logger.info(msg.format('iteration',
-                                self._iteration_number,
-                                self._max_iterations,
-                                cost))
-        self._changed_segmentations = set()  # FIXME: use for convergence
-        while self._operation_number < len(self.training_operations):
-            operation = self._resolve_operation(self._operation_number)
-            min_epoch_cost_gain = self._training_params('min_epoch_cost_gain')
-            max_epochs = self._training_params('max_epochs')
-            if self._training_params('must_reestimate'):
-                update_func = self.reestimate_probabilities
-            else:
-                update_func = None
-
-            msg = 'Iteration {:2d}, operation {:2d} ({}), max {:2d} epoch(s).'
-            _logger.info(msg.format(
-                    self._iteration_number, self._operation_number,
-                    self.training_operations[self._operation_number],
-                    max_epochs))
-            utils.memlog('see above')
-            self.convergence_of_cost(
-                lambda: self._transformation_epoch(operation()),
-                update_func=update_func,
-                min_cost_gain=min_epoch_cost_gain,
-                max_iterations=max_epochs)
-            self.reestimate_probabilities()
-            self._operation_number += 1
-            for callback in self.operation_callbacks:
-                callback(self)
-
-    def _iteration_update(self, no_increment=False):
-        """Updates performed between training iterations.
-        Set the no_increment flag to suppress incrementing
-        the iteration number, which is needed when the update is
-        performed several times during one iteration e.g. in weight learning.
-        """
-
-        force_another = False
-
-        if self._supervised:
-            old_cost = self.get_cost()
-            _logger.info('Updating annotation choices...')
-            self._update_annotation_choices()
-            new_cost = self.get_cost()
-            if old_cost != new_cost:
-                _logger.info('Updated annotation choices, changing cost from '
-                            '{} to {}'.format(old_cost, new_cost))
-                force_another = True
-            self._annot_coding.update_weight()
-
-        self._operation_number = 0
-        if not no_increment:
-            self._iteration_number += 1
-        return force_another
-
-    def convergence_of_cost(self, train_func, update_func,
-                            min_cost_gain=0.005,
-                            max_iterations=5):
-        """Iterates the specified training function until the model cost
-        no longer improves enough or until maximum number of iterations
-        is reached.
-
-        On each iteration train_func is called without arguments.
-        The data used to train the model must therefore be completely
-        contained in the model itself. This can e.g. mean iterating over
-        the morphs already stored in the lexicon.
-
-        Arguments:
-            train_func -- A method of CatmapModel which causes some part of
-                          the model to be trained.
-            update_func -- Updates to the model between iterations,
-                           that should not be considered in the convergence
-                           analysis. However, if the return value is
-                           True, at least one more iteration is forced unless
-                           the maximum limit has been reached.
-            min_cost_gain -- Stop iterating if cost reduction between
-                             iterations is below this limit * #boundaries.
-                             Default 0.005.
-            max_iterations -- Maximum number of iterations (epochs). Default 5.
-        """
-
-        previous_cost = self.get_cost()
-        for iteration in range(max_iterations):
-            cost = self.get_cost()
-            msg = ('{:9s} {:2d}/{:<2d}          Cost: {:' +
-                   self._cost_field_fmt(cost) + 'f}.')
-            _logger.info(msg.format('epoch',
-                                    iteration + 1, max_iterations,
-                                    cost))
-
-            # perform the optimization
-            train_func()
-
-            # perform update between optimization iterations
-            if update_func is not None:
-                _logger.info('{:24s} Cost: {}'.format(
-                    'Before epoch update.', cost))
-
-            # perform update between optimization iterations
-            if update_func is not None:
-                force_another = update_func()
-            else:
-                force_another = False
-
-            for callback in self.epoch_callbacks:
-                callback(self, iteration)
-
-            cost = self.get_cost()
-            cost_diff = cost - previous_cost
-            limit = self._cost_convergence_limit(min_cost_gain)
-            converged = (not force_another) and -cost_diff <= limit
-            self._display_cost(cost_diff, limit, 'epoch',
-                           iteration, max_iterations, converged)
-            if converged:
-                _logger.info('{:24s} Cost: {}'.format(
-                    'final epoch.', cost))
-                return
-            previous_cost = cost
-
-    def _display_cost(self, cost_diff, limit, iteration_name,
-                      iteration, max_iterations, converged):
-        msg = ('Cost difference {:' +
-                    self._cost_field_fmt(cost_diff) + 'f} ' +
-                '(limit {}) ' +
-                'in {:9s} {:2d}/{:<2d} {}')
-        if converged:
-            conv = '(Converged)'
-        else:
-            conv = ''
-        _logger.info(msg.format(cost_diff, limit,
-                                iteration_name, iteration + 1,
-                                max_iterations, conv))
-
-    def _cost_convergence_limit(self, min_cost_gain=0.005):
-        return min_cost_gain * self._corpus_coding.boundaries
-
-    def convergence_of_analysis(self, train_func, resegment_func,
-                                min_difference_proportion=0,
-                                min_cost_gain=0, max_iterations=15):
-        """Iterates the specified training function until the segmentations
-        produced by the model no longer changes more than
-        the specified threshold, until the model cost no longer improves
-        enough or until maximum number of iterations is reached.
-
-        On each iteration the current optimal analysis for the corpus is
-        produced by calling resegment_func.
-        This corresponds to:
-
-        Y(t) = arg min { L( theta(t-1), Y, D ) }
-
-        Then the train_func function is called, which corresponds to:
-
-        theta(t) = arg min { L( theta, Y(t), D ) }
-
-        Neither train_func nor resegment_func may require any arguments.
-
-        Arguments:
-            train_func -- A method of CatmapModel which causes some aspect
-                          of the model to be trained.
-            resegment_func -- A method of CatmapModel that resegments or
-                              retags the segmentations, to produce the
-                              results to compare. Should return the number
-                              of changed words.
-            min_difference_proportion -- Maximum proportion of words with
-                                         changed segmentation or category
-                                         tags in the final iteration.
-                                         Default 0.
-            min_cost_gain -- Stop iterating if cost reduction between
-                                   iterations is below this limit.
-            max_iterations -- Maximum number of iterations. Default 15.
-        """
-
-        previous_cost = self.get_cost()
-        for iteration in range(max_iterations):
-            _logger.info(
-                'Iteration {:2d} ({}). {:2d}/{:<2d}'.format(
-                    self._iteration_number, train_func.__name__,
-                    iteration + 1, max_iterations))
-
-            # perform the optimization
-            train_func()
-
-            cost = self.get_cost()
-            cost_diff = cost - previous_cost
-            cost_limit = min_cost_gain * self._corpus_coding.boundaries
-            if -cost_diff <= cost_limit:
-                msg = ('Cost difference {:' +
-                            self._cost_field_fmt(cost_diff) + 'f} ' +
-                       '(limit {}) ' +
-                       'in iteration {:2d}    (Converged).')
-                _logger.info(msg.format(cost_diff, cost_limit, iteration + 1))
-                break
-
-            # perform the reanalysis
-            differences = resegment_func()
-
-            limit = min_difference_proportion * len(self.segmentations)
-            # the length of the slot needed to display
-            # the number of segmentations
-            field_width = str(len(str(len(self.segmentations))))
-            if differences <= limit:
-                msg = ('Segmentation differences: {:' + field_width + 'd} ' +
-                       '(limit {:' + field_width + 'd}). ' +
-                       'in iteration {:2d}    (Converged).')
-                _logger.info(msg.format(differences, int(math.floor(limit)),
-                                        iteration + 1))
-                break
-            msg = ('Segmentation differences: {:' + field_width + 'd} ' +
-                   '(limit {:' + field_width + 'd}). Cost difference: {}')
-            _logger.info(msg.format(differences, int(math.floor(limit)),
-                                    cost_diff))
-            previous_cost = cost
-
-    def _training_params(self, param_name):
-        """Parameters for the training operators
-        (calls to convergence_of_cost).
-        Can depend on the _iteration_number and _operation_number.
-        Customize this if you need more finegrained control of the training.
-        """
-
-        if param_name == 'min_epoch_cost_gain':
-            return self._min_epoch_cost_gain
-        if param_name == 'min_iter_cost_gain':
-            return self._min_iter_cost_gain
-        if param_name == 'max_epochs':
-            if (self.training_operations[self._operation_number] ==
-                'resegment'):
-                return self._max_resegment_epochs
-            if self._iteration_number == 1:
-                # Perform more epochs in the first iteration.
-                # 0 is pre-iteration, 1 is the first actual iteration.
-                return self._max_epochs_first
-            # After that do just one of each operation.
-            return self._max_epochs
-        # FIXME This is a bit of ugliness I hope to get rid of
-        if param_name == 'must_reestimate':
-            return (self.training_operations[self._operation_number] ==
-                    'resegment')
-
-    def _single_epoch_iteration(self):
-        """One iteration of training, with exactly one epoch of each
-        operation and no convergence checks or update passes."""
-        for i in range(len(self.training_operations)):
-            operation = self._resolve_operation(i)
-            self._transformation_epoch(operation())
-
-    def weightlearn_probe(self):
-        """Partial training used in weight learning."""
-        self._single_epoch_iteration()
-        self.reestimate_probabilities()
-        self._iteration_update(no_increment=True)
-
-    def reestimate_probabilities(self):
-        """Re-estimates model parameters from a segmented, tagged corpus.
-
-        theta(t) = arg min { L( theta, Y(t), D ) }
-        """
-        self._calculate_usage_features()
-        self._calculate_transition_counts()
-        self._calculate_emission_counts()
-
-    def _calculate_usage_features(self):
-        """Recalculates the morph usage features (perplexities).
-        """
-
-        self._lexicon_coding.clear()
-
-        self._morph_usage.calculate_usage_features(
-            lambda: self.detag_list(self.segmentations))
-
-        for morph in self._morph_usage.seen_morphs():
-            self._lexicon_coding.add(morph)
-
-    def _unigram_transition_probs(self):
-        """Initial transition probabilities based on unigram distribution.
-
-        Each tag is presumed to be succeeded by the expectation over all data
-        of the number of prefixes, suffixes, stems, non-morphemes and word
-        boundaries.
-        """
-
-        category_totals = self._morph_usage.category_token_count
-
-        transitions = collections.Counter()
-        nclass = {WORD_BOUNDARY: self.word_tokens}
-        for (i, category) in enumerate(get_categories()):
-            nclass[category] = float(category_totals[i])
-
-        num_tokens_tagged = 0.0
-        valid_transitions = MorphUsageProperties.valid_transitions()
-
-        for (cat1, cat2) in valid_transitions:
-            # count all possible valid transitions
-            num_tokens_tagged += nclass[cat2]
-            transitions[(cat1, cat2)] = nclass[cat2]
-
-        if num_tokens_tagged == 0:
-            _logger.warning('Tried to train without data')
-            return
-
-        for pair in MorphUsageProperties.zero_transitions:
-            transitions[pair] = 0.0
-
-        normalization = (sum(nclass.values()) / num_tokens_tagged)
-        for (prev_cat, next_cat) in transitions:
-            self._corpus_coding.update_transition_count(
-                prev_cat, next_cat,
-                transitions[(prev_cat, next_cat)] * normalization)
-
-    def _calculate_transition_counts(self):
-        """Count the number of transitions of each type.
-        Can be used to estimate transition probabilities from
-        a category-tagged segmented corpus.
-        """
-
-        self._corpus_coding.clear_transition_counts()
-        for rcount, segments in self.segmentations:
-            # Only the categories matter, not the morphs themselves
-            categories = [x.category for x in segments]
-            # Include word boundaries
-            categories.insert(0, WORD_BOUNDARY)
-            categories.append(WORD_BOUNDARY)
-            for (prev_cat, next_cat) in utils.ngrams(categories, 2):
-                pair = (prev_cat, next_cat)
-                if pair in MorphUsageProperties.zero_transitions:
-                    _logger.warning('Impossible transition ' +
-                                    '{!r} -> {!r}'.format(*pair))
-                self._corpus_coding.update_transition_count(prev_cat,
-                                                            next_cat,
-                                                            rcount)
-
-    def _calculate_emission_counts(self):
-        """Recalculates the emission counts from a retagged segmentation."""
-        self._corpus_coding.clear_emission_counts()
-        for (count, analysis) in self.segmentations:
-            for morph in analysis:
-                self._corpus_coding.update_emission_count(morph.category,
-                                                          morph.morph,
-                                                          count)
-
-    def _calculate_morph_backlinks(self):
-        """Recalculates the mapping from morphs to the indices of corpus
-        words in which the morphs occur."""
-        self.morph_backlinks.clear()
-        for (i, segmentation) in enumerate(self.segmentations):
-            for morph in self.detag_word(segmentation.analysis):
-                self.morph_backlinks[morph].add(i)
-
-    def _is_annotation(self, target):
-        """Returns True if the targetted corpus index is part of the
-        annotated corpus."""
-        return (self._supervised and target < len(self.annotations))
-
-    def _find_in_corpus(self, rule, targets=None):
-        """Returns the indices of words in the corpus segmentation
-        matching the given rule, and the total number of matches, which
-        can be larger than the sum of counts of matched_targets, if there
-        are several matches in some word(s).
-
-        Arguments:
-            rule -- A TransformationRule describing the criteria for a match.
-            targets -- A set of indices to limit the search to, or None to
-                       search all segmentations. Default: full search.
-        """
-
-        if targets is None:
-            targets = range(len(self.segmentations))
-
-        matched_targets = set()
-        num_matches = 0
-        for target in targets:
-            old_analysis = self.segmentations[target]
-            tmp_matches = (old_analysis.count *
-                            rule.num_matches(
-                                old_analysis.analysis))
-            if tmp_matches > 0:
-                matched_targets.add(target)
-                num_matches += tmp_matches
-        return matched_targets, num_matches
-
-    def _transformation_epoch(self, transformation_generator):
-        """Performs each experiment yielded by the transform generator,
-        in sequence, always choosing the alternative that minimizes the
-        model cost, or making no change if all choices would increase the
-        cost.
-
-        An experiment is a set of transformations sharing a common matching
-        rule. The individual transformations in the set are considered to
-        be mutually exclusive, only one of them can be chosen.
-
-        Can be used to split, join or otherwise re-segment.
-        Can even be abused to alter the corpus: it is up to the caller to
-        ensure that the rules and results detokenize to the same string.
-
-        Arguments:
-            transformation_generator -- a generator yielding
-                (transform_group, targets, temporaries)
-                tuples, where
-                    transform_group -- a list of Transform objects.
-                    targets -- a set with an initial guess of indices of
-                               matching words in the corpus. Can contain false
-                               positives, but should not omit positive
-                               indices (they will be missed).
-                    temporaries -- a set of new morphs with estimated
-                                   contexts.
-        """
-
-        EpochNode = collections.namedtuple('EpochNode', ['cost',
-                                                         'transform',
-                                                         'targets'])
-        self._changed_segmentations_op = set()
-        if not self._online:
-            transformation_generator = utils._generator_progress(
-                transformation_generator)
-        for experiment in transformation_generator:
-            (transform_group, targets,
-             changed_morphs, temporaries) = experiment
-            if len(transform_group) == 0:
-                continue
-            # Cost of doing nothing
-            best = EpochNode(self.get_cost(), None, set())
-
-            # All transforms in group must match the same words,
-            # we can use just the first transform
-            matched_targets, num_matches = self._find_in_corpus(
-                transform_group[0].rule, targets)
-            if num_matches == 0:
-                continue
-
-            detagged = self.detag_word(transform_group[0].rule)
-            if self._supervised:
-                # Old contribution to annotation cost needs to be
-                # removed before the probability changes
-                # (when using ML-estimate, this needs to be done for
-                # corpus cost also)
-                for morph in changed_morphs:
-                    self._annot_coding.modify_contribution(morph, -1)
-            for morph in detagged:
-                # Remove the old representation, but only from
-                # morph counts (emissions and transitions updated later)
-                self._modify_morph_count(morph, -num_matches)
-
-            for transform in transform_group:
-                detagged = self.detag_word(transform.result)
-                for morph in detagged:
-                    # Add the new representation to morph counts
-                    self._modify_morph_count(morph, num_matches)
-                for target in matched_targets:
-                    old_analysis = self.segmentations[target]
-                    new_analysis = transform.apply(old_analysis, self)
-
-                # Apply change to encoding
-                self._update_counts(transform.change_counts, 1)
-                # Observe that annotation counts are not updated,
-                # even if the transform targets an annotation,
-                # because that would defeat the purpose of annotations
-                if self._supervised:
-                    # contribution to annotation cost needs to be readded
-                    # after the emission probability has been updated
-                    # (ordering with _update_counts relevant for ML-estimate)
-                    for morph in changed_morphs:
-                        self._annot_coding.modify_contribution(morph, 1)
-                cost = self.get_cost()
-                if cost < best.cost:
-                    best = EpochNode(cost, transform, matched_targets)
-                # Revert change to encoding
-                if self._supervised:
-                    for morph in changed_morphs:
-                        self._annot_coding.modify_contribution(morph, -1)
-                self._update_counts(transform.change_counts, -1)
-                for morph in self.detag_word(transform.result):
-                    self._modify_morph_count(morph, -num_matches)
-
-            if best.transform is None:
-                # Best option was to do nothing. Revert morph count.
-                for morph in self.detag_word(transform_group[0].rule):
-                    self._modify_morph_count(morph, num_matches)
-            else:
-                # A real change was the best option
-                best.transform.reset_counts()
-                for target in best.targets:
-                    for morph in self.detag_word(best.transform.result):
-                        # Add the new representation to morph counts
-                        self._modify_morph_count(morph, num_matches)
-                    new_analysis = best.transform.apply(
-                        self.segmentations[target],
-                        self, corpus_index=target)
-                    self.segmentations[target] = new_analysis
-                    # any morph used in the best segmentation
-                    # is no longer temporary
-                    temporaries.difference_update(
-                        self.detag_word(new_analysis.analysis))
-                self._update_counts(best.transform.change_counts, 1)
-                self._changed_segmentations.update(best.targets)
-                self._changed_segmentations_op.update(best.targets)
-
-            if self._supervised:
-                for morph in changed_morphs:
-                    self._annot_coding.modify_contribution(morph, 1)
-
-            self._morph_usage.remove_temporaries(temporaries)
-
-    def _op_split_generator(self):
-        """Generates splits of seen morphs into two submorphs.
-        Use with _transformation_epoch
-        """
-        # FIXME random shuffle or sort by length/frequency?
-        if self.training_focus is None:
-            unsorted = self._morph_usage.seen_morphs()
-        else:
-            unsorted = set()
-            for (count, segmentation) in self.training_focus_filter():
-                for morph in self.detag_word(segmentation):
-                    unsorted.add(morph)
-        epoch_morphs = sorted(unsorted, key=len)
-        for morph in epoch_morphs:
-            if len(morph) == 1:
-                continue
-            if self._morph_usage.count(morph) == 0:
-                continue
-
-            # Match the parent morph with any category
-            rule = TransformationRule((CategorizedMorph(morph, None),))
-            transforms = []
-            changed_morphs = set((morph,))
-            # Apply to all words in which the morph occurs
-            targets = self.morph_backlinks[morph]
-            # Temporary estimated contexts
-            temporaries = set()
-            for splitloc in range(1, len(morph)):
-                if (self.nosplit_re and
-                        self.nosplit_re.match(
-                            morph[(splitloc - 1):(splitloc + 1)])):
-                    continue
-                prefix = morph[:splitloc]
-                suffix = morph[splitloc:]
-                changed_morphs.update((prefix, suffix))
-                # Make sure that there are context features available
-                # (real or estimated) for the submorphs
-                tmp = (self._morph_usage.estimate_contexts(morph,
-                                                           (prefix, suffix)))
-                temporaries.update(tmp)
-                transforms.append(
-                    Transformation(rule,
-                                   (CategorizedMorph(prefix, None),
-                                    CategorizedMorph(suffix, None))))
-            yield (transforms, targets, changed_morphs, temporaries)
-
-    def _generic_bimorph_generator(self, result_func):
-        """The common parts of operation generators that operate on
-        context-sensitive bimorphs. Don't call this directly.
-
-        Arguments:
-            result_func -- A function that takes the prefix an suffix
-                           as arguments, and returns all the proposed results
-                           as tuples of CategorizedMorphs.
-        """
-
-        # FIXME random shuffle or sort by bigram frequency?
-        bigram_freqs = collections.Counter()
-        for (count, segments) in self.training_focus_filter():
-            segments = _wb_wrap(segments)
-            for quad in utils.ngrams(segments, n=4):
-                prev_morph, prefix, suffix, next_morph = quad
-                if (prefix.morph in self.forcesplit or
-                    suffix.morph in self.forcesplit):
-                    # don't propose to join morphs on forcesplit list
-                    continue
-                context_type = MorphUsageProperties.context_type(
-                    prev_morph.morph, next_morph.morph,
-                    prev_morph.category, next_morph.category)
-                bigram_freqs[(prefix, suffix, context_type)] += count
-
-        for (bigram, count) in bigram_freqs.most_common():
-            prefix, suffix, context_type = bigram
-            # Require both morphs, tags and context to match
-            rule = TransformationRule((prefix, suffix),
-                                      context_type=context_type)
-            temporaries = set()
-            transforms = []
-            changed_morphs = set((prefix.morph, suffix.morph))
-            results = result_func(prefix, suffix)
-            for result in results:
-                detagged = self.detag_word(result)
-                changed_morphs.update(detagged)
-                temporaries.update(self._morph_usage.estimate_contexts(
-                    (prefix.morph, suffix.morph), detagged))
-                transforms.append(Transformation(rule, result))
-            # targets will be a subset of the intersection of the
-            # occurences of both submorphs
-            targets = set(self.morph_backlinks[prefix.morph])
-            targets.intersection_update(self.morph_backlinks[suffix.morph])
-            if len(targets) > 0:
-                yield(transforms, targets, changed_morphs, temporaries)
-
-    def _op_join_generator(self):
-        """Generates joins of consecutive morphs into a supermorph.
-        Can make different join decisions in different contexts.
-        Use with _transformation_epoch
-        """
-
-        def join_helper(prefix, suffix):
-            joined = prefix.morph + suffix.morph
-            return ((CategorizedMorph(joined, None),),)
-
-        return self._generic_bimorph_generator(join_helper)
-
-    def _op_shift_generator(self):
-        """Generates operations that shift the split point in a bigram.
-        Use with _transformation_epoch
-        """
-
-        def shift_helper(prefix, suffix):
-            results = []
-            for i in range(1, self._max_shift + 1):
-                # Move backward
-                if len(prefix) - i >= self._min_shift_remainder:
-                    new_pre = prefix.morph[:-i]
-                    shifted = prefix.morph[-i:]
-                    new_suf = shifted + suffix.morph
-                    if (not self.nosplit_re or
-                            not self.nosplit_re.match(
-                                new_pre[-1] + new_suf[0])):
-                        results.append((CategorizedMorph(new_pre, None),
-                                        CategorizedMorph(new_suf, None)))
-                # Move forward
-                if len(suffix) - i >= self._min_shift_remainder:
-                    new_suf = suffix.morph[i:]
-                    shifted = suffix.morph[:i]
-                    new_pre = prefix.morph + shifted
-                    if (not self.nosplit_re or
-                            not self.nosplit_re.match(
-                                new_pre[-1] + new_suf[0])):
-                        results.append((CategorizedMorph(new_pre, None),
-                                        CategorizedMorph(new_suf, None)))
-            return results
-
-        return self._generic_bimorph_generator(shift_helper)
-
-    def _op_resegment_generator(self):
-        """Generates special transformations that resegment and tag
-        all words in the corpus using viterbi_segment.
-        Use with _transformation_epoch
-        """
-        if self.training_focus is None:
-            source = range(len(self.segmentations))
-        else:
-            source = self.training_focus
-        for i in source:
-            word = self.segmentations[i]
-            changed_morphs = set(self.detag_word(word.analysis))
-            vrt = ViterbiResegmentTransformation(word, self)
-            changed_morphs = set(self.detag_word(vrt.result))
-
-            yield ([vrt], set([i]), changed_morphs, set())
-
-    def _modify_morph_count(self, morph, diff_count):
-        """Modifies the count of a morph in the lexicon.
-        Does not affect transitions or emissions."""
-        old_count = self._morph_usage.count(morph)
-        new_count = old_count + diff_count
-        self._morph_usage.set_count(morph, new_count)
-        self._corpus_coding.clear_emission_cache()
-        if old_count == 0 and new_count > 0:
-            self._lexicon_coding.add(morph)
-        elif old_count > 0 and new_count == 0:
-            self._lexicon_coding.remove(morph)
-
-    def _update_counts(self, change_counts, multiplier):
-        """Updates the model counts according to the pre-calculated
-        ChangeCounts object (e.g. calculated in Transformation).
-
-        Arguments:
-            change_counts -- A ChangeCounts object
-            multiplier -- +1 to apply the change, -1 to revert it.
-        """
-        for cmorph in change_counts.emissions:
-            self._corpus_coding.update_emission_count(
-                cmorph.category,
-                cmorph.morph,
-                change_counts.emissions[cmorph] * multiplier)
-
-        for (prev_cat, next_cat) in change_counts.transitions:
-            self._corpus_coding.update_transition_count(
-                prev_cat, next_cat,
-                change_counts.transitions[(prev_cat, next_cat)] * multiplier)
-
-        if multiplier > 0:
-            bl_rm = change_counts.backlinks_remove
-            bl_add = change_counts.backlinks_add
-        else:
-            bl_rm = change_counts.backlinks_add
-            bl_add = change_counts.backlinks_remove
-
-        for morph in bl_rm:
-            self.morph_backlinks[morph].difference_update(
-                change_counts.backlinks_remove[morph])
-        for morph in bl_add:
-            self.morph_backlinks[morph].update(
-                change_counts.backlinks_add[morph])
-
-    def viterbi_tag(self, segments):
-        """Tag a pre-segmented word using the learned model.
-
-        Arguments:
-            segments -- A list of morphs to tag.
-                        Raises KeyError if morph is not present in the
-                        training data.
-                        For segmenting and tagging new words,
-                        use viterbi_segment(compound).
-        """
-
-        # To make sure that internally impossible states are penalized
-        # even more than impossible states caused by zero parameters.
-        extrazero = LOGPROB_ZERO ** 2
-
-        # This function uses internally indices of categories,
-        # instead of names and the word boundary object,
-        # to remove the need to look them up constantly.
-        categories = get_categories(wb=True)
-        wb = categories.index(WORD_BOUNDARY)
-        forbidden = []
-        for (prev_cat, next_cat) in MorphUsageProperties.zero_transitions:
-            forbidden.append((categories.index(prev_cat),
-                              categories.index(next_cat)))
-
-        # Grid consisting of
-        # the lowest accumulated cost ending in each possible state.
-        # and back pointers that indicate the best path.
-        # Initialized to pseudo-zero for all states
-        grid = [[ViterbiNode(extrazero, None)] * len(categories)]
-        # Except probability one that first state is a word boundary
-        grid[0][wb] = ViterbiNode(0, None)
-
-        # Temporaries
-        # Cumulative costs for each category at current time step
-        cost = []
-        best = []
-
-        # Throw away old category information, if any
-        segments = self.detag_word(segments)
-        for (i, morph) in enumerate(segments):
-            for next_cat in range(len(categories)):
-                if next_cat == wb:
-                    # Impossible to visit boundary in the middle of the
-                    # sequence
-                    best.append(ViterbiNode(extrazero, None))
-                    continue
-                for prev_cat in range(len(categories)):
-                    if (prev_cat, next_cat) in forbidden:
-                        cost.append(extrazero)
-                        continue
-                    # Cost of selecting prev_cat as previous state
-                    # if now at next_cat
-                    cost.append(grid[i][prev_cat].cost +
-                                self._corpus_coding.transit_emit_cost(
-                                    categories[prev_cat],
-                                    categories[next_cat], morph))
-                best.append(ViterbiNode(*utils.minargmin(cost)))
-                cost = []
-            # Update grid to prepare for next iteration
-            grid.append(best)
-            best = []
-
-        # Last transition must be to word boundary
-        for prev_cat in range(len(categories)):
-            pair = (categories[prev_cat], WORD_BOUNDARY)
-            cost = (grid[-1][prev_cat].cost +
-                    self._corpus_coding.log_transitionprob(*pair))
-            best.append(cost)
-        backtrace = ViterbiNode(*utils.minargmin(best))
-
-        # Backtrace for the best category sequence
-        result = [CategorizedMorph(segments[-1],
-                  categories[backtrace.backpointer])]
-        for i in range(len(segments) - 1, 0, -1):
-            backtrace = grid[i + 1][backtrace.backpointer]
-            result.insert(0, CategorizedMorph(segments[i - 1],
-                categories[backtrace.backpointer]))
-        return result
-
-    def viterbi_tag_corpus(self):
-        """(Re)tags the corpus segmentations using viterbi_tag"""
-        num_changed_words = 0
-        for (i, word) in enumerate(self.segmentations):
-            self.segmentations[i] = WordAnalysis(word.count,
-                self.viterbi_tag(word.analysis))
-            if word != self.segmentations[i]:
-                num_changed_words += 1
-        return num_changed_words
 
     def viterbi_segment(self, segments):
         """Simultaneously segment and tag a word using the learned model.
@@ -1327,42 +521,98 @@ class CatmapModel(object):
             pos -= len(backtrace.backpointer[1])
         return result, best.cost
 
-    def viterbi_segment_corpus(self):
-        """(Re)segments the corpus using viterbi_segment"""
+    def viterbi_tag(self, segments):
+        """Tag a pre-segmented word using the learned model.
+
+        Arguments:
+            segments -- A list of morphs to tag.
+                        Raises KeyError if morph is not present in the
+                        training data.
+                        For segmenting and tagging new words,
+                        use viterbi_segment(compound).
+        """
+
+        # To make sure that internally impossible states are penalized
+        # even more than impossible states caused by zero parameters.
+        extrazero = LOGPROB_ZERO ** 2
+
+        # This function uses internally indices of categories,
+        # instead of names and the word boundary object,
+        # to remove the need to look them up constantly.
+        categories = get_categories(wb=True)
+        wb = categories.index(WORD_BOUNDARY)
+        forbidden = []
+        for (prev_cat, next_cat) in MorphUsageProperties.zero_transitions:
+            forbidden.append((categories.index(prev_cat),
+                              categories.index(next_cat)))
+
+        # Grid consisting of
+        # the lowest accumulated cost ending in each possible state.
+        # and back pointers that indicate the best path.
+        # Initialized to pseudo-zero for all states
+        grid = [[ViterbiNode(extrazero, None)] * len(categories)]
+        # Except probability one that first state is a word boundary
+        grid[0][wb] = ViterbiNode(0, None)
+
+        # Temporaries
+        # Cumulative costs for each category at current time step
+        cost = []
+        best = []
+
+        # Throw away old category information, if any
+        segments = self.detag_word(segments)
+        for (i, morph) in enumerate(segments):
+            for next_cat in range(len(categories)):
+                if next_cat == wb:
+                    # Impossible to visit boundary in the middle of the
+                    # sequence
+                    best.append(ViterbiNode(extrazero, None))
+                    continue
+                for prev_cat in range(len(categories)):
+                    if (prev_cat, next_cat) in forbidden:
+                        cost.append(extrazero)
+                        continue
+                    # Cost of selecting prev_cat as previous state
+                    # if now at next_cat
+                    cost.append(grid[i][prev_cat].cost +
+                                self._corpus_coding.transit_emit_cost(
+                                    categories[prev_cat],
+                                    categories[next_cat], morph))
+                best.append(ViterbiNode(*utils.minargmin(cost)))
+                cost = []
+            # Update grid to prepare for next iteration
+            grid.append(best)
+            best = []
+
+        # Last transition must be to word boundary
+        for prev_cat in range(len(categories)):
+            pair = (categories[prev_cat], WORD_BOUNDARY)
+            cost = (grid[-1][prev_cat].cost +
+                    self._corpus_coding.log_transitionprob(*pair))
+            best.append(cost)
+        backtrace = ViterbiNode(*utils.minargmin(best))
+
+        # Backtrace for the best category sequence
+        result = [CategorizedMorph(segments[-1],
+                  categories[backtrace.backpointer])]
+        for i in range(len(segments) - 1, 0, -1):
+            backtrace = grid[i + 1][backtrace.backpointer]
+            result.insert(0, CategorizedMorph(segments[i - 1],
+                categories[backtrace.backpointer]))
+        return result
+
+    def viterbi_tag_corpus(self):
+        """(Re)tags the corpus segmentations using viterbi_tag"""
         num_changed_words = 0
         for (i, word) in enumerate(self.segmentations):
             self.segmentations[i] = WordAnalysis(word.count,
-                self.viterbi_segment(word.analysis)[0])
+                self.viterbi_tag(word.analysis))
             if word != self.segmentations[i]:
                 num_changed_words += 1
-        self.reestimate_probabilities()
-        self._calculate_morph_backlinks()
         return num_changed_words
 
-    def viterbi_analyze_list(self, corpus):
-        """Convenience wrapper around viterbi_segment for a
-        list of word strings or segmentations with attached counts.
-        Segmented input can be with or without tags.
-        This function can be used to analyze previously unseen data.
-        """
-        for line in corpus:
-            if (isinstance(line, (WordAnalysis, tuple)) and
-                    len(line) == 2 and
-                    isinstance(line[0], int)):
-                count, word = line
-            else:
-                word = line
-                count = 1
-            if isinstance(word, basestring):
-                word = (word,)
-            yield WordAnalysis(count, self.viterbi_segment(word)[0])
-
-    def map_segmentations(self, func):
-        """Apply a mapping to the analysis part of segmentations.
-        Convenience function."""
-        for word in self.segmentations:
-            yield WordAnalysis(word.count, func(word.analysis))
-
+    ### Secondary public methods
+    #
     def get_cost(self):
         """Return current model encoding cost."""
         cost = self._corpus_coding.get_cost() + self._lexicon_coding.get_cost()
@@ -1372,73 +622,44 @@ class CatmapModel(object):
         assert cost >= 0
         return cost
 
-    def _update_annotation_choices(self):
-        """Update the selection of alternative analyses in annotations."""
-        if not self._supervised:
-            return
-        # Will need to check for proper expansion when introducing
-        # hierarchical morphs
+    def reestimate_probabilities(self):
+        """Re-estimates model parameters from a segmented, tagged corpus.
 
-        count_diff = collections.Counter()
-        # changes to unannotated corpus counts
-        changes_unannot = ChangeCounts()
-        # new annotated corpus counts
-        # (starting from zero, as the analysis in self.segmentations
-        # might no longer match the annotation due to performed operations
-        changes_annot = ChangeCounts()
-        for (i, annotation) in enumerate(self.annotations):
-            (_, alternatives) = annotation
+        theta(t) = arg min { L( theta, Y(t), D ) }
+        """
+        self._calculate_usage_features()
+        self._calculate_transition_counts()
+        self._calculate_emission_counts()
 
-            if not self._annotations_tagged:
-                alternatives = [self.viterbi_tag(alt) for alt in alternatives]
+    def map_segmentations(self, func):
+        """Apply a mapping to the analysis part of segmentations.
+        Convenience function."""
+        for word in self.segmentations:
+            yield WordAnalysis(word.count, func(word.analysis))
 
-            sorted_alts = self.best_analysis([AnalysisAlternative(alt, 0)
-                                              for alt in alternatives])
-            old_active = self.segmentations[i].analysis
-            new_active = sorted_alts[0].analysis
+    def weightlearn_probe(self):
+        """Partial training used in weight learning."""
+        self._single_epoch_iteration()
+        self.reestimate_probabilities()
+        self._iteration_update(no_increment=True)
 
-            if old_active is not None:
-                changes_unannot.update(old_active, -1, corpus_index=i)
-            changes_unannot.update(new_active, 1, corpus_index=i)
-            changes_annot.update(new_active, 1, corpus_index=i)
+    def get_learned_params(self):
+        """Returns a dict of learned and estimated parameters."""
+        params = {'corpusweight': self.get_corpus_coding_weight()}
+        if self._supervised:
+            params['annotationweight'] = self._annot_coding.weight
+        return params
 
-            # Active segmentation is changed before removal/adding of morphs
-            self.segmentations[i] = WordAnalysis(1, new_active)
-            # Only morphs in both new_active and old_active will get penalty,
-            # which will be cancelled out when adding new_active.
-            if old_active is not None:
-                for morph in self.detag_word(old_active):
-                    count_diff[morph] -= 1
-            new_detagged = self.detag_word(new_active)
-            for morph in new_detagged:
-                count_diff[morph] += 1
-
-        for (morph, count) in count_diff.items():
-            if count == 0:
-                continue
-            self._modify_morph_count(morph, count)
-        self._update_counts(changes_unannot, 1)
-        self._annot_coding.set_counts(changes_annot)
-        self._annot_coding.reset_contributions()
-
-    def add_annotations(self, annotations, annotatedcorpusweight=None):
-        """Adds data to the annotated corpus."""
-        self._supervised = True
-        self._annotations_tagged = True
-        for (word, alternatives) in annotations.items():
-            if alternatives[0][0].category == CategorizedMorph.no_category:
-                self._annotations_tagged = False
-            # The fist entries in self.segmentations are the currently active
-            # annotations, in the same order as in self.annotations
-            self.segmentations.insert(
-                len(self.annotations),
-                WordAnalysis(1, alternatives[0]))
-            self.annotations.append((word, alternatives))
-        self._calculate_morph_backlinks()
-        self._annot_coding = CatmapAnnotatedCorpusEncoding(
-                                self._corpus_coding,
-                                weight=annotatedcorpusweight)
-        self._annot_coding.boundaries = len(self.annotations)
+    def set_learned_params(self, params):
+        """Sets learned parameters to loaded values."""
+        if 'corpusweight' in params:
+            _logger.info('Setting corpus coding weight to {}'.format(
+                params['corpusweight']))
+            self.set_corpus_coding_weight(float(params['corpusweight']))
+        if self._supervised and 'annotationweight' in params:
+            _logger.info('Setting annotation weight to {}'.format(
+                params['annotationweight']))
+            self._annot_coding.weight = float(params['annotationweight'])
 
     def get_corpus_coding_weight(self):
         return self._corpus_coding.weight
@@ -1446,7 +667,7 @@ class CatmapModel(object):
     def set_corpus_coding_weight(self, weight):
         self._corpus_coding.weight = weight
 
-    def training_focus_filter(self):
+    def _training_focus_filter(self):
         """Yields segmentations.
         If no training filter is selected, the whole corpus is generated.
         Otherwise only segmentations in the focus sample are generated.
@@ -1458,14 +679,6 @@ class CatmapModel(object):
             ordered = sorted(self.training_focus)
             for i in ordered:
                 yield self.segmentations[i]
-
-    def set_focus_sample(self, set_index):
-        """Select one pregenerated focus sample set as active."""
-        if self.training_focus_sets is None:
-            self.training_focus = None
-            return
-        else:
-            self.training_focus = self.training_focus_sets[set_index]
 
     def generate_focus_samples(self, num_sets, num_samples):
         """Generates subsets of the corpus by weighted sampling."""
@@ -1480,6 +693,29 @@ class CatmapModel(object):
                     set(utils.weighted_sample(self.segmentations,
                                               num_samples)))
 
+    def set_focus_sample(self, set_index):
+        """Select one pregenerated focus sample set as active."""
+        if self.training_focus_sets is None:
+            self.training_focus = None
+            return
+        else:
+            self.training_focus = self.training_focus_sets[set_index]
+
+    def toggle_callbacks(self, callbacks=None):
+        """Callbacks are not saved in the pickled model, because pickle is
+        unable to restore instance methods. If you need callbacks in a loaded
+        model, you have to readd them after loading.
+        """
+        out = (self.operation_callbacks, self.epoch_callbacks)
+        if callbacks is None:
+            self.operation_callbacks = []
+            self.epoch_callbacks = []
+        else:
+            (self.operation_callbacks, self.epoch_callbacks) = callbacks
+        return out
+
+    ### Public diagnostic methods
+    #
     def best_analysis(self, choices):
         """Choose the best analysis of a set of choices.
 
@@ -1563,36 +799,816 @@ class CatmapModel(object):
             if seg_de not in alts_de:
                 yield (seg_de, alts_de)
 
-    def toggle_callbacks(self, callbacks=None):
-        """Callbacks are not saved in the pickled model, because pickle is
-        unable to restore instance methods. If you need callbacks in a loaded
-        model, you have to readd them after loading.
+    def viterbi_analyze_list(self, corpus):
+        """Convenience wrapper around viterbi_segment for a
+        list of word strings or segmentations with attached counts.
+        Segmented input can be with or without tags.
+        This function can be used to analyze previously unseen data.
         """
-        out = (self.operation_callbacks, self.epoch_callbacks)
-        if callbacks is None:
-            self.operation_callbacks = []
-            self.epoch_callbacks = []
+        for line in corpus:
+            if (isinstance(line, (WordAnalysis, tuple)) and
+                    len(line) == 2 and
+                    isinstance(line[0], int)):
+                count, word = line
+            else:
+                word = line
+                count = 1
+            if isinstance(word, basestring):
+                word = (word,)
+            yield WordAnalysis(count, self.viterbi_segment(word)[0])
+
+    ### Training operations
+    #
+    def _generic_bimorph_generator(self, result_func):
+        """The common parts of operation generators that operate on
+        context-sensitive bimorphs. Don't call this directly.
+
+        Arguments:
+            result_func -- A function that takes the prefix an suffix
+                           as arguments, and returns all the proposed results
+                           as tuples of CategorizedMorphs.
+        """
+
+        # FIXME random shuffle or sort by bigram frequency?
+        bigram_freqs = collections.Counter()
+        for (count, segments) in self._training_focus_filter():
+            segments = _wb_wrap(segments)
+            for quad in utils.ngrams(segments, n=4):
+                prev_morph, prefix, suffix, next_morph = quad
+                if (prefix.morph in self.forcesplit or
+                    suffix.morph in self.forcesplit):
+                    # don't propose to join morphs on forcesplit list
+                    continue
+                context_type = MorphUsageProperties.context_type(
+                    prev_morph.morph, next_morph.morph,
+                    prev_morph.category, next_morph.category)
+                bigram_freqs[(prefix, suffix, context_type)] += count
+
+        for (bigram, count) in bigram_freqs.most_common():
+            prefix, suffix, context_type = bigram
+            # Require both morphs, tags and context to match
+            rule = TransformationRule((prefix, suffix),
+                                      context_type=context_type)
+            temporaries = set()
+            transforms = []
+            changed_morphs = set((prefix.morph, suffix.morph))
+            results = result_func(prefix, suffix)
+            for result in results:
+                detagged = self.detag_word(result)
+                changed_morphs.update(detagged)
+                temporaries.update(self._morph_usage.estimate_contexts(
+                    (prefix.morph, suffix.morph), detagged))
+                transforms.append(Transformation(rule, result))
+            # targets will be a subset of the intersection of the
+            # occurences of both submorphs
+            targets = set(self.morph_backlinks[prefix.morph])
+            targets.intersection_update(self.morph_backlinks[suffix.morph])
+            if len(targets) > 0:
+                yield(transforms, targets, changed_morphs, temporaries)
+
+    def _op_split_generator(self):
+        """Generates splits of seen morphs into two submorphs.
+        Use with _transformation_epoch
+        """
+        # FIXME random shuffle or sort by length/frequency?
+        if self.training_focus is None:
+            unsorted = self._morph_usage.seen_morphs()
         else:
-            (self.operation_callbacks, self.epoch_callbacks) = callbacks
-        return out
+            unsorted = set()
+            for (count, segmentation) in self._training_focus_filter():
+                for morph in self.detag_word(segmentation):
+                    unsorted.add(morph)
+        epoch_morphs = sorted(unsorted, key=len)
+        for morph in epoch_morphs:
+            if len(morph) == 1:
+                continue
+            if self._morph_usage.count(morph) == 0:
+                continue
 
-    def get_learned_params(self):
-        """Returns a dict of learned and estimated parameters."""
-        params = {'corpusweight': self.get_corpus_coding_weight()}
+            # Match the parent morph with any category
+            rule = TransformationRule((CategorizedMorph(morph, None),))
+            transforms = []
+            changed_morphs = set((morph,))
+            # Apply to all words in which the morph occurs
+            targets = self.morph_backlinks[morph]
+            # Temporary estimated contexts
+            temporaries = set()
+            for splitloc in range(1, len(morph)):
+                if (self.nosplit_re and
+                        self.nosplit_re.match(
+                            morph[(splitloc - 1):(splitloc + 1)])):
+                    continue
+                prefix = morph[:splitloc]
+                suffix = morph[splitloc:]
+                changed_morphs.update((prefix, suffix))
+                # Make sure that there are context features available
+                # (real or estimated) for the submorphs
+                tmp = (self._morph_usage.estimate_contexts(morph,
+                                                           (prefix, suffix)))
+                temporaries.update(tmp)
+                transforms.append(
+                    Transformation(rule,
+                                   (CategorizedMorph(prefix, None),
+                                    CategorizedMorph(suffix, None))))
+            yield (transforms, targets, changed_morphs, temporaries)
+
+    def _op_join_generator(self):
+        """Generates joins of consecutive morphs into a supermorph.
+        Can make different join decisions in different contexts.
+        Use with _transformation_epoch
+        """
+
+        def join_helper(prefix, suffix):
+            joined = prefix.morph + suffix.morph
+            return ((CategorizedMorph(joined, None),),)
+
+        return self._generic_bimorph_generator(join_helper)
+
+    def _op_shift_generator(self):
+        """Generates operations that shift the split point in a bigram.
+        Use with _transformation_epoch
+        """
+
+        def shift_helper(prefix, suffix):
+            results = []
+            for i in range(1, self._max_shift + 1):
+                # Move backward
+                if len(prefix) - i >= self._min_shift_remainder:
+                    new_pre = prefix.morph[:-i]
+                    shifted = prefix.morph[-i:]
+                    new_suf = shifted + suffix.morph
+                    if (not self.nosplit_re or
+                            not self.nosplit_re.match(
+                                new_pre[-1] + new_suf[0])):
+                        results.append((CategorizedMorph(new_pre, None),
+                                        CategorizedMorph(new_suf, None)))
+                # Move forward
+                if len(suffix) - i >= self._min_shift_remainder:
+                    new_suf = suffix.morph[i:]
+                    shifted = suffix.morph[:i]
+                    new_pre = prefix.morph + shifted
+                    if (not self.nosplit_re or
+                            not self.nosplit_re.match(
+                                new_pre[-1] + new_suf[0])):
+                        results.append((CategorizedMorph(new_pre, None),
+                                        CategorizedMorph(new_suf, None)))
+            return results
+
+        return self._generic_bimorph_generator(shift_helper)
+
+    def _op_resegment_generator(self):
+        """Generates special transformations that resegment and tag
+        all words in the corpus using viterbi_segment.
+        Use with _transformation_epoch
+        """
+        if self.training_focus is None:
+            source = range(len(self.segmentations))
+        else:
+            source = self.training_focus
+        for i in source:
+            word = self.segmentations[i]
+            changed_morphs = set(self.detag_word(word.analysis))
+            vrt = ViterbiResegmentTransformation(word, self)
+            changed_morphs = set(self.detag_word(vrt.result))
+
+            yield ([vrt], set([i]), changed_morphs, set())
+
+    ### Private: reestimation
+    #
+    def _calculate_usage_features(self):
+        """Recalculates the morph usage features (perplexities).
+        """
+
+        self._lexicon_coding.clear()
+
+        self._morph_usage.calculate_usage_features(
+            lambda: self.detag_list(self.segmentations))
+
+        for morph in self._morph_usage.seen_morphs():
+            self._lexicon_coding.add(morph)
+
+    def _unigram_transition_probs(self):
+        """Initial transition probabilities based on unigram distribution.
+
+        Each tag is presumed to be succeeded by the expectation over all data
+        of the number of prefixes, suffixes, stems, non-morphemes and word
+        boundaries.
+        """
+
+        category_totals = self._morph_usage.category_token_count
+
+        transitions = collections.Counter()
+        nclass = {WORD_BOUNDARY: self.word_tokens}
+        for (i, category) in enumerate(get_categories()):
+            nclass[category] = float(category_totals[i])
+
+        num_tokens_tagged = 0.0
+        valid_transitions = MorphUsageProperties.valid_transitions()
+
+        for (cat1, cat2) in valid_transitions:
+            # count all possible valid transitions
+            num_tokens_tagged += nclass[cat2]
+            transitions[(cat1, cat2)] = nclass[cat2]
+
+        if num_tokens_tagged == 0:
+            _logger.warning('Tried to train without data')
+            return
+
+        for pair in MorphUsageProperties.zero_transitions:
+            transitions[pair] = 0.0
+
+        normalization = (sum(nclass.values()) / num_tokens_tagged)
+        for (prev_cat, next_cat) in transitions:
+            self._corpus_coding.update_transition_count(
+                prev_cat, next_cat,
+                transitions[(prev_cat, next_cat)] * normalization)
+
+    def _calculate_transition_counts(self):
+        """Count the number of transitions of each type.
+        Can be used to estimate transition probabilities from
+        a category-tagged segmented corpus.
+        """
+
+        self._corpus_coding.clear_transition_counts()
+        for rcount, segments in self.segmentations:
+            # Only the categories matter, not the morphs themselves
+            categories = [x.category for x in segments]
+            # Include word boundaries
+            categories.insert(0, WORD_BOUNDARY)
+            categories.append(WORD_BOUNDARY)
+            for (prev_cat, next_cat) in utils.ngrams(categories, 2):
+                pair = (prev_cat, next_cat)
+                if pair in MorphUsageProperties.zero_transitions:
+                    _logger.warning('Impossible transition ' +
+                                    '{!r} -> {!r}'.format(*pair))
+                self._corpus_coding.update_transition_count(prev_cat,
+                                                            next_cat,
+                                                            rcount)
+
+    def _calculate_emission_counts(self):
+        """Recalculates the emission counts from a retagged segmentation."""
+        self._corpus_coding.clear_emission_counts()
+        for (count, analysis) in self.segmentations:
+            for morph in analysis:
+                self._corpus_coding.update_emission_count(morph.category,
+                                                          morph.morph,
+                                                          count)
+
+    def _calculate_morph_backlinks(self):
+        """Recalculates the mapping from morphs to the indices of corpus
+        words in which the morphs occur."""
+        self.morph_backlinks.clear()
+        for (i, segmentation) in enumerate(self.segmentations):
+            for morph in self.detag_word(segmentation.analysis):
+                self.morph_backlinks[morph].add(i)
+
+    def _iteration_update(self, no_increment=False):
+        """Updates performed between training iterations.
+        Set the no_increment flag to suppress incrementing
+        the iteration number, which is needed when the update is
+        performed several times during one iteration e.g. in weight learning.
+        """
+
+        force_another = False
+
         if self._supervised:
-            params['annotationweight'] = self._annot_coding.weight
-        return params
+            old_cost = self.get_cost()
+            _logger.info('Updating annotation choices...')
+            self._update_annotation_choices()
+            new_cost = self.get_cost()
+            if old_cost != new_cost:
+                _logger.info('Updated annotation choices, changing cost from '
+                            '{} to {}'.format(old_cost, new_cost))
+                force_another = True
+            self._annot_coding.update_weight()
 
-    def set_learned_params(self, params):
-        """Sets learned parameters to loaded values."""
-        if 'corpusweight' in params:
-            _logger.info('Setting corpus coding weight to {}'.format(
-                params['corpusweight']))
-            self.set_corpus_coding_weight(float(params['corpusweight']))
-        if self._supervised and 'annotationweight' in params:
-            _logger.info('Setting annotation weight to {}'.format(
-                params['annotationweight']))
-            self._annot_coding.weight = float(params['annotationweight'])
+        self._operation_number = 0
+        if not no_increment:
+            self._iteration_number += 1
+        return force_another
+
+    def _update_annotation_choices(self):
+        """Update the selection of alternative analyses in annotations."""
+        if not self._supervised:
+            return
+        # Will need to check for proper expansion when introducing
+        # hierarchical morphs
+
+        count_diff = collections.Counter()
+        # changes to unannotated corpus counts
+        changes_unannot = ChangeCounts()
+        # new annotated corpus counts
+        # (starting from zero, as the analysis in self.segmentations
+        # might no longer match the annotation due to performed operations
+        changes_annot = ChangeCounts()
+        for (i, annotation) in enumerate(self.annotations):
+            (_, alternatives) = annotation
+
+            if not self._annotations_tagged:
+                alternatives = [self.viterbi_tag(alt) for alt in alternatives]
+
+            sorted_alts = self.best_analysis([AnalysisAlternative(alt, 0)
+                                              for alt in alternatives])
+            old_active = self.segmentations[i].analysis
+            new_active = sorted_alts[0].analysis
+
+            if old_active is not None:
+                changes_unannot.update(old_active, -1, corpus_index=i)
+            changes_unannot.update(new_active, 1, corpus_index=i)
+            changes_annot.update(new_active, 1, corpus_index=i)
+
+            # Active segmentation is changed before removal/adding of morphs
+            self.segmentations[i] = WordAnalysis(1, new_active)
+            # Only morphs in both new_active and old_active will get penalty,
+            # which will be cancelled out when adding new_active.
+            if old_active is not None:
+                for morph in self.detag_word(old_active):
+                    count_diff[morph] -= 1
+            new_detagged = self.detag_word(new_active)
+            for morph in new_detagged:
+                count_diff[morph] += 1
+
+        for (morph, count) in count_diff.items():
+            if count == 0:
+                continue
+            self._modify_morph_count(morph, count)
+        self._update_counts(changes_unannot, 1)
+        self._annot_coding.set_counts(changes_annot)
+        self._annot_coding.reset_contributions()
+
+    ### Private: model state updaters
+    #
+    def _modify_morph_count(self, morph, diff_count):
+        """Modifies the count of a morph in the lexicon.
+        Does not affect transitions or emissions."""
+        old_count = self._morph_usage.count(morph)
+        new_count = old_count + diff_count
+        self._morph_usage.set_count(morph, new_count)
+        self._corpus_coding.clear_emission_cache()
+        if old_count == 0 and new_count > 0:
+            self._lexicon_coding.add(morph)
+        elif old_count > 0 and new_count == 0:
+            self._lexicon_coding.remove(morph)
+
+    def _update_counts(self, change_counts, multiplier):
+        """Updates the model counts according to the pre-calculated
+        ChangeCounts object (e.g. calculated in Transformation).
+
+        Arguments:
+            change_counts -- A ChangeCounts object
+            multiplier -- +1 to apply the change, -1 to revert it.
+        """
+        for cmorph in change_counts.emissions:
+            self._corpus_coding.update_emission_count(
+                cmorph.category,
+                cmorph.morph,
+                change_counts.emissions[cmorph] * multiplier)
+
+        for (prev_cat, next_cat) in change_counts.transitions:
+            self._corpus_coding.update_transition_count(
+                prev_cat, next_cat,
+                change_counts.transitions[(prev_cat, next_cat)] * multiplier)
+
+        if multiplier > 0:
+            bl_rm = change_counts.backlinks_remove
+            bl_add = change_counts.backlinks_add
+        else:
+            bl_rm = change_counts.backlinks_add
+            bl_add = change_counts.backlinks_remove
+
+        for morph in bl_rm:
+            self.morph_backlinks[morph].difference_update(
+                change_counts.backlinks_remove[morph])
+        for morph in bl_add:
+            self.morph_backlinks[morph].update(
+                change_counts.backlinks_add[morph])
+
+    ### Private: iteration structure
+    #
+    def _convergence_of_cost(self, train_func, update_func,
+                            min_cost_gain=0.005,
+                            max_iterations=5):
+        """Iterates the specified training function until the model cost
+        no longer improves enough or until maximum number of iterations
+        is reached.
+
+        On each iteration train_func is called without arguments.
+        The data used to train the model must therefore be completely
+        contained in the model itself. This can e.g. mean iterating over
+        the morphs already stored in the lexicon.
+
+        Arguments:
+            train_func -- A method of CatmapModel which causes some part of
+                          the model to be trained.
+            update_func -- Updates to the model between iterations,
+                           that should not be considered in the convergence
+                           analysis. However, if the return value is
+                           True, at least one more iteration is forced unless
+                           the maximum limit has been reached.
+            min_cost_gain -- Stop iterating if cost reduction between
+                             iterations is below this limit * #boundaries.
+                             Default 0.005.
+            max_iterations -- Maximum number of iterations (epochs). Default 5.
+        """
+
+        previous_cost = self.get_cost()
+        for iteration in range(max_iterations):
+            cost = self.get_cost()
+            msg = ('{:9s} {:2d}/{:<2d}          Cost: {:' +
+                   self._cost_field_fmt(cost) + 'f}.')
+            _logger.info(msg.format('epoch',
+                                    iteration + 1, max_iterations,
+                                    cost))
+
+            # perform the optimization
+            train_func()
+
+            # perform update between optimization iterations
+            if update_func is not None:
+                _logger.info('{:24s} Cost: {}'.format(
+                    'Before epoch update.', cost))
+
+            # perform update between optimization iterations
+            if update_func is not None:
+                force_another = update_func()
+            else:
+                force_another = False
+
+            for callback in self.epoch_callbacks:
+                callback(self, iteration)
+
+            cost = self.get_cost()
+            cost_diff = cost - previous_cost
+            limit = self._cost_convergence_limit(min_cost_gain)
+            converged = (not force_another) and -cost_diff <= limit
+            self._display_cost(cost_diff, limit, 'epoch',
+                           iteration, max_iterations, converged)
+            if converged:
+                _logger.info('{:24s} Cost: {}'.format(
+                    'final epoch.', cost))
+                return
+            previous_cost = cost
+
+    def _convergence_of_analysis(self, train_func, resegment_func,
+                                min_difference_proportion=0,
+                                min_cost_gain=0, max_iterations=15):
+        """Iterates the specified training function until the segmentations
+        produced by the model no longer changes more than
+        the specified threshold, until the model cost no longer improves
+        enough or until maximum number of iterations is reached.
+
+        On each iteration the current optimal analysis for the corpus is
+        produced by calling resegment_func.
+        This corresponds to:
+
+        Y(t) = arg min { L( theta(t-1), Y, D ) }
+
+        Then the train_func function is called, which corresponds to:
+
+        theta(t) = arg min { L( theta, Y(t), D ) }
+
+        Neither train_func nor resegment_func may require any arguments.
+
+        Arguments:
+            train_func -- A method of CatmapModel which causes some aspect
+                          of the model to be trained.
+            resegment_func -- A method of CatmapModel that resegments or
+                              retags the segmentations, to produce the
+                              results to compare. Should return the number
+                              of changed words.
+            min_difference_proportion -- Maximum proportion of words with
+                                         changed segmentation or category
+                                         tags in the final iteration.
+                                         Default 0.
+            min_cost_gain -- Stop iterating if cost reduction between
+                                   iterations is below this limit.
+            max_iterations -- Maximum number of iterations. Default 15.
+        """
+
+        previous_cost = self.get_cost()
+        for iteration in range(max_iterations):
+            _logger.info(
+                'Iteration {:2d} ({}). {:2d}/{:<2d}'.format(
+                    self._iteration_number, train_func.__name__,
+                    iteration + 1, max_iterations))
+
+            # perform the optimization
+            train_func()
+
+            cost = self.get_cost()
+            cost_diff = cost - previous_cost
+            cost_limit = min_cost_gain * self._corpus_coding.boundaries
+            if -cost_diff <= cost_limit:
+                msg = ('Cost difference {:' +
+                            self._cost_field_fmt(cost_diff) + 'f} ' +
+                       '(limit {}) ' +
+                       'in iteration {:2d}    (Converged).')
+                _logger.info(msg.format(cost_diff, cost_limit, iteration + 1))
+                break
+
+            # perform the reanalysis
+            differences = resegment_func()
+
+            limit = min_difference_proportion * len(self.segmentations)
+            # the length of the slot needed to display
+            # the number of segmentations
+            field_width = str(len(str(len(self.segmentations))))
+            if differences <= limit:
+                msg = ('Segmentation differences: {:' + field_width + 'd} ' +
+                       '(limit {:' + field_width + 'd}). ' +
+                       'in iteration {:2d}    (Converged).')
+                _logger.info(msg.format(differences, int(math.floor(limit)),
+                                        iteration + 1))
+                break
+            msg = ('Segmentation differences: {:' + field_width + 'd} ' +
+                   '(limit {:' + field_width + 'd}). Cost difference: {}')
+            _logger.info(msg.format(differences, int(math.floor(limit)),
+                                    cost_diff))
+            previous_cost = cost
+
+    def _train_iteration(self):
+        """One iteration of training, which may contain several epochs
+        of each operation in sequence.
+
+        The model must have been initialized, either by loading a baseline
+        segmentation or a pretrained catmap model from pickle or tagged
+        segmentation file, and calling initialize_baseline and/or
+        initialize_hmm
+        """
+        cost = self.get_cost()
+        msg = ('{:9s} {:2d}/{:<2d}          Cost: {:' +
+                self._cost_field_fmt(cost) + 'f}.')
+        _logger.info(msg.format('iteration',
+                                self._iteration_number,
+                                self._max_iterations,
+                                cost))
+        self._changed_segmentations = set()  # FIXME: use for convergence
+        while self._operation_number < len(self.training_operations):
+            operation = self._resolve_operation(self._operation_number)
+            min_epoch_cost_gain = self._training_params('min_epoch_cost_gain')
+            max_epochs = self._training_params('max_epochs')
+            if self._training_params('must_reestimate'):
+                update_func = self.reestimate_probabilities
+            else:
+                update_func = None
+
+            msg = 'Iteration {:2d}, operation {:2d} ({}), max {:2d} epoch(s).'
+            _logger.info(msg.format(
+                    self._iteration_number, self._operation_number,
+                    self.training_operations[self._operation_number],
+                    max_epochs))
+            utils.memlog('see above')
+            self._convergence_of_cost(
+                lambda: self._transformation_epoch(operation()),
+                update_func=update_func,
+                min_cost_gain=min_epoch_cost_gain,
+                max_iterations=max_epochs)
+            self.reestimate_probabilities()
+            self._operation_number += 1
+            for callback in self.operation_callbacks:
+                callback(self)
+
+    def _single_epoch_iteration(self):
+        """One iteration of training, with exactly one epoch of each
+        operation and no convergence checks or update passes."""
+        for i in range(len(self.training_operations)):
+            operation = self._resolve_operation(i)
+            self._transformation_epoch(operation())
+
+    def _transformation_epoch(self, transformation_generator):
+        """Performs each experiment yielded by the transform generator,
+        in sequence, always choosing the alternative that minimizes the
+        model cost, or making no change if all choices would increase the
+        cost.
+
+        An experiment is a set of transformations sharing a common matching
+        rule. The individual transformations in the set are considered to
+        be mutually exclusive, only one of them can be chosen.
+
+        Can be used to split, join or otherwise re-segment.
+        Can even be abused to alter the corpus: it is up to the caller to
+        ensure that the rules and results detokenize to the same string.
+
+        Arguments:
+            transformation_generator -- a generator yielding
+                (transform_group, targets, temporaries)
+                tuples, where
+                    transform_group -- a list of Transform objects.
+                    targets -- a set with an initial guess of indices of
+                               matching words in the corpus. Can contain false
+                               positives, but should not omit positive
+                               indices (they will be missed).
+                    temporaries -- a set of new morphs with estimated
+                                   contexts.
+        """
+
+        EpochNode = collections.namedtuple('EpochNode', ['cost',
+                                                         'transform',
+                                                         'targets'])
+        self._changed_segmentations_op = set()
+        if not self._online:
+            transformation_generator = utils._generator_progress(
+                transformation_generator)
+        for experiment in transformation_generator:
+            (transform_group, targets,
+             changed_morphs, temporaries) = experiment
+            if len(transform_group) == 0:
+                continue
+            # Cost of doing nothing
+            best = EpochNode(self.get_cost(), None, set())
+
+            # All transforms in group must match the same words,
+            # we can use just the first transform
+            matched_targets, num_matches = self._find_in_corpus(
+                transform_group[0].rule, targets)
+            if num_matches == 0:
+                continue
+
+            detagged = self.detag_word(transform_group[0].rule)
+            if self._supervised:
+                # Old contribution to annotation cost needs to be
+                # removed before the probability changes
+                # (when using ML-estimate, this needs to be done for
+                # corpus cost also)
+                for morph in changed_morphs:
+                    self._annot_coding.modify_contribution(morph, -1)
+            for morph in detagged:
+                # Remove the old representation, but only from
+                # morph counts (emissions and transitions updated later)
+                self._modify_morph_count(morph, -num_matches)
+
+            for transform in transform_group:
+                detagged = self.detag_word(transform.result)
+                for morph in detagged:
+                    # Add the new representation to morph counts
+                    self._modify_morph_count(morph, num_matches)
+                for target in matched_targets:
+                    old_analysis = self.segmentations[target]
+                    new_analysis = transform.apply(old_analysis, self)
+
+                # Apply change to encoding
+                self._update_counts(transform.change_counts, 1)
+                # Observe that annotation counts are not updated,
+                # even if the transform targets an annotation,
+                # because that would defeat the purpose of annotations
+                if self._supervised:
+                    # contribution to annotation cost needs to be readded
+                    # after the emission probability has been updated
+                    # (ordering with _update_counts relevant for ML-estimate)
+                    for morph in changed_morphs:
+                        self._annot_coding.modify_contribution(morph, 1)
+                cost = self.get_cost()
+                if cost < best.cost:
+                    best = EpochNode(cost, transform, matched_targets)
+                # Revert change to encoding
+                if self._supervised:
+                    for morph in changed_morphs:
+                        self._annot_coding.modify_contribution(morph, -1)
+                self._update_counts(transform.change_counts, -1)
+                for morph in self.detag_word(transform.result):
+                    self._modify_morph_count(morph, -num_matches)
+
+            if best.transform is None:
+                # Best option was to do nothing. Revert morph count.
+                for morph in self.detag_word(transform_group[0].rule):
+                    self._modify_morph_count(morph, num_matches)
+            else:
+                # A real change was the best option
+                best.transform.reset_counts()
+                for target in best.targets:
+                    for morph in self.detag_word(best.transform.result):
+                        # Add the new representation to morph counts
+                        self._modify_morph_count(morph, num_matches)
+                    new_analysis = best.transform.apply(
+                        self.segmentations[target],
+                        self, corpus_index=target)
+                    self.segmentations[target] = new_analysis
+                    # any morph used in the best segmentation
+                    # is no longer temporary
+                    temporaries.difference_update(
+                        self.detag_word(new_analysis.analysis))
+                self._update_counts(best.transform.change_counts, 1)
+                self._changed_segmentations.update(best.targets)
+                self._changed_segmentations_op.update(best.targets)
+
+            if self._supervised:
+                for morph in changed_morphs:
+                    self._annot_coding.modify_contribution(morph, 1)
+
+            self._morph_usage.remove_temporaries(temporaries)
+
+    ### Private: secondary
+    #
+    def _test_skip(self, word):
+        """Return true if word instance should be skipped."""
+        if not self._online:
+            return False
+        if word in self._skipcounter:
+            t = self._skipcounter[word]
+            if random.random() > 1.0 / max(1, t):
+                return True
+        self._skipcounter[word] += 1
+        return False
+
+    def _resolve_operation(self, op_number):
+        """Returns an object method corresponding to the given
+        operation number."""
+        operation_name = '_op_{}_generator'.format(
+            self.training_operations[op_number])
+        try:
+            operation = self.__getattribute__(operation_name)
+        except AttributeError:
+            raise InvalidOperationError(
+                self.training_operations[op_number],
+                operation_name)
+        return operation
+
+    def _display_cost(self, cost_diff, limit, iteration_name,
+                      iteration, max_iterations, converged):
+        msg = ('Cost difference {:' +
+                    self._cost_field_fmt(cost_diff) + 'f} ' +
+                '(limit {}) ' +
+                'in {:9s} {:2d}/{:<2d} {}')
+        if converged:
+            conv = '(Converged)'
+        else:
+            conv = ''
+        _logger.info(msg.format(cost_diff, limit,
+                                iteration_name, iteration + 1,
+                                max_iterations, conv))
+
+    def _cost_convergence_limit(self, min_cost_gain=0.005):
+        return min_cost_gain * self._corpus_coding.boundaries
+
+    def _training_params(self, param_name):
+        """Parameters for the training operators
+        (calls to _convergence_of_cost).
+        Can depend on the _iteration_number and _operation_number.
+        Customize this if you need more finegrained control of the training.
+        """
+
+        if param_name == 'min_epoch_cost_gain':
+            return self._min_epoch_cost_gain
+        if param_name == 'min_iter_cost_gain':
+            return self._min_iter_cost_gain
+        if param_name == 'max_epochs':
+            if (self.training_operations[self._operation_number] ==
+                'resegment'):
+                return self._max_resegment_epochs
+            if self._iteration_number == 1:
+                # Perform more epochs in the first iteration.
+                # 0 is pre-iteration, 1 is the first actual iteration.
+                return self._max_epochs_first
+            # After that do just one of each operation.
+            return self._max_epochs
+        # FIXME This is a bit of ugliness I hope to get rid of
+        if param_name == 'must_reestimate':
+            return (self.training_operations[self._operation_number] ==
+                    'resegment')
+
+    def _is_annotation(self, target):
+        """Returns True if the targetted corpus index is part of the
+        annotated corpus."""
+        return (self._supervised and target < len(self.annotations))
+
+    def _find_in_corpus(self, rule, targets=None):
+        """Returns the indices of words in the corpus segmentation
+        matching the given rule, and the total number of matches, which
+        can be larger than the sum of counts of matched_targets, if there
+        are several matches in some word(s).
+
+        Arguments:
+            rule -- A TransformationRule describing the criteria for a match.
+            targets -- A set of indices to limit the search to, or None to
+                       search all segmentations. Default: full search.
+        """
+
+        if targets is None:
+            targets = range(len(self.segmentations))
+
+        matched_targets = set()
+        num_matches = 0
+        for target in targets:
+            old_analysis = self.segmentations[target]
+            tmp_matches = (old_analysis.count *
+                            rule.num_matches(
+                                old_analysis.analysis))
+            if tmp_matches > 0:
+                matched_targets.add(target)
+                num_matches += tmp_matches
+        return matched_targets, num_matches
+
+    def _viterbi_segment_corpus(self):
+        """(Re)segments the corpus using viterbi_segment"""
+        num_changed_words = 0
+        for (i, word) in enumerate(self.segmentations):
+            self.segmentations[i] = WordAnalysis(word.count,
+                self.viterbi_segment(word.analysis)[0])
+            if word != self.segmentations[i]:
+                num_changed_words += 1
+        self.reestimate_probabilities()
+        self._calculate_morph_backlinks()
+        return num_changed_words
 
     def _cost_field_fmt(self, cost):
         current = len(str(int(cost))) + self._cost_field_precision + 1
@@ -1610,242 +1626,24 @@ class CatmapModel(object):
         return get_categories(wb)
 
     @staticmethod
-    def _detag_morph(morph):
+    def detag_morph(morph):
         if isinstance(morph, CategorizedMorph):
             return morph.morph
         return morph
 
     @staticmethod
     def detag_word(segments):
-        return [CatmapModel._detag_morph(x) for x in segments]
+        return [CatmapModel.detag_morph(x) for x in segments]
 
     @staticmethod
     def detag_list(segmentations):
         """Removes category tags from a segmented corpus."""
         for rcount, segments in segmentations:
-            yield ((rcount, [CatmapModel._detag_morph(x) for x in segments]))
+            yield ((rcount, [CatmapModel.detag_morph(x) for x in segments]))
 
     @property
     def word_tokens(self):
         return self._corpus_coding.boundaries
-
-
-class ChangeCounts(object):
-    """A data structure for the aggregated set of changes to
-    emission and transition counts and morph backlinks.
-    Used to reduce the number of model updates and to make
-    reverting changes easier.
-    """
-
-    __slots__ = ['emissions', 'transitions',
-                 'backlinks_remove', 'backlinks_add']
-
-    def __init__(self, emissions=None, transitions=None):
-        if emissions is None:
-            self.emissions = collections.Counter()
-        else:
-            self.emissions = emissions
-        if transitions is None:
-            self.transitions = collections.Counter()
-        else:
-            self.transitions = transitions
-        self.backlinks_remove = collections.defaultdict(set)
-        self.backlinks_add = collections.defaultdict(set)
-
-    def update(self, analysis, count, corpus_index=None):
-        """Updates the counts to add or remove the effects of an analysis.
-
-        Arguments:
-            analysis -- A tuple of CategorizedMorphs.
-            count -- The occurence count of the analyzed word.
-                     A negative count removes the effects of the analysis.
-            corpus_index -- If not None, the mapping between the morphs
-                            and the indices of words in the corpus that they
-                            occur in will be updated. corpus_index is then
-                            the index of the current occurence being updated.
-        """
-
-        for cmorph in analysis:
-            self.emissions[cmorph] += count
-            if corpus_index is not None:
-                if count < 0:
-                    self.backlinks_remove[cmorph.morph].add(corpus_index)
-                elif count > 0:
-                    self.backlinks_add[cmorph.morph].add(corpus_index)
-        wb_extended = _wb_wrap(analysis)
-        for (prefix, suffix) in utils.ngrams(wb_extended, n=2):
-            self.transitions[(prefix.category, suffix.category)] += count
-        # Make sure that backlinks_remove and backlinks_add are disjoint
-        # Removal followed by readding is the same as just adding
-        for morph in self.backlinks_add:
-            self.backlinks_remove[morph].difference_update(
-                self.backlinks_add[morph])
-
-
-class Transformation(object):
-    """A transformation of a certain pattern of morphs and/or categories,
-    to be (partially) replaced by another representation.
-    """
-    __slots__ = ['rule', 'result', 'change_counts']
-
-    def __init__(self, rule, result):
-        self.rule = rule
-        if isinstance(result, CategorizedMorph):
-            self.result = (result,)
-        else:
-            self.result = result
-        self.change_counts = ChangeCounts()
-
-    def __repr__(self):
-        return '{}({}, {})'.format(self.__class__.__name__,
-                                   self.rule, self.result)
-
-    def apply(self, word, model, corpus_index=None):
-        """Tries to apply this transformation to an analysis.
-        If the transformation doesn't match, the input is returned unchanged.
-        If the transformation matches, changes are made greedily from the
-        beginning of the analysis, until the whole sequence has been
-        processed. After this the segmentation is retagged using viterbi
-        tagging with the given model.
-
-        Arguments:
-            word -- A WordAnalysis object.
-            model -- The current model to use for tagging.
-            corpus_index -- Index of the word in the corpus, or None if
-                            the change is temporary and morph to word
-                            backlinks don't need to be updated.
-        """
-        i = 0
-        out = []
-        matches = 0
-        while i + len(self.rule) <= len(word.analysis):
-            if self.rule.match_at(word.analysis, i):
-                out.extend(self.result)
-                i += len(self.rule)
-                matches += 1
-            else:
-                out.append(word.analysis[i])
-                i += 1
-        while i < len(word.analysis):
-            out.append(word.analysis[i])
-            i += 1
-
-        if matches > 0:
-            # Only retag if the rule matched something
-            out = model.viterbi_tag(out)
-
-            self.change_counts.update(word.analysis, -word.count,
-                                      corpus_index)
-            self.change_counts.update(out, word.count, corpus_index)
-
-        return WordAnalysis(word.count, out)
-
-    def reset_counts(self):
-        self.change_counts = ChangeCounts()
-
-
-class ViterbiResegmentTransformation(object):
-    """Special transformation that resegments and tags
-    words in the corpus using viterbi_segment.
-    """
-
-    def __init__(self, word, model):
-        self.rule = TransformationRule(tuple(word.analysis))
-        self.result, _ = model.viterbi_segment(word.analysis)
-        self.change_counts = ChangeCounts()
-
-    def __repr__(self):
-        return '{}({}, {})'.format(self.__class__.__name__,
-                                   self.rule, self.result)
-
-    def apply(self, word, model, corpus_index=None):
-        """Apply the new segmentation ot the counts.
-        Note that the segmentation was performed already at __init__,
-        which means that the morph count changes between the beginning
-        of the _transformation_epoch loop
-        and the call to apply do not affect the segmentation.
-        """
-        if self.rule.num_matches(word.analysis) == 0:
-            return word
-        self.change_counts.update(word.analysis, -word.count,
-                                    corpus_index)
-        self.change_counts.update(self.result, word.count, corpus_index)
-        return WordAnalysis(word.count, self.result)
-
-    def reset_counts(self):
-        self.change_counts = ChangeCounts()
-
-
-class TransformationRule(object):
-    """A simple transformation rule that requires a pattern of category
-    and/or morph matches. Don't care -values are marked by None.
-    This simple rule does not account for context outside the part to
-    be replaced.
-    """
-
-    def __init__(self, categorized_morphs, context_type=None):
-        if isinstance(categorized_morphs, CategorizedMorph):
-            categorized_morphs = (categorized_morphs,)
-        self._rule = categorized_morphs
-        self._context_type = context_type
-
-    def __len__(self):
-        return len(self._rule)
-
-    def __iter__(self):
-        return iter(self._rule)
-
-    def __repr__(self):
-        return '{}({})'.format(self.__class__.__name__, self._rule)
-
-    def match_at(self, analysis, i):
-        """Returns true if this rule matches the analysis
-        at the given index."""
-        # Compare morphs and categories specified in rule
-        for (j, cmorph) in enumerate(analysis[i:(i + len(self))]):
-            if self._rule[j].category != CategorizedMorph.no_category:
-                # Rule requires category at this point to match
-                if self._rule[j].category != cmorph.category:
-                    return False
-            if self._rule[j].morph is not None:
-                # Rule requires morph at this point to match
-                if self._rule[j].morph != cmorph.morph:
-                    return False
-        # Compare context type
-        if self._context_type is not None:
-            if i <= 0:
-                prev_morph = WORD_BOUNDARY
-                prev_category = WORD_BOUNDARY
-            else:
-                prev_morph = analysis[i - 1].morph
-                prev_category = analysis[i - 1].category
-            if (i + len(self)) >= len(analysis):
-                next_morph = WORD_BOUNDARY
-                next_category = WORD_BOUNDARY
-            else:
-                next_morph = analysis[i + len(self)].morph
-                next_category = analysis[i + len(self)].category
-            context_type = MorphUsageProperties.context_type(
-                                prev_morph, next_morph,
-                                prev_category, next_category)
-            if self._context_type != context_type:
-                return False
-
-        # No comparison failed
-        return True
-
-    def num_matches(self, analysis):
-        """Total number of matches of this rule in the analysis.
-        Greedy application of the rule is used."""
-        i = 0
-        matches = 0
-        while i + len(self) <= len(analysis):
-            if self.match_at(analysis, i):
-                i += len(self)
-                matches += 1
-            else:
-                i += 1
-        return matches
 
 
 class CatmapLexiconEncoding(baseline.LexiconEncoding):
@@ -2453,22 +2251,222 @@ class CorpusWeightUpdater(object):
         return (accept, weight_next, f_mean, direction)
 
 
-def _log_catprobs(probs):
-    """Convenience function to convert a ByCategory object containing actual
-    probabilities into one with log probabilities"""
-
-    return ByCategory(*[zlog(x) for x in probs])
-
-
-def _wb_wrap(segments, end_only=False):
-    """Add a word boundary CategorizedMorph at one or both ends of
-    the segmentation.
+class ChangeCounts(object):
+    """A data structure for the aggregated set of changes to
+    emission and transition counts and morph backlinks.
+    Used to reduce the number of model updates and to make
+    reverting changes easier.
     """
-    wb = CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)
-    if end_only:
-        return list(segments) + [wb]
-    else:
-        return [wb] + segments + [wb]
+
+    __slots__ = ['emissions', 'transitions',
+                 'backlinks_remove', 'backlinks_add']
+
+    def __init__(self, emissions=None, transitions=None):
+        if emissions is None:
+            self.emissions = collections.Counter()
+        else:
+            self.emissions = emissions
+        if transitions is None:
+            self.transitions = collections.Counter()
+        else:
+            self.transitions = transitions
+        self.backlinks_remove = collections.defaultdict(set)
+        self.backlinks_add = collections.defaultdict(set)
+
+    def update(self, analysis, count, corpus_index=None):
+        """Updates the counts to add or remove the effects of an analysis.
+
+        Arguments:
+            analysis -- A tuple of CategorizedMorphs.
+            count -- The occurence count of the analyzed word.
+                     A negative count removes the effects of the analysis.
+            corpus_index -- If not None, the mapping between the morphs
+                            and the indices of words in the corpus that they
+                            occur in will be updated. corpus_index is then
+                            the index of the current occurence being updated.
+        """
+
+        for cmorph in analysis:
+            self.emissions[cmorph] += count
+            if corpus_index is not None:
+                if count < 0:
+                    self.backlinks_remove[cmorph.morph].add(corpus_index)
+                elif count > 0:
+                    self.backlinks_add[cmorph.morph].add(corpus_index)
+        wb_extended = _wb_wrap(analysis)
+        for (prefix, suffix) in utils.ngrams(wb_extended, n=2):
+            self.transitions[(prefix.category, suffix.category)] += count
+        # Make sure that backlinks_remove and backlinks_add are disjoint
+        # Removal followed by readding is the same as just adding
+        for morph in self.backlinks_add:
+            self.backlinks_remove[morph].difference_update(
+                self.backlinks_add[morph])
+
+
+class TransformationRule(object):
+    """A simple transformation rule that requires a pattern of category
+    and/or morph matches. Don't care -values are marked by None.
+    This simple rule does not account for context outside the part to
+    be replaced.
+    """
+
+    def __init__(self, categorized_morphs, context_type=None):
+        if isinstance(categorized_morphs, CategorizedMorph):
+            categorized_morphs = (categorized_morphs,)
+        self._rule = categorized_morphs
+        self._context_type = context_type
+
+    def __len__(self):
+        return len(self._rule)
+
+    def __iter__(self):
+        return iter(self._rule)
+
+    def __repr__(self):
+        return '{}({})'.format(self.__class__.__name__, self._rule)
+
+    def match_at(self, analysis, i):
+        """Returns true if this rule matches the analysis
+        at the given index."""
+        # Compare morphs and categories specified in rule
+        for (j, cmorph) in enumerate(analysis[i:(i + len(self))]):
+            if self._rule[j].category != CategorizedMorph.no_category:
+                # Rule requires category at this point to match
+                if self._rule[j].category != cmorph.category:
+                    return False
+            if self._rule[j].morph is not None:
+                # Rule requires morph at this point to match
+                if self._rule[j].morph != cmorph.morph:
+                    return False
+        # Compare context type
+        if self._context_type is not None:
+            if i <= 0:
+                prev_morph = WORD_BOUNDARY
+                prev_category = WORD_BOUNDARY
+            else:
+                prev_morph = analysis[i - 1].morph
+                prev_category = analysis[i - 1].category
+            if (i + len(self)) >= len(analysis):
+                next_morph = WORD_BOUNDARY
+                next_category = WORD_BOUNDARY
+            else:
+                next_morph = analysis[i + len(self)].morph
+                next_category = analysis[i + len(self)].category
+            context_type = MorphUsageProperties.context_type(
+                                prev_morph, next_morph,
+                                prev_category, next_category)
+            if self._context_type != context_type:
+                return False
+
+        # No comparison failed
+        return True
+
+    def num_matches(self, analysis):
+        """Total number of matches of this rule in the analysis.
+        Greedy application of the rule is used."""
+        i = 0
+        matches = 0
+        while i + len(self) <= len(analysis):
+            if self.match_at(analysis, i):
+                i += len(self)
+                matches += 1
+            else:
+                i += 1
+        return matches
+
+
+class Transformation(object):
+    """A transformation of a certain pattern of morphs and/or categories,
+    to be (partially) replaced by another representation.
+    """
+    __slots__ = ['rule', 'result', 'change_counts']
+
+    def __init__(self, rule, result):
+        self.rule = rule
+        if isinstance(result, CategorizedMorph):
+            self.result = (result,)
+        else:
+            self.result = result
+        self.change_counts = ChangeCounts()
+
+    def __repr__(self):
+        return '{}({}, {})'.format(self.__class__.__name__,
+                                   self.rule, self.result)
+
+    def apply(self, word, model, corpus_index=None):
+        """Tries to apply this transformation to an analysis.
+        If the transformation doesn't match, the input is returned unchanged.
+        If the transformation matches, changes are made greedily from the
+        beginning of the analysis, until the whole sequence has been
+        processed. After this the segmentation is retagged using viterbi
+        tagging with the given model.
+
+        Arguments:
+            word -- A WordAnalysis object.
+            model -- The current model to use for tagging.
+            corpus_index -- Index of the word in the corpus, or None if
+                            the change is temporary and morph to word
+                            backlinks don't need to be updated.
+        """
+        i = 0
+        out = []
+        matches = 0
+        while i + len(self.rule) <= len(word.analysis):
+            if self.rule.match_at(word.analysis, i):
+                out.extend(self.result)
+                i += len(self.rule)
+                matches += 1
+            else:
+                out.append(word.analysis[i])
+                i += 1
+        while i < len(word.analysis):
+            out.append(word.analysis[i])
+            i += 1
+
+        if matches > 0:
+            # Only retag if the rule matched something
+            out = model.viterbi_tag(out)
+
+            self.change_counts.update(word.analysis, -word.count,
+                                      corpus_index)
+            self.change_counts.update(out, word.count, corpus_index)
+
+        return WordAnalysis(word.count, out)
+
+    def reset_counts(self):
+        self.change_counts = ChangeCounts()
+
+
+class ViterbiResegmentTransformation(object):
+    """Special transformation that resegments and tags
+    words in the corpus using viterbi_segment.
+    """
+
+    def __init__(self, word, model):
+        self.rule = TransformationRule(tuple(word.analysis))
+        self.result, _ = model.viterbi_segment(word.analysis)
+        self.change_counts = ChangeCounts()
+
+    def __repr__(self):
+        return '{}({}, {})'.format(self.__class__.__name__,
+                                   self.rule, self.result)
+
+    def apply(self, word, model, corpus_index=None):
+        """Apply the new segmentation ot the counts.
+        Note that the segmentation was performed already at __init__,
+        which means that the morph count changes between the beginning
+        of the _transformation_epoch loop
+        and the call to apply do not affect the segmentation.
+        """
+        if self.rule.num_matches(word.analysis) == 0:
+            return word
+        self.change_counts.update(word.analysis, -word.count,
+                                    corpus_index)
+        self.change_counts.update(self.result, word.count, corpus_index)
+        return WordAnalysis(word.count, self.result)
+
+    def reset_counts(self):
+        self.change_counts = ChangeCounts()
 
 
 class CostBreakdown(object):
@@ -2494,3 +2492,21 @@ class CostBreakdown(object):
     def penalty(self, cost):
         self.cost += cost
         self.components.append('penalty: {}'.format(cost))
+
+
+def _log_catprobs(probs):
+    """Convenience function to convert a ByCategory object containing actual
+    probabilities into one with log probabilities"""
+
+    return ByCategory(*[zlog(x) for x in probs])
+
+
+def _wb_wrap(segments, end_only=False):
+    """Add a word boundary CategorizedMorph at one or both ends of
+    the segmentation.
+    """
+    wb = CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)
+    if end_only:
+        return list(segments) + [wb]
+    else:
+        return [wb] + segments + [wb]

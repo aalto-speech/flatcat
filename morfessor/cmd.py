@@ -6,7 +6,7 @@ import random
 import sys
 import time
 
-from . import get_version
+from . import get_version, _logger
 from .baseline import BaselineModel
 from .catmap import CatmapModel, CorpusWeightUpdater, train_batch
 from .categorizationscheme import MorphUsageProperties, HeuristicPostprocessor
@@ -16,8 +16,6 @@ from .io import MorfessorIO, CatmapIO
 from .utils import _generator_progress, LOGPROB_ZERO
 
 PY3 = sys.version_info.major == 3
-
-_logger = logging.getLogger(__name__)
 
 
 LICENSE = """

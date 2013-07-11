@@ -146,7 +146,6 @@ class MorfessorIO:
         annotations = {}
         _logger.info("Reading annotations from '%s'..." % file_name)
         for line in self._read_text_file(file_name):
-            analyses = []
             compound, analyses_line = line.split(None, 1)
 
             if compound not in annotations:
@@ -412,6 +411,9 @@ class CatmapIO(MorfessorIO):
         return annotations
 
     def _morph_or_cmorph(self, morph_cat):
+        """Parses a string describing a morph, either tagged
+        or not tagged, returing a CategorizedMorph.
+        """
         parts = morph_cat.rsplit(self.category_separator, 1)
         morph = parts[0]
         if len(parts) == 1:

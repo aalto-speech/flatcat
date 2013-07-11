@@ -3,6 +3,11 @@ import collections
 import logging
 import math
 
+"""A scheme for assigning categories to morphs.
+To change the number or meaning of categories,
+only this file should need to be modified.
+"""
+
 from . import utils
 
 _logger = logging.getLogger(__name__)
@@ -304,6 +309,7 @@ class MorphUsageProperties(object):
         self._marginalizer = None
 
     def calculate_usage_features(self, seg_func):
+        """Calculate the usage features of morphs in the corpus."""
         self._clear()
         while True:
             # If risk of running out of memory, perform calculations in

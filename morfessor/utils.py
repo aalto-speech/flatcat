@@ -1,3 +1,7 @@
+"""Data structures and functions of general utility,
+shared between different modules and variants of the software.
+"""
+
 import logging
 import math
 import random
@@ -191,6 +195,12 @@ def _nt_zeros(constructor, zero=0):
 
 
 def memlog(location):
+    """Logs memory usage of the whole program,
+    as reported by the operating system.
+    The method of counting may differ: freeing blocks is in no
+    way guaranteed to lower this number.
+    Useful for rough estimations of how much memory to reserve.
+    """
     _logger.info('Mem usage at "{}": {}'.format(location,
         resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
 
@@ -206,7 +216,7 @@ def weighted_sample(data, num_samples):
     """
     tokens = sum(x[0] for x in data)
     token_indices = sorted([random.randint(0, tokens - 1)
-                            for x in range(num_samples)])
+                            for _ in range(num_samples)])
 
     data_indices = []
     d = enumerate(x[0] for x in data)

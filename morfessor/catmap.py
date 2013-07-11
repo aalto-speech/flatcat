@@ -4,8 +4,7 @@ Morfessor 2.0 Categories-MAP variant.
 """
 from __future__ import unicode_literals
 
-# Temporarily disabled to enable from catmap import * in interactive shell,
-# Which is a workaround for the pickle namespace problem
+# FIXME: decide on a public api
 #__all__ = ['CatmapIO', 'CatmapModel']
 
 __author__ = 'Stig-Arne Gronroos'
@@ -17,7 +16,6 @@ import math
 import random
 import re
 import sys
-import time
 
 from . import baseline
 from . import utils
@@ -45,6 +43,14 @@ SortedAnalysis = collections.namedtuple('SortedAnalysis',
 
 
 def train_batch(model, weight_learn_func=None):
+    """Perform batch training on the given model.
+
+    This is a function instead of a method of CatmapModel,
+    because of the probe weight learning,
+    which reloads models from pickles.
+    This procedure makes it necessary to move the control flow
+    outside the object, to allow it to be garbage collected.
+    """
     model._iteration_update(no_increment=True)
     previous_cost = model.get_cost()
     wl_force_another = False
@@ -174,6 +180,7 @@ class CatmapModel(object):
         # Variables for online learning
         self._online = False
         self.training_focus = None
+        self.training_focus_sets = None
         self._use_skips = use_skips  # Random skips for frequent constructions
         self._skipcounter = collections.Counter()
 
@@ -324,7 +331,7 @@ class CatmapModel(object):
                             self._test_skip(w)):
                         # Only increase the word count, don't analyze
                         skip_this = True
-                        
+
                     if skip_this:
                         i_new = word_backlinks[w]
                         segments = self.segmentations[i_new].analysis
@@ -355,7 +362,7 @@ class CatmapModel(object):
                         self._modify_morph_count(morph, new_count)
 
                     self._update_counts(change_counts, 1)
-                    
+
                     if not skip_this:
                         self.training_focus = set((i_new,))
                         self._single_epoch_iteration()
@@ -381,6 +388,8 @@ class CatmapModel(object):
         return epochs, newcost
 
     def _resolve_operation(self, op_number):
+        """Returns an object method corresponding to the given
+        operation number."""
         operation_name = '_op_{}_generator'.format(
             self.training_operations[op_number])
         try:
@@ -434,6 +443,12 @@ class CatmapModel(object):
                 callback(self)
 
     def _iteration_update(self, no_increment=False):
+        """Updates performed between training iterations.
+        Set the no_increment flag to suppress incrementing
+        the iteration number, which is needed when the update is
+        performed several times during one iteration e.g. in weight learning.
+        """
+
         force_another = False
 
         if self._supervised:
@@ -644,6 +659,7 @@ class CatmapModel(object):
             self._transformation_epoch(operation())
 
     def weightlearn_probe(self):
+        """Partial training used in weight learning."""
         self._single_epoch_iteration()
         self.reestimate_probabilities()
         self._iteration_update(no_increment=True)
@@ -737,12 +753,16 @@ class CatmapModel(object):
                                                           count)
 
     def _calculate_morph_backlinks(self):
+        """Recalculates the mapping from morphs to the indices of corpus
+        words in which the morphs occur."""
         self.morph_backlinks.clear()
         for (i, segmentation) in enumerate(self.segmentations):
             for morph in self.detag_word(segmentation.analysis):
                 self.morph_backlinks[morph].add(i)
 
     def _is_annotation(self, target):
+        """Returns True if the targetted corpus index is part of the
+        annotated corpus."""
         return (self._supervised and target < len(self.annotations))
 
     def _find_in_corpus(self, rule, targets=None):
@@ -802,7 +822,7 @@ class CatmapModel(object):
         EpochNode = collections.namedtuple('EpochNode', ['cost',
                                                          'transform',
                                                          'targets'])
-        self._changed_segmentations_op = set()  # FIXME
+        self._changed_segmentations_op = set()
         if not self._online:
             transformation_generator = utils._generator_progress(
                 transformation_generator)
@@ -1402,6 +1422,7 @@ class CatmapModel(object):
         self._annot_coding.reset_contributions()
 
     def add_annotations(self, annotations, annotatedcorpusweight=None):
+        """Adds data to the annotated corpus."""
         self._supervised = True
         self._annotations_tagged = True
         for (word, alternatives) in annotations.items():
@@ -1426,6 +1447,10 @@ class CatmapModel(object):
         self._corpus_coding.weight = weight
 
     def training_focus_filter(self):
+        """Yields segmentations.
+        If no training filter is selected, the whole corpus is generated.
+        Otherwise only segmentations in the focus sample are generated.
+        """
         if self.training_focus is None:
             for seg in self.segmentations:
                 yield seg
@@ -1435,6 +1460,7 @@ class CatmapModel(object):
                 yield self.segmentations[i]
 
     def set_focus_sample(self, set_index):
+        """Select one pregenerated focus sample set as active."""
         if self.training_focus_sets is None:
             self.training_focus = None
             return
@@ -1442,6 +1468,7 @@ class CatmapModel(object):
             self.training_focus = self.training_focus_sets[set_index]
 
     def generate_focus_samples(self, num_sets, num_samples):
+        """Generates subsets of the corpus by weighted sampling."""
         if num_samples > len(self.segmentations):
             # No point sampling a larger set than the corpus
             self.training_focus = None
@@ -1557,6 +1584,7 @@ class CatmapModel(object):
         return params
 
     def set_learned_params(self, params):
+        """Sets learned parameters to loaded values."""
         if 'corpusweight' in params:
             _logger.info('Setting corpus coding weight to {}'.format(
                 params['corpusweight']))
@@ -1601,12 +1629,14 @@ class CatmapModel(object):
     def word_tokens(self):
         return self._corpus_coding.boundaries
 
-    @property
-    def morph_tokens(self):
-        return sum(self._morph_usage.category_token_count)
-
 
 class ChangeCounts(object):
+    """A data structure for the aggregated set of changes to
+    emission and transition counts and morph backlinks.
+    Used to reduce the number of model updates and to make
+    reverting changes easier.
+    """
+
     __slots__ = ['emissions', 'transitions',
                  'backlinks_remove', 'backlinks_add']
 
@@ -1729,6 +1759,12 @@ class ViterbiResegmentTransformation(object):
                                    self.rule, self.result)
 
     def apply(self, word, model, corpus_index=None):
+        """Apply the new segmentation ot the counts.
+        Note that the segmentation was performed already at __init__,
+        which means that the morph count changes between the beginning
+        of the _transformation_epoch loop
+        and the call to apply do not affect the segmentation.
+        """
         if self.rule.num_matches(word.analysis) == 0:
             return word
         self.change_counts.update(word.analysis, -word.count,
@@ -1899,6 +1935,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
         return self._transition_counts[(prev_cat, next_cat)]
 
     def log_transitionprob(self, prev_cat, next_cat):
+        """-Log of transition probability P(next_cat|prev_cat)"""
         pair = (prev_cat, next_cat)
         if pair not in self._log_transitionprob_cache:
             if self._cat_tagcount[prev_cat] == 0:
@@ -2052,6 +2089,13 @@ class CatmapEncoding(baseline.CorpusEncoding):
         raise Exception('Inherited method not appropriate for CatmapEncoding')
 
     def logtransitionsum(self):
+        """Returns the term of the cost function associated with the
+        transition probabilities. This term is recalculated on each call
+        to get_cost, as the transition matrix is small and
+        each segmentation change is likely to modify
+        a large part of the transition matrix,
+        making cumulative updates unnecessary.
+        """
         categories = get_categories(wb=True)
         t_cost = 0.0
         # FIXME: this can be optimized when getting rid of the assertions
@@ -2100,6 +2144,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
 
 
 class CatmapAnnotatedCorpusEncoding(object):
+    """Class for calculating the cost of encoding the annotated corpus"""
     def __init__(self, corpus_coding, weight=None):
         self.corpus_coding = corpus_coding
         if weight is None:
@@ -2123,6 +2168,8 @@ class CatmapAnnotatedCorpusEncoding(object):
         self._transition_counts = collections.Counter()
 
     def set_counts(self, counts):
+        """Sets the counts of emissions and transitions occurring
+        in the annotated corpus to precalculated values."""
         self._emission_counts = utils.Sparse(
             default=utils._nt_zeros(ByCategory))
         self._transition_counts = collections.Counter()
@@ -2139,6 +2186,8 @@ class CatmapAnnotatedCorpusEncoding(object):
             assert self._transition_counts[pair] >= 0
 
     def reset_contributions(self):
+        """Resets the contributions of all morphs to zero.
+        Use before fully reprocessing a tagged segmented corpus."""
         self.logemissionsum = 0.0
         categories = get_categories()
         for (morph, counts) in self._emission_counts.items():
@@ -2149,12 +2198,24 @@ class CatmapAnnotatedCorpusEncoding(object):
                 self._contribution_helper(morph, category, counts[i])
 
     def modify_contribution(self, morph, direction):
+        """Removes or readds the complete contribution of a morph to the
+        cost function. The contribution must be removed using the same
+        probability value as was used when adding it, making ordering of
+        operations important.
+        """
         categories = get_categories()
         counts = self._emission_counts[morph]
         for (i, category) in enumerate(categories):
             self._contribution_helper(morph, category, counts[i] * direction)
 
     def transition_cost(self):
+        """Returns the term of the cost function associated with the
+        transition probabilities. This term is recalculated on each call
+        to get_cost, as the transition matrix is small and
+        each segmentation change is likely to modify
+        a large part of the transition matrix,
+        making cumulative updates unnecessary.
+        """
         cost = 0.0
         valid_transitions = MorphUsageProperties.valid_transitions()
         for pair in valid_transitions:
@@ -2163,6 +2224,7 @@ class CatmapAnnotatedCorpusEncoding(object):
         return cost
 
     def get_cost(self):
+        """Returns the cost of encoding the annotated corpus"""
         if self.boundaries == 0:
             return 0.0
         tc = self.transition_cost()
@@ -2191,6 +2253,23 @@ class CatmapAnnotatedCorpusEncoding(object):
 
 
 class CorpusWeightUpdater(object):
+    """Corpus weight learning.
+    Decisions are based on comparisons against a development set
+    with a gold standard segmentation.
+
+    The effects of a change in corpus weight are estimated by performing
+    a small amount of training, limiting the local search to randomly
+    chosen subsets of the corpus, and then using the partially trained
+    model to segment the development set.
+
+    The direction of change for the corpus weight is chosen in an attempt
+    to balance precision and recall.
+    The decision to accept or reject the proposed corpus weight is done
+    by comparing the development set f-measures of the models
+    partially trained with different corpus weights.
+
+    The step size is gradually decreased.
+    """
     def __init__(self,
                  annotations,
                  heuristic,
@@ -2237,16 +2316,42 @@ class CorpusWeightUpdater(object):
         return (f, direction)
 
     def update_model(self, model, epochs, direction):
-        if direction != 0:
-            weight = model.get_corpus_coding_weight()
-            if direction > 0:
-                weight *= 1 + 2.0 / epochs
-            else:
-                weight *= 1.0 / (1 + 2.0 / epochs)
-            model.set_corpus_coding_weight(weight)
+        """Calculates a new corpus coding weight,
+        sets it in the model and returns the value.
+        Arguments:
+            model -- Model to be updated
+            epochs -- A parameter controlling the size of the step.
+                      Earlier steps are larger than later steps.
+            direction --  1 for oversegmentation (too small corpus weight)
+                         -1 for undersegmentation (too large corpus weight)
+        """
+        weight = model.get_corpus_coding_weight()
+        if direction == 0:
+            return weight
+        if direction > 0:
+            weight *= 1 + 2.0 / epochs
+        else:
+            weight *= 1.0 / (1 + 2.0 / epochs)
+        model.set_corpus_coding_weight(weight)
         return weight
 
     def weight_learning(self, model):
+        """Perform weight learning on the given model.
+        Arguments:
+            model -- Initial model to perform weight learning on.
+                     Do not keep references to this model,
+                     as it will not be updated.
+                     Instead carry on using the returned model.
+        Returns (model, force_another) where:
+            model -- A new model with the learned corpus weight.
+                     Any segmentation changes made during the learning
+                     have been reverted.
+            force_another -- If the optimal weight changed, at least one
+                             more iteration of learning should be performed,
+                             even though the convergence criteria
+                             were reached.
+        """
+
         real_iteration_number = model._iteration_number
         print('real_iteration_number {}'.format(real_iteration_number))
         if model._iteration_number == 1:
@@ -2305,12 +2410,18 @@ class CorpusWeightUpdater(object):
         return (model, model.get_corpus_coding_weight() != first_weight)
 
     def _prepare_alternative(self, model, i, direction, weight_prev):
+        """Perform preparations that are necessary for an alternative,
+        but not for the initial corpus coding weight."""
         model.set_corpus_coding_weight(weight_prev)
         weight_next = self.update_model(model, i, direction)
         return weight_next
 
     def _majority_probe(self, f_prev, weight_prev, depth,
                         prepare_func, first_model=None):
+        """Perform the probe for each weightlearning set,
+        and aggregate the results.
+        Returns: (accept, weight_next, f_mean, direction)
+        """
         fs = []
         directions = []
         decisions = []
@@ -2361,6 +2472,7 @@ def _wb_wrap(segments, end_only=False):
 
 
 class CostBreakdown(object):
+    """Helper for utility functions cost_breakdown and best_analysis"""
     def __init__(self):
         self.components = []
         self.cost = 0

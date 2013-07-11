@@ -594,7 +594,6 @@ Simple usage examples (training and testing):
             "Each character in the string will be included as a " +
             "forcesplit atom. " +
             "(default '-').")
-    # FIXME not yet fully supported: segmentation may still split between these
     add_arg('--nosplit-re', dest="nosplit", type=str, default=None,
             metavar='<regexp>',
             help="if the expression matches the two surrounding characters, "

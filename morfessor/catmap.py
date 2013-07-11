@@ -187,6 +187,8 @@ class CatmapModel(object):
         self._cost_field_width = 9
         self._cost_field_precision = 4
 
+        self._interned_morphs = {}
+
     ### Primary public methods
     #
     def add_corpus_data(self, segmentations, freqthreshold=1,
@@ -452,7 +454,7 @@ class CatmapModel(object):
             for next_len in range(1, pos + 1):
                 grid[pos].append(list(zeros))
                 prev_pos = pos - next_len
-                morph = word[prev_pos:pos]
+                morph = self._interned_morph(word[prev_pos:pos])
 
                 if (self.nosplit_re and
                         pos < len(word) and
@@ -627,6 +629,7 @@ class CatmapModel(object):
 
         theta(t) = arg min { L( theta, Y(t), D ) }
         """
+        self._intern_corpus()
         self._calculate_usage_features()
         self._calculate_transition_counts()
         self._calculate_emission_counts()
@@ -898,8 +901,8 @@ class CatmapModel(object):
                         self.nosplit_re.match(
                             morph[(splitloc - 1):(splitloc + 1)])):
                     continue
-                prefix = morph[:splitloc]
-                suffix = morph[splitloc:]
+                prefix = self._interned_morph(morph[:splitloc])
+                suffix = self._interned_morph(morph[splitloc:])
                 changed_morphs.update((prefix, suffix))
                 # Make sure that there are context features available
                 # (real or estimated) for the submorphs
@@ -920,6 +923,7 @@ class CatmapModel(object):
 
         def join_helper(prefix, suffix):
             joined = prefix.morph + suffix.morph
+            joined = self._interned_morph(joined)
             return ((CategorizedMorph(joined, None),),)
 
         return self._generic_bimorph_generator(join_helper)
@@ -940,6 +944,8 @@ class CatmapModel(object):
                     if (not self.nosplit_re or
                             not self.nosplit_re.match(
                                 new_pre[-1] + new_suf[0])):
+                        new_pre = self._interned_morph(new_pre)
+                        new_suf = self._interned_morph(new_suf)
                         results.append((CategorizedMorph(new_pre, None),
                                         CategorizedMorph(new_suf, None)))
                 # Move forward
@@ -950,6 +956,8 @@ class CatmapModel(object):
                     if (not self.nosplit_re or
                             not self.nosplit_re.match(
                                 new_pre[-1] + new_suf[0])):
+                        new_pre = self._interned_morph(new_pre)
+                        new_suf = self._interned_morph(new_suf)
                         results.append((CategorizedMorph(new_pre, None),
                                         CategorizedMorph(new_suf, None)))
             return results
@@ -1499,6 +1507,30 @@ class CatmapModel(object):
 
     ### Private: secondary
     #
+    def _interned_morph(self, morph, store=False):
+        """A homebrew approximation of interning,
+        to reduce memory footprint of unicode strings with same content.
+        Pythons builtin intern functionality is not used,
+        because Python 2 does not allow interning of unicode strings.
+        In a Python 3 only version this could be simplified.
+        """
+        if morph in self._interned_morphs:
+            return self._interned_morphs[morph]
+        if store:
+            self._interned_morphs[morph] = morph
+        return morph
+
+    def _intern_word(self, cmorphs):
+        # This intentionally violates the immutability of CategorizedMorph.
+        for cmorph in cmorphs:
+            cmorph.morph = self._interned_morph(
+                cmorph.morph, store=True)
+
+    def _intern_corpus(self):
+        self._interned_morphs.clear()
+        for word in self.segmentations:
+            self._intern_word(word.analysis)
+
     def _test_skip(self, word):
         """Return true if word instance should be skipped."""
         if not self._online:

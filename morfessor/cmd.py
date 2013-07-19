@@ -586,8 +586,10 @@ Simple usage examples (training and testing):
                  '(default %(default)s).')
     add_arg('-d', '--dampening', dest="dampening", type=str, default='none',
             metavar='<type>', choices=['none', 'log', 'ones'],
-            help="frequency dampening for training data ('none', 'log', or "
-                 "'ones'; default '%(default)s').")
+            help="Frequency dampening for training data. " +
+                 "Do not apply dampening if the baseline was already " +
+                 "dampened: the effect is cumulative. " +
+                 "('none', 'log', or 'ones'; default '%(default)s').")
     add_arg('-f', '--forcesplit', dest="forcesplit", type=list, default=['-'],
             metavar='<list>',
             help="force split on given atoms. " +
@@ -729,7 +731,7 @@ Simple usage examples (training and testing):
                  'in between-iteration weight updates ' +
                  '(default %(default)s).')
     add_arg('--weightlearn-sample-size', dest='wlearn_sample_size', type=int,
-            default=1000, metavar='<int>',
+            default=2000, metavar='<int>',
             help='A subset of this size is sampled (with repetition, ' +
             'weighting according to occurrence count) from the corpus. ' +
             'When evaluating a value for the corpus weight during weight '
@@ -737,7 +739,7 @@ Simple usage examples (training and testing):
             'to this set, to reduce computation time. ' +
             '(default %(default)s); ')
     add_arg('--weightlearn-sample-sets', dest='wlearn_sample_sets', type=int,
-            default=3, metavar='<int>',
+            default=5, metavar='<int>',
             help='Make a majority decision based on this number of ' +
             'weightlearning sample sets. ' +
             '(default %(default)s); ')

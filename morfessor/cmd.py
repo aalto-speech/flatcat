@@ -8,7 +8,7 @@ import time
 
 from . import get_version, _logger
 from .baseline import BaselineModel
-from .catmap import CatmapModel, CorpusWeightUpdater, train_batch
+from .catmap import CatmapModel, CorpusWeightUpdater, train_batch, SharedModel
 from .categorizationscheme import MorphUsageProperties, HeuristicPostprocessor
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
@@ -847,7 +847,8 @@ def catmap_main(args):
     model_initialized = False
     training_ops = args.training_operations.split(',')
     if args.loadfile is not None:
-        model = io.read_binary_model_file(args.loadfile)
+        shared_model = SharedModel(
+            io.read_binary_model_file(args.loadfile))
         model_initialized = True
     else:
         m_usage = MorphUsageProperties(
@@ -857,17 +858,21 @@ def catmap_main(args):
             length_slope=args.length_slope,
             use_word_tokens=not args.type_ppl,
             min_perplexity_length=args.min_ppl_length)
-        model = CatmapModel(m_usage, forcesplit=args.forcesplit,
+        # Make sure that the current model can be garbage collected
+        # if it needs to be reloaded from disk
+        shared_model = SharedModel(CatmapModel(
+                            m_usage,
+                            forcesplit=args.forcesplit,
                             nosplit=args.nosplit,
                             corpusweight=args.corpusweight,
-                            use_skips=args.skips)
+                            use_skips=args.skips))
 
     # Set up statistics logging
     stats = None
     if args.stats_file is not None:
         stats = IterationStatistics()
-        model.epoch_callbacks.append(stats.callback)
-        stats.set_names(model, training_ops)
+        shared_model.model.epoch_callbacks.append(stats.callback)
+        stats.set_names(shared_model.model, training_ops)
 
         if args.statsannotfile is not None:
             stats.set_gold_standard(
@@ -877,7 +882,7 @@ def catmap_main(args):
     # Load data
     for f in args.loadsegfiles:
         _logger.info('Calling model.add_corpus_data')
-        model.add_corpus_data(io.read_segmentation_file(f),
+        shared_model.model.add_corpus_data(io.read_segmentation_file(f),
                               count_modifier=dampfunc,
                               freqthreshold=args.freqthreshold)
         _logger.info('Done with model.add_corpus_data')
@@ -886,12 +891,12 @@ def catmap_main(args):
             len(args.baselinefiles) > 0):
         # Starting from both tagged and untagged segmentation files,
         # but no trained model: have to initialize from the tagging.
-        model.reestimate_probabilities()
-        model.initialize_hmm(min_difference_proportion=args.min_diff_prop)
+        shared_model.model.reestimate_probabilities()
+        shared_model.model.initialize_hmm(min_difference_proportion=args.min_diff_prop)
         model_initialized = True
     for f in args.baselinefiles:
         _logger.info('Calling model.add_corpus_data')
-        model.add_corpus_data(io.read_segmentation_file(f),
+        shared_model.model.add_corpus_data(io.read_segmentation_file(f),
                               count_modifier=dampfunc,
                               freqthreshold=args.freqthreshold)
         _logger.info('Done with model.add_corpus_data')
@@ -899,7 +904,7 @@ def catmap_main(args):
     if args.annofile is not None:
         annotations = io.read_annotations_file(args.annofile,
             analysis_sep=args.analysisseparator)
-        model.add_annotations(annotations,
+        shared_model.model.add_annotations(annotations,
                               args.annotationweight)
 
     if args.develfile is not None:
@@ -911,27 +916,27 @@ def catmap_main(args):
     if args.loadparamsfile is not None:
         _logger.info('Loading learned params from {}'.format(
             args.loadparamsfile))
-        model.set_learned_params(
+        shared_model.model.set_learned_params(
             io.read_parameter_file(args.loadparamsfile))
 
     # Initialize the model
     must_train = False
     if not model_initialized:
         # Starting from segmentations instead of pickle,
-        model.training_operations = training_ops
+        shared_model.model.training_operations = training_ops
         # Need to (re)estimate the probabilities
         if len(args.loadsegfiles) == 0:
             # Starting from a baseline model
             _logger.info('Initializing from baseline segmentation...')
-            model.initialize_baseline()
+            shared_model.model.initialize_baseline()
             must_train = True
         else:
-            model.reestimate_probabilities()
-        model.initialize_hmm(min_difference_proportion=args.min_diff_prop)
+            shared_model.model.reestimate_probabilities()
+        shared_model.model.initialize_hmm(min_difference_proportion=args.min_diff_prop)
     elif len(args.baselinefiles) > 0 or len(args.loadsegfiles) > 0:
         # Extending initialized model with new data
-        model.viterbi_tag_corpus()
-        model.initialize_hmm(min_difference_proportion=args.min_diff_prop)
+        shared_model.model.viterbi_tag_corpus()
+        shared_model.model.initialize_hmm(min_difference_proportion=args.min_diff_prop)
         must_train = True
 
     # Heuristic nonmorpheme removal
@@ -953,15 +958,15 @@ def catmap_main(args):
             args.weightlearn_depth_first,
             args.weightlearn_depth)
         weight_learn_func = corpus_weight_updater.weight_learning
-        model.generate_focus_samples(
+        shared_model.model.generate_focus_samples(
             args.wlearn_sample_sets,
             args.wlearn_sample_size)
 
         _logger.info('Performing initial weight learning')
-        (model, must_train) = corpus_weight_updater.weight_learning(
-            model)
+        must_train = corpus_weight_updater.weight_learning(
+            shared_model)
 
-        model.training_focus = None
+        shared_model.model.training_focus = None
     else:
         weight_learn_func = None
 
@@ -974,11 +979,12 @@ def catmap_main(args):
     if args.trainmode in ('online', 'online+batch'):
         # Always reads from stdin
         data = io.read_corpus_files('-')
-        model.train_online(data, count_modifier=dampfunc,
+        shared_model.model.train_online(data, count_modifier=dampfunc,
                            epoch_interval=args.epochinterval,
                            max_epochs=args.max_epochs)
     if args.trainmode in ('batch', 'online+batch'):
-        model.batch_parameters(min_epoch_cost_gain=args.min_epoch_cost_gain,
+        shared_model.model.batch_parameters(
+                               min_epoch_cost_gain=args.min_epoch_cost_gain,
                                min_iter_cost_gain=args.min_iter_cost_gain,
                                max_iterations=args.max_iterations,
                                max_epochs_first=args.max_epochs_first,
@@ -987,27 +993,27 @@ def catmap_main(args):
                                max_shift_distance=args.max_shift_distance,
                                min_shift_remainder=args.min_shift_remainder)
         ts = time.time()
-        model = train_batch(model, weight_learn_func)
-        _logger.info('Final cost: {}'.format(model.get_cost()))
+        train_batch(shared_model, weight_learn_func)
+        _logger.info('Final cost: {}'.format(shared_model.model.get_cost()))
         te = time.time()
         _logger.info('Training time: {:.3f}s'.format(te - ts))
 
     # Save model
     if args.savefile is not None:
-        model.toggle_callbacks(None)
-        io.write_binary_model_file(args.savefile, model)
+        shared_model.model.toggle_callbacks(None)
+        io.write_binary_model_file(args.savefile, shared_model.model)
 
     if args.savesegfile is not None:
         if heuristic is not None:
-            segs = model.map_segmentations(
-                lambda x: heuristic.remove_nonmorfemes(x, model))
+            segs = shared_model.model.map_segmentations(
+                lambda x: heuristic.remove_nonmorfemes(x, shared_model.model))
         else:
-            segs = model.segmentations
+            segs = shared_model.model.segmentations
         io.write_segmentation_file(args.savesegfile, segs)
 
     if args.saveparamsfile is not None:
         io.write_parameter_file(args.saveparamsfile,
-                                model.get_learned_params())
+                                shared_model.model.get_learned_params())
 
     # Segment test data
     if len(args.testfiles) > 0:
@@ -1022,10 +1028,10 @@ def catmap_main(args):
         with io._open_text_file_write(args.outfile) as fobj:
             testdata = io.read_corpus_files(args.testfiles)
             for count, compound, atoms in _generator_progress(testdata):
-                constructions, logp = model.viterbi_segment(atoms)
+                constructions, logp = shared_model.model.viterbi_segment(atoms)
                 if heuristic is not None:
                     constructions = heuristic.remove_nonmorfemes(
-                                        constructions, model)
+                                        constructions, shared_model.model)
                 if args.test_output_tags:
                     def _output_morph(cmorph):
                         return '{}{}{}'.format(cmorph.morph,

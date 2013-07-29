@@ -42,7 +42,7 @@ SortedAnalysis = collections.namedtuple('SortedAnalysis',
                                          'index', 'brakdown'])
 
 
-def train_batch(model, weight_learn_func=None):
+def train_batch(smodel, weight_learn_func=None):
     """Perform batch training on the given model.
 
     This is a function instead of a method of CatmapModel,
@@ -51,22 +51,23 @@ def train_batch(model, weight_learn_func=None):
     This procedure makes it necessary to move the control flow
     outside the object, to allow it to be garbage collected.
     """
-    model._iteration_update(no_increment=True)
-    previous_cost = model.get_cost()
+    smodel.model._iteration_update(no_increment=True)
+    previous_cost = smodel.model.get_cost()
     wl_force_another = False
     u_force_another = False
-    for iteration in range(model._max_iterations):
-        model._train_iteration()
+    for iteration in range(smodel.model._max_iterations):
+        smodel.model._train_iteration()
 
-        cost = model.get_cost()
+        cost = smodel.model.get_cost()
         cost_diff = cost - previous_cost
-        limit = model._cost_convergence_limit(model._min_iter_cost_gain)
+        limit = smodel.model._cost_convergence_limit(
+            smodel.model._min_iter_cost_gain)
 
         if (weight_learn_func is not None and
-                iteration < model._max_iterations - 1):
-            (model, wl_force_another) = weight_learn_func(model)
-        u_force_another = model._iteration_update()
-        post_update_cost = model.get_cost()
+                iteration < smodel.model._max_iterations - 1):
+            wl_force_another = weight_learn_func(smodel.model)
+        u_force_another = smodel.model._iteration_update()
+        post_update_cost = smodel.model.get_cost()
         if post_update_cost != cost:
             _logger.info('cost from {} to {} in iter update'.format(
                 cost, post_update_cost))
@@ -75,14 +76,22 @@ def train_batch(model, weight_learn_func=None):
         converged = ((not wl_force_another) and
                      (not u_force_another) and
                      (-cost_diff <= limit))
-        model._display_cost(cost_diff, limit, 'iteration',
-                        iteration, model._max_iterations, converged)
+        smodel.model._display_cost(cost_diff, limit, 'iteration',
+                        iteration, smodel.model._max_iterations, converged)
         if converged:
             _logger.info('{:24s} Cost: {}'.format(
                 'final iteration.', cost))
             break
         previous_cost = cost
-    return model
+
+
+class SharedModel(object):
+    """A mutable holder for model objects that may be replaced
+    by loading from disk. If no references to the actual model
+    object are kept, it can be garbage collected.
+    """
+    def __init__(self, model):
+        self.model = model
 
 
 class CatmapModel(object):
@@ -2165,42 +2174,44 @@ class CorpusWeightUpdater(object):
         model.set_corpus_coding_weight(weight)
         return weight
 
-    def weight_learning(self, model):
+    def weight_learning(self, smodel):
         """Perform weight learning on the given model.
         Arguments:
-            model -- Initial model to perform weight learning on.
-                     Do not keep references to this model,
-                     as it will not be updated.
-                     Instead carry on using the returned model.
-        Returns (model, force_another) where:
-            model -- A new model with the learned corpus weight.
-                     Any segmentation changes made during the learning
-                     have been reverted.
+            smodel -- Wrapped initial model to perform weight learning on.
+                      Do not keep references to the model object within
+                      the wrapper, as it will not be updated and keeping
+                      references prevents it from being garbage collected.
+                      Instead carry on using the returned model.
+        Returns:
             force_another -- If the optimal weight changed, at least one
                              more iteration of learning should be performed,
                              even though the convergence criteria
                              were reached.
+        Note:
+            smodel.model -- A new model with the learned corpus weight.
+                            Any segmentation changes made during the learning
+                            have been reverted.
         """
 
-        real_iteration_number = model._iteration_number
+        real_iteration_number = smodel.model._iteration_number
         print('real_iteration_number {}'.format(real_iteration_number))
-        if model._iteration_number == 1:
+        if smodel.model._iteration_number == 1:
             epochs = self.epochs_first
             depth = self.depth_first
         else:
             epochs = self.epochs
             depth = self.depth
-        callbacks = model.toggle_callbacks(None)
-        model._iteration_update(no_increment=True)
-        if model.training_focus_sets is not None:
-            self.num_sets = len(model.training_focus_sets)
+        callbacks = smodel.model.toggle_callbacks(None)
+        smodel.model._iteration_update(no_increment=True)
+        if smodel.model.training_focus_sets is not None:
+            self.num_sets = len(smodel.model.training_focus_sets)
         else:
             self.num_sets = 1
-        self.io.write_binary_model_file(self.checkpointfile, model)
-        first_weight = model.get_corpus_coding_weight()
+        self.io.write_binary_model_file(self.checkpointfile, smodel.model)
+        first_weight = smodel.model.get_corpus_coding_weight()
         weight_prev = first_weight
         (_, _, f_prev, direction) = self._majority_probe(
-            0.0, first_weight, depth, prepare_func=None, first_model=model)
+            0.0, first_weight, depth, prepare_func=None, first_model=smodel)
 
         _logger.info(
             'Initial corpus weight: ' +
@@ -2230,14 +2241,14 @@ class CorpusWeightUpdater(object):
                 # Discard the step and try again with a smaller step
                 direction = prev_direction
         # Start normal training from the checkpoint using the optimized weight
-        model = self.io.read_binary_model_file(self.checkpointfile)
-        model._iteration_number = real_iteration_number
-        model.training_focus = None
-        model.toggle_callbacks(callbacks)
-        model.set_corpus_coding_weight(weight_prev)
+        smodel.model = self.io.read_binary_model_file(self.checkpointfile)
+        smodel.model._iteration_number = real_iteration_number
+        smodel.model.training_focus = None
+        smodel.model.toggle_callbacks(callbacks)
+        smodel.model.set_corpus_coding_weight(weight_prev)
         _logger.info('Final learned corpus weight {}'.format(weight_prev))
 
-        return (model, model.get_corpus_coding_weight() != first_weight)
+        return smodel.model.get_corpus_coding_weight() != first_weight
 
     def _prepare_alternative(self, model, i, direction, weight_prev):
         """Perform preparations that are necessary for an alternative,
@@ -2257,7 +2268,7 @@ class CorpusWeightUpdater(object):
         decisions = []
         for j in range(self.num_sets):
             if j == 0 and first_model is not None:
-                model = first_model
+                model = first_model.model
             else:
                 # Revert the changes by reloading the checkpoint model.
                 # Good steps are also reverted, to prevent accumulated gains

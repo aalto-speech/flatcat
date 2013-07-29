@@ -229,6 +229,7 @@ class CatmapModel(object):
                 continue
             if count_modifier != None:
                 count = count_modifier(count)
+            self._intern_word(analysis)
             segmentation = WordAnalysis(count, analysis)
             self.segmentations.append(segmentation)
             for morph in self.detag_word(segmentation.analysis):

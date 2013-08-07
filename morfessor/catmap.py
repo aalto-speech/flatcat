@@ -65,7 +65,7 @@ def train_batch(smodel, weight_learn_func=None):
 
         if (weight_learn_func is not None and
                 iteration < smodel.model._max_iterations - 1):
-            wl_force_another = weight_learn_func(smodel.model)
+            wl_force_another = weight_learn_func(smodel)
         u_force_another = smodel.model._iteration_update()
         post_update_cost = smodel.model.get_cost()
         if post_update_cost != cost:
@@ -2165,14 +2165,14 @@ class CorpusWeightUpdater(object):
             direction --  1 for oversegmentation (too small corpus weight)
                          -1 for undersegmentation (too large corpus weight)
         """
-        weight = model.get_corpus_coding_weight()
+        weight = self._getter(model)
         if direction == 0:
             return weight
         if direction > 0:
             weight *= 1 + 2.0 / epochs
         else:
             weight *= 1.0 / (1 + 2.0 / epochs)
-        model.set_corpus_coding_weight(weight)
+        self._setter(model, weight)
         return weight
 
     def weight_learning(self, smodel):
@@ -2209,7 +2209,7 @@ class CorpusWeightUpdater(object):
         else:
             self.num_sets = 1
         self.io.write_binary_model_file(self.checkpointfile, smodel.model)
-        first_weight = smodel.model.get_corpus_coding_weight()
+        first_weight = self._getter(smodel.model)
         weight_prev = first_weight
         (_, _, f_prev, direction) = self._majority_probe(
             0.0, first_weight, depth, prepare_func=None, first_model=smodel)
@@ -2240,23 +2240,35 @@ class CorpusWeightUpdater(object):
                 _logger.info('Rejected the step, ' +
                     'reverting to weight {}'.format(weight_prev))
                 # Discard the step and try again with a smaller step
-                direction = prev_direction
+                direction = self._reject_direction(prev_direction)
         # Start normal training from the checkpoint using the optimized weight
         smodel.model = self.io.read_binary_model_file(self.checkpointfile)
         smodel.model._iteration_number = real_iteration_number
         smodel.model.training_focus = None
         smodel.model.toggle_callbacks(callbacks)
-        smodel.model.set_corpus_coding_weight(weight_prev)
+        self._setter(smodel.model, weight_prev)
         _logger.info('Final learned corpus weight {}'.format(weight_prev))
 
-        return smodel.model.get_corpus_coding_weight() != first_weight
+        return self._getter(smodel.model) != first_weight
 
     def _prepare_alternative(self, model, i, direction, weight_prev):
         """Perform preparations that are necessary for an alternative,
         but not for the initial corpus coding weight."""
-        model.set_corpus_coding_weight(weight_prev)
+        self._setter(model, weight_prev)
         weight_next = self.update_model(model, i, direction)
         return weight_next
+
+    def _getter(self, model):
+        """Allows overriding for learning other parameters"""
+        return model.get_corpus_coding_weight()
+
+    def _setter(self, model, value):
+        """Allows overriding for learning other parameters"""
+        model.set_corpus_coding_weight(value)
+
+    def _reject_direction(self, prev_direction):
+        """Allows overriding for learning other parameters"""
+        return prev_direction
 
     def _majority_probe(self, f_prev, weight_prev, depth,
                         prepare_func, first_model=None):
@@ -2293,6 +2305,53 @@ class CorpusWeightUpdater(object):
             direction = direction / abs(direction)
         accept = (sum(decisions) >= (float(len(decisions)) / 2))
         return (accept, weight_next, f_mean, direction)
+
+
+class AnnotationWeightUpdater(CorpusWeightUpdater):
+    def __init__(self,
+                 annotations,
+                 heuristic,
+                 io,
+                 checkpointfile,
+                 epochs_first=1,
+                 epochs=1,
+                 depth_first=1,
+                 depth=1,
+                 threshold=0.01):
+        super(AnnotationWeightUpdater, self).__init__(
+                    annotations,
+                    heuristic,
+                    io,
+                    checkpointfile,
+                    epochs_first,
+                    epochs,
+                    depth_first,
+                    depth,
+                    threshold)
+        self.direction = 1
+
+    def weight_learning(self, smodel):
+        # Start with rule of thumb
+        smodel.model._annot_coding.update_weight()
+        smodel.model._annot_coding.do_update_weight = False
+
+        return super(AnnotationWeightUpdater, self).weight_learning(smodel)
+
+    def _getter(self, model):
+        model._annot_coding.do_update_weight = False
+        return model._annot_coding.weight
+
+    def _setter(self, model, value):
+        model._annot_coding.weight = value
+
+    def _reject_direction(self, prev_direction):
+        """Inverts the previous direction"""
+        self.direction *= -1
+        return self.direction
+
+    def calculate_update(self, model):
+        (f, _) = super(AnnotationWeightUpdater, self).calculate_update(model)
+        return (f, self.direction)
 
 
 class ChangeCounts(object):

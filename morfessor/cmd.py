@@ -8,7 +8,7 @@ import time
 
 from . import get_version, _logger
 from .baseline import BaselineModel
-from .catmap import CatmapModel, CorpusWeightUpdater, train_batch, SharedModel
+from .catmap import CatmapModel, CorpusWeightUpdater, train_batch, SharedModel, AnnotationWeightUpdater
 from .categorizationscheme import MorphUsageProperties, HeuristicPostprocessor
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
@@ -948,7 +948,8 @@ def catmap_main(args):
 
     # Perform weight learning using development annotations
     if develannots is not None:
-        corpus_weight_updater = CorpusWeightUpdater(
+        #corpus_weight_updater = CorpusWeightUpdater(
+        corpus_weight_updater = AnnotationWeightUpdater(    # FIXME debug
             develannots,
             heuristic,
             io,

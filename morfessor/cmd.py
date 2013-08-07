@@ -6,9 +6,8 @@ import random
 import sys
 import time
 
-from . import get_version, _logger
+from . import get_version, _logger, catmap
 from .baseline import BaselineModel
-from .catmap import CatmapModel, CorpusWeightUpdater, train_batch, SharedModel, AnnotationWeightUpdater
 from .categorizationscheme import MorphUsageProperties, HeuristicPostprocessor
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
@@ -680,7 +679,8 @@ Simple usage examples (training and testing):
                  'all iterations. Resegmentation is the heaviest operation. ' +
                  '(default %(default)s).')
     add_arg('--training-operations', dest='training_operations', type=str,
-            default=','.join(CatmapModel.DEFAULT_TRAIN_OPS), metavar='<list>',
+            default=','.join(catmap.CatmapModel.DEFAULT_TRAIN_OPS),
+            metavar='<list>',
             help='The sequence of training operations. ' +
                  'Valid training operations are strings for which ' +
                  'CatmapModel has a function named _op_X_generator. ' +
@@ -847,7 +847,7 @@ def catmap_main(args):
     model_initialized = False
     training_ops = args.training_operations.split(',')
     if args.loadfile is not None:
-        shared_model = SharedModel(
+        shared_model = catmap.SharedModel(
             io.read_binary_model_file(args.loadfile))
         model_initialized = True
     else:
@@ -860,7 +860,7 @@ def catmap_main(args):
             min_perplexity_length=args.min_ppl_length)
         # Make sure that the current model can be garbage collected
         # if it needs to be reloaded from disk
-        shared_model = SharedModel(CatmapModel(
+        shared_model = catmap.SharedModel(catmap.CatmapModel(
                             m_usage,
                             forcesplit=args.forcesplit,
                             nosplit=args.nosplit,
@@ -948,8 +948,7 @@ def catmap_main(args):
 
     # Perform weight learning using development annotations
     if develannots is not None:
-        #corpus_weight_updater = CorpusWeightUpdater(
-        corpus_weight_updater = AnnotationWeightUpdater(    # FIXME debug
+        weight_updater_args = [
             develannots,
             heuristic,
             io,
@@ -957,15 +956,25 @@ def catmap_main(args):
             args.weightlearn_epochs_first,
             args.weightlearn_epochs,
             args.weightlearn_depth_first,
-            args.weightlearn_depth)
-        weight_learn_func = corpus_weight_updater.weight_learning
+            args.weightlearn_depth]
+        corpus_weight_updater = catmap.CorpusWeightUpdater(
+            *weight_updater_args)
+        if shared_model.model._supervised:
+            anno_weight_updater = catmap.AnnotationWeightUpdater(
+                *weight_updater_args)
+            combo_updater = catmap.CombinationWeightUpdater([
+                anno_weight_updater,
+                corpus_weight_updater,
+                anno_weight_updater])
+            weight_learn_func = combo_updater.weight_learning
+        else:
+            weight_learn_func = corpus_weight_updater.weight_learning
         shared_model.model.generate_focus_samples(
             args.wlearn_sample_sets,
             args.wlearn_sample_size)
 
         _logger.info('Performing initial weight learning')
-        must_train = corpus_weight_updater.weight_learning(
-            shared_model)
+        must_train = weight_learn_func(shared_model)
 
         shared_model.model.training_focus = None
     else:
@@ -994,7 +1003,7 @@ def catmap_main(args):
                                max_shift_distance=args.max_shift_distance,
                                min_shift_remainder=args.min_shift_remainder)
         ts = time.time()
-        train_batch(shared_model, weight_learn_func)
+        catmap.train_batch(shared_model, weight_learn_func)
         _logger.info('Final cost: {}'.format(shared_model.model.get_cost()))
         te = time.time()
         _logger.info('Training time: {:.3f}s'.format(te - ts))

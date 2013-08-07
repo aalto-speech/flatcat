@@ -2130,6 +2130,7 @@ class CorpusWeightUpdater(object):
         self.depth = depth
         self.threshold = threshold
         self.num_sets = 0
+        self._log_variable = 'corpus weight'
 
     def calculate_update(self, model):
         """Tune model corpus weight based on the precision and
@@ -2195,7 +2196,6 @@ class CorpusWeightUpdater(object):
         """
 
         real_iteration_number = smodel.model._iteration_number
-        print('real_iteration_number {}'.format(real_iteration_number))
         if smodel.model._iteration_number == 1:
             epochs = self.epochs_first
             depth = self.depth_first
@@ -2210,14 +2210,14 @@ class CorpusWeightUpdater(object):
             self.num_sets = 1
         self.io.write_binary_model_file(self.checkpointfile, smodel.model)
         first_weight = self._getter(smodel.model)
+        _logger.info('Initial {}: {}'.format(self._log_variable, first_weight))
         weight_prev = first_weight
         (_, _, f_prev, direction) = self._majority_probe(
-            0.0, first_weight, depth, prepare_func=None, first_model=smodel)
+            0.0, first_weight, depth, -1, prepare_func=None, first_model=smodel)
 
         _logger.info(
-            'Initial corpus weight: ' +
-            '{}, f-measure: {}, direction: {}'.format(
-                weight_prev, f_prev, direction))
+            'Initial {}: {}, f-measure: {}, direction: {}'.format(
+                self._log_variable, weight_prev, f_prev, direction))
 
         for i in range(epochs):
             if direction == 0:
@@ -2226,11 +2226,11 @@ class CorpusWeightUpdater(object):
                 m, i + real_iteration_number * 2, direction, weight_prev)
             prev_direction = direction
             (accept, weight_next, f, direction) = self._majority_probe(
-                f_prev, weight_prev, depth, prepare_func)
+                f_prev, weight_prev, depth, i, prepare_func)
             _logger.info(
                 'Weight learning iteration {}: '.format(i) +
-                'corpus weight {}, f-measure: {}, direction: {}'.format(
-                    weight_next, f, direction))
+                '{} {}, f-measure: {}, direction: {}'.format(
+                    self._log_variable, weight_next, f, direction))
             if accept:
                 # Accept the step
                 _logger.info('Accepted the step to {}'.format(weight_next))
@@ -2247,7 +2247,8 @@ class CorpusWeightUpdater(object):
         smodel.model.training_focus = None
         smodel.model.toggle_callbacks(callbacks)
         self._setter(smodel.model, weight_prev)
-        _logger.info('Final learned corpus weight {}'.format(weight_prev))
+        _logger.info('Final learned {} {}'.format(self._log_variable,
+                                                  weight_prev))
 
         return self._getter(smodel.model) != first_weight
 
@@ -2270,7 +2271,7 @@ class CorpusWeightUpdater(object):
         """Allows overriding for learning other parameters"""
         return prev_direction
 
-    def _majority_probe(self, f_prev, weight_prev, depth,
+    def _majority_probe(self, f_prev, weight_prev, depth, iteration,
                         prepare_func, first_model=None):
         """Perform the probe for each weightlearning set,
         and aggregate the results.
@@ -2297,8 +2298,9 @@ class CorpusWeightUpdater(object):
             fs.append(f)
             directions.append(direction)
             decisions.append(f > f_prev)
-            _logger.info('Weightlearn with set {}: f {}, dir {}'.format(
-                j, f, direction))
+            _logger.info(
+                'Weight learning iter {}, set {}: f {}, dir {}'.format(
+                    iteration, j, f, direction))
         f_mean = sum(fs) / len(fs)
         direction = sum(directions)
         if direction != 0:
@@ -2329,9 +2331,10 @@ class AnnotationWeightUpdater(CorpusWeightUpdater):
                     depth,
                     threshold)
         self.direction = 1
+        self._log_variable = 'annotation weight'
 
     def weight_learning(self, smodel):
-        # Start with rule of thumb
+        # Start with rule of thumb, unless startpoint is specified
         smodel.model._annot_coding.update_weight()
         smodel.model._annot_coding.do_update_weight = False
 
@@ -2352,6 +2355,17 @@ class AnnotationWeightUpdater(CorpusWeightUpdater):
     def calculate_update(self, model):
         (f, _) = super(AnnotationWeightUpdater, self).calculate_update(model)
         return (f, self.direction)
+
+
+class CombinationWeightUpdater(object):
+    def __init__(self, components):
+        self.components = components
+
+    def weight_learning(self, smodel):
+        forces = []
+        for component in self.components:
+            forces.append(component.weight_learning(smodel))
+        return any(forces)
 
 
 class ChangeCounts(object):

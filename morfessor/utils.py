@@ -91,29 +91,6 @@ def _progress(iter_func):
     return iter_func
 
 
-def _generator_progress(generator):
-    """Prints a progress bar for visualizing flow through a generator.
-    The length of a generator is not known in advance, so the bar has
-    no fixed length. GENERATOR_DOT_FREQ controls the frequency of dots.
-
-    This function wraps the generator given as argument,
-     returning a new generator.
-    """
-
-    if GENERATOR_DOT_FREQ <= 0:
-        return generator
-
-    def _progress_wrapper(generator):
-        for (i, x) in enumerate(generator):
-            if i % GENERATOR_DOT_FREQ == 0:
-                sys.stderr.write('.')
-                sys.stderr.flush()
-            yield x
-        sys.stderr.write('\n')
-
-    return _progress_wrapper(generator)
-
-
 class Sparse(dict):
     """A defaultdict-like data structure, which tries to remain as sparse
     as possible. If a value becomes equal to the default value, it (and the
@@ -186,3 +163,24 @@ def _nt_zeros(constructor, zero=0):
     without needing to know the number of fields."""
     zeros = [zero] * len(constructor._fields)
     return constructor(*zeros)
+
+def _generator_progress(generator):
+    """Prints a progress bar for visualizing flow through a generator.
+    The length of a generator is not known in advance, so the bar has
+    no fixed length. GENERATOR_DOT_FREQ controls the frequency of dots.
+
+    This function wraps the argument generator, returning a new generator.
+    """
+
+    if GENERATOR_DOT_FREQ <= 0:
+        return generator
+
+    def _progress_wrapper(generator):
+        for (i, x) in enumerate(generator):
+            if i % GENERATOR_DOT_FREQ == 0:
+                sys.stderr.write('.')
+                sys.stderr.flush()
+            yield x
+        sys.stderr.write('\n')
+
+    return _progress_wrapper(generator)

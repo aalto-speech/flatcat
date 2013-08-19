@@ -229,7 +229,13 @@ class CatmapModel(object):
                 continue
             if count_modifier != None:
                 count = count_modifier(count)
-            self._intern_word(analysis)
+            if len(analysis) == 0:
+                continue
+            if isinstance(analysis[0], CategorizedMorph):
+                self._intern_word(analysis)
+            else:
+                analysis = [self._interned_morph(morph, store=True)
+                            for morph in analysis]
             segmentation = WordAnalysis(count, analysis)
             self.segmentations.append(segmentation)
             for morph in self.detag_word(segmentation.analysis):
@@ -488,14 +494,14 @@ class CatmapModel(object):
                             best = ViterbiNode(cost, ((0, wb),
                                 CategorizedMorph(morph, categories[next_cat])))
                     # implicit else: for-loop will be empty if prev_pos == 0
-                    for prev_len in range(1, prev_pos + 1):
-                        for prev_cat in categories_nowb:
-                            cost = (
-                                grid[prev_pos][prev_len - 1][prev_cat].cost +
-                                self._corpus_coding.transit_emit_cost(
-                                    categories[prev_cat],
-                                    categories[next_cat],
-                                    morph))
+                    for prev_cat in categories_nowb:
+                        t_e_cost = self._corpus_coding.transit_emit_cost(
+                                        categories[prev_cat],
+                                        categories[next_cat],
+                                        morph)
+                        for prev_len in range(1, prev_pos + 1):
+                            cost = (t_e_cost +
+                                grid[prev_pos][prev_len - 1][prev_cat].cost)
                             if cost <= best.cost:
                                 best = ViterbiNode(cost, ((prev_len, prev_cat),
                                     CategorizedMorph(morph,
@@ -573,6 +579,7 @@ class CatmapModel(object):
 
         # Throw away old category information, if any
         segments = self.detag_word(segments)
+
         for (i, morph) in enumerate(segments):
             for next_cat in range(len(categories)):
                 if next_cat == wb:
@@ -1784,9 +1791,9 @@ class CatmapEncoding(baseline.CorpusEncoding):
                 self._log_transitionprob_cache[pair] = (
                     zlog(self._transition_counts[(prev_cat, next_cat)]) -
                     zlog(self._cat_tagcount[prev_cat]))
-        msg = 'transition {} -> {} has probability > 1'.format(
-            prev_cat, next_cat)
-        assert self._log_transitionprob_cache[pair] >= 0, msg
+        #msg = 'transition {} -> {} has probability > 1'.format(
+        #    prev_cat, next_cat)
+        #assert self._log_transitionprob_cache[pair] >= 0, msg
         return self._log_transitionprob_cache[pair]
 
     def update_transition_count(self, prev_cat, next_cat, diff_count):
@@ -1846,8 +1853,8 @@ class CatmapEncoding(baseline.CorpusEncoding):
                     zlog(count) +
                     zlog(self._morph_usage.condprobs(morph)[cat_index]) -
                     zlog(self._morph_usage.category_token_count[cat_index]))
-        msg = 'emission {} -> {} has probability > 1'.format(category, morph)
-        assert self._log_emissionprob_cache[pair] >= 0, msg
+        #msg = 'emission {} -> {} has probability > 1'.format(category, morph)
+        #assert self._log_emissionprob_cache[pair] >= 0, msg
         return self._log_emissionprob_cache[pair]
 
     def update_emission_count(self, category, morph, diff_count):

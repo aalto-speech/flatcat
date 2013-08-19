@@ -277,16 +277,16 @@ class TestOnline(unittest.TestCase):
     def test_focus(self):
         assert self.model.training_focus is None
         self.assertEqual(len(self.model.segmentations),
-                         len(list(self.model.training_focus_filter())))
+                         len(list(self.model._training_focus_filter())))
 
         self.model.training_focus = [5, 10, 2]
-        self.assertEqual(len(list(self.model.training_focus_filter())), 3)
-        self.assertEqual(self.model.training_focus_filter().next(),
+        self.assertEqual(len(list(self.model._training_focus_filter())), 3)
+        self.assertEqual(self.model._training_focus_filter().next(),
                          self.model.segmentations[2])
 
         self.model.training_focus = [0, len(self.model.segmentations) - 1]
-        self.assertEqual(len(list(self.model.training_focus_filter())), 2)
-        self.assertEqual(self.model.training_focus_filter().next(),
+        self.assertEqual(len(list(self.model._training_focus_filter())), 2)
+        self.assertEqual(self.model._training_focus_filter().next(),
                          self.model.segmentations[0])
 
 

@@ -1076,6 +1076,7 @@ class CatmapModel(object):
             self._corpus_coding.update_transition_count(
                 prev_cat, next_cat,
                 transitions[(prev_cat, next_cat)] * normalization)
+        self._corpus_coding.clear_transition_cache()
 
     def _calculate_transition_counts(self):
         """Count the number of transitions of each type.
@@ -1098,6 +1099,7 @@ class CatmapModel(object):
                 self._corpus_coding.update_transition_count(prev_cat,
                                                             next_cat,
                                                             rcount)
+        self._corpus_coding.clear_transition_cache()
 
     def _calculate_emission_counts(self):
         """Recalculates the emission counts from a retagged segmentation."""
@@ -1222,6 +1224,7 @@ class CatmapModel(object):
             self._corpus_coding.update_transition_count(
                 prev_cat, next_cat,
                 change_counts.transitions[(prev_cat, next_cat)] * multiplier)
+        self._corpus_coding.clear_transition_cache()
 
         if multiplier > 0:
             bl_rm = change_counts.backlinks_remove
@@ -1820,6 +1823,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
                 self._log_transitionprob_cache[pair] = (
                     zlog(self._transition_counts[(prev_cat, next_cat)]) -
                     zlog(self._cat_tagcount[prev_cat]))
+        # Assertion disabled due to performance hit
         #msg = 'transition {} -> {} has probability > 1'.format(
         #    prev_cat, next_cat)
         #assert self._log_transitionprob_cache[pair] >= 0, msg
@@ -1828,6 +1832,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
     def update_transition_count(self, prev_cat, next_cat, diff_count):
         """Updates the number of observed transitions between
         categories.
+        OBSERVE! Clearing the cache is left to the caller.
 
         Arguments:
             prev_cat -- The name (not index) of the category
@@ -1837,23 +1842,23 @@ class CatmapEncoding(baseline.CorpusEncoding):
             diff_count -- The change in the number of transitions.
         """
 
-        msg = 'update_transition_count needs category names, not indices'
-        assert not isinstance(prev_cat, int), msg
-        assert not isinstance(next_cat, int), msg
+        # Assertion disabled due to performance hit
+        #msg = 'update_transition_count needs category names, not indices'
+        #assert not isinstance(prev_cat, int), msg
+        #assert not isinstance(next_cat, int), msg
         pair = (prev_cat, next_cat)
 
         self._transition_counts[pair] += diff_count
         self._cat_tagcount[prev_cat] += diff_count
 
-        if self._transition_counts[pair] > 0:
-            assert pair not in MorphUsageProperties.zero_transitions
+        # Assertion disabled due to performance hit
+        #if self._transition_counts[pair] > 0:
+        #    assert pair not in MorphUsageProperties.zero_transitions
 
-        msg = 'subzero transition count for {}'.format(pair)
-        assert self._transition_counts[pair] >= 0, msg
-        assert self._cat_tagcount[prev_cat] >= 0
-
-        # invalidate cache
-        self._log_transitionprob_cache.clear()
+        # Assertion disabled due to performance hit
+        #msg = 'subzero transition count for {}'.format(pair)
+        #assert self._transition_counts[pair] >= 0, msg
+        #assert self._cat_tagcount[prev_cat] >= 0
 
     def clear_transition_counts(self):
         """Resets transition counts, costs and cache.
@@ -1882,6 +1887,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
                     zlog(count) +
                     zlog(self._morph_usage.condprobs(morph)[cat_index]) -
                     zlog(self._morph_usage.category_token_count[cat_index]))
+        # Assertion disabled due to performance hit
         #msg = 'emission {} -> {} has probability > 1'.format(category, morph)
         #assert self._log_emissionprob_cache[pair] >= 0, msg
         return self._log_emissionprob_cache[pair]
@@ -1952,6 +1958,11 @@ class CatmapEncoding(baseline.CorpusEncoding):
         """Clears the cache for emission probability values.
         Use if an incremental change invalidates cached values."""
         self._log_emissionprob_cache.clear()
+
+    def clear_transition_cache(self):
+        """Clears the cache for emission probability values.
+        Use if an incremental change invalidates cached values."""
+        self._log_transitionprob_cache.clear()
 
     # General methods
 

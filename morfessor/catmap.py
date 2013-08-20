@@ -593,10 +593,13 @@ class CatmapModel(object):
                         continue
                     # Cost of selecting prev_cat as previous state
                     # if now at next_cat
-                    cost.append(grid[i][prev_cat].cost +
-                                self._corpus_coding.transit_emit_cost(
-                                    categories[prev_cat],
-                                    categories[next_cat], morph))
+                    if grid[i][prev_cat].cost >= extrazero:
+                        cost.append(extrazero)
+                    else:
+                        cost.append(grid[i][prev_cat].cost +
+                                    self._corpus_coding.transit_emit_cost(
+                                        categories[prev_cat],
+                                        categories[next_cat], morph))
                 best.append(ViterbiNode(*utils.minargmin(cost)))
                 cost = []
             # Update grid to prepare for next iteration
@@ -1469,7 +1472,7 @@ class CatmapModel(object):
                     self._modify_morph_count(morph, num_matches)
                 for target in matched_targets:
                     old_analysis = self.segmentations[target]
-                    new_analysis = transform.apply(old_analysis, self)
+                    transform.apply(old_analysis, self)
 
                 # Apply change to encoding
                 self._update_counts(transform.change_counts, 1)

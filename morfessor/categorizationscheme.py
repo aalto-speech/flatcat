@@ -597,19 +597,15 @@ class CategorizedMorph(object):
     These objects should be treated as immutable, even though
     it is not enforced by the code.
     """
-    no_category = ''
 
     __slots__ = ['morph', 'category']
 
     def __init__(self, morph, category=None):
         self.morph = morph
-        if category is not None:
-            self.category = category
-        else:
-            self.category = CategorizedMorph.no_category
+        self.category = category
 
     def __repr__(self):
-        if self.category == CategorizedMorph.no_category:
+        if self.category is None:
             return unicode(self.morph)
         return self.morph + '/' + self.category
 

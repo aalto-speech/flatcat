@@ -249,7 +249,7 @@ class CatmapModel(object):
         self._supervised = True
         self._annotations_tagged = True
         for (word, alternatives) in annotations.items():
-            if alternatives[0][0].category == CategorizedMorph.no_category:
+            if alternatives[0][0].category is None:
                 self._annotations_tagged = False
             # The fist entries in self.segmentations are the currently active
             # annotations, in the same order as in self.annotations
@@ -549,7 +549,28 @@ class CatmapModel(object):
                         For segmenting and tagging new words,
                         use viterbi_segment(compound).
         """
+        
+        # Throw away old category information, if any
+        segments = self.detag_word(segments)
 
+        return self._viterbi_tag_helper(segments)
+
+    def fast_tag_gaps(self, segments):
+        """Tag the gaps in a pre-segmented word where most morphs are already
+        tagged. Existing tags can not be changed.
+        """
+        def constraint(i, cat):
+            if segments[i].category is None:
+                return False
+            if cat == segments[i].category:
+                return False
+            return True
+
+        return self._viterbi_tag_helper(segments, constraint,
+                                        CatmapModel.detag_morph)
+
+    def _viterbi_tag_helper(self, segments,
+                            constraint=None, mapping=lambda x: x):
         # To make sure that internally impossible states are penalized
         # even more than impossible states caused by zero parameters.
         extrazero = LOGPROB_ZERO ** 2
@@ -577,16 +598,18 @@ class CatmapModel(object):
         cost = []
         best = []
 
-        # Throw away old category information, if any
-        segments = self.detag_word(segments)
-
         for (i, morph) in enumerate(segments):
-            for next_cat in range(len(categories)):
+            for (next_cat, nc_label) in enumerate(categories):
                 if next_cat == wb:
                     # Impossible to visit boundary in the middle of the
                     # sequence
                     best.append(ViterbiNode(extrazero, None))
                     continue
+                if constraint is not None and constraint(i, nc_label):
+                    # lies outside the constrained path
+                    best.append(ViterbiNode(extrazero, None))
+                    continue
+                morph = mapping(morph)
                 for prev_cat in range(len(categories)):
                     if (prev_cat, next_cat) in forbidden:
                         cost.append(extrazero)
@@ -594,6 +617,7 @@ class CatmapModel(object):
                     # Cost of selecting prev_cat as previous state
                     # if now at next_cat
                     if grid[i][prev_cat].cost >= extrazero:
+                        # This path is already failed
                         cost.append(extrazero)
                     else:
                         cost.append(grid[i][prev_cat].cost +
@@ -615,12 +639,14 @@ class CatmapModel(object):
         backtrace = ViterbiNode(*utils.minargmin(best))
 
         # Backtrace for the best category sequence
-        result = [CategorizedMorph(segments[-1],
-                  categories[backtrace.backpointer])]
+        result = [CategorizedMorph(
+                    mapping(segments[-1]),
+                    categories[backtrace.backpointer])]
         for i in range(len(segments) - 1, 0, -1):
             backtrace = grid[i + 1][backtrace.backpointer]
-            result.insert(0, CategorizedMorph(segments[i - 1],
-                categories[backtrace.backpointer]))
+            morph = mapping(segments[i - 1])
+            result.insert(0, CategorizedMorph(
+                morph, categories[backtrace.backpointer]))
         return result
 
     def viterbi_tag_corpus(self):
@@ -2459,7 +2485,7 @@ class TransformationRule(object):
         at the given index."""
         # Compare morphs and categories specified in rule
         for (j, cmorph) in enumerate(analysis[i:(i + len(self))]):
-            if self._rule[j].category != CategorizedMorph.no_category:
+            if self._rule[j].category is not None:
                 # Rule requires category at this point to match
                 if self._rule[j].category != cmorph.category:
                     return False
@@ -2554,7 +2580,8 @@ class Transformation(object):
 
         if matches > 0:
             # Only retag if the rule matched something
-            out = model.viterbi_tag(out)
+            out = model.fast_tag_gaps(out)
+            #out = model.viterbi_tag(out)
 
             self.change_counts.update(word.analysis, -word.count,
                                       corpus_index)

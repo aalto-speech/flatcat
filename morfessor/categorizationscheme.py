@@ -32,7 +32,9 @@ class WordBoundary(object):
         return 8364886854198508766
 
 
-WORD_BOUNDARY = WordBoundary()
+# Using a string is slightly faster.
+# Change to WordBoundary if you want to e.g. support '#':s in the corpus
+WORD_BOUNDARY = '#' #WordBoundary()
 
 ##################################
 ### Categorization-dependent code:

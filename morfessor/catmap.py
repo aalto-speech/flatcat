@@ -1169,7 +1169,7 @@ class CatmapModel(object):
         old_count = self._morph_usage.count(morph)
         new_count = old_count + diff_count
         self._morph_usage.set_count(morph, new_count)
-        self._corpus_coding.clear_emission_cache(morph)
+        self._corpus_coding.clear_emission_cache()
         if old_count == 0 and new_count > 0:
             self._lexicon_coding.add(morph)
         elif old_count > 0 and new_count == 0:
@@ -1772,7 +1772,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
         # Caches for transition and emission logprobs,
         # to avoid wasting effort recalculating.
         self._log_transitionprob_cache = dict()
-        self._log_emissionprob_cache = EmissionCache()
+        self._log_emissionprob_cache = dict()
 
         self.logcondprobsum = 0.0
 
@@ -1840,22 +1840,22 @@ class CatmapEncoding(baseline.CorpusEncoding):
 
     def log_emissionprob(self, category, morph):
         """-Log of posterior emission probability P(morph|category)"""
-        out = self._log_emissionprob_cache.get(category, morph)
-        if out is None:
+        pair = (category, morph)
+        if pair not in self._log_emissionprob_cache:
+            cat_index = get_categories().index(category)
             count = self._morph_usage.count(morph)
             # Not equal to what you get by:
             # zlog(self._emission_counts[morph][cat_index]) +
             if self._cat_tagcount[category] == 0 or count == 0:
-                out = LOGPROB_ZERO
+                self._log_emissionprob_cache[pair] = LOGPROB_ZERO
             else:
-                cat_index = get_categories().index(category)
-                out = (zlog(count) +
-                       zlog(self._morph_usage.condprobs(morph)[cat_index]) -
-                       zlog(self._morph_usage.category_token_count[cat_index]))
-            self._log_emissionprob_cache.set(category, morph, out)
+                self._log_emissionprob_cache[pair] = (
+                    zlog(count) +
+                    zlog(self._morph_usage.condprobs(morph)[cat_index]) -
+                    zlog(self._morph_usage.category_token_count[cat_index]))
         #msg = 'emission {} -> {} has probability > 1'.format(category, morph)
         #assert self._log_emissionprob_cache[pair] >= 0, msg
-        return out
+        return self._log_emissionprob_cache[pair]
 
     def update_emission_count(self, category, morph, diff_count):
         """Updates the number of observed emissions of a single morph from a
@@ -1867,8 +1867,6 @@ class CatmapEncoding(baseline.CorpusEncoding):
             morph -- string representation of the morph.
             diff_count -- the change in the number of occurences.
         """
-        if diff_count == 0:
-            return
         cat_index = get_categories().index(category)
         old_count = self._emission_counts[morph][cat_index]
         new_count = old_count + diff_count
@@ -1882,7 +1880,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
         self._set_emission_counts(morph, new_counts)
 
         # invalidate cache
-        self._log_emissionprob_cache.clear_morph(morph)
+        self._log_emissionprob_cache.clear()
 
     def _set_emission_counts(self, morph, new_counts):
         """Set the number of emissions of a morph from all categories
@@ -1908,7 +1906,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
             self.tokens += new_total
 
         # invalidate cache
-        self._log_emissionprob_cache.clear_morph(morph)
+        self._log_emissionprob_cache.clear()
 
     def clear_emission_counts(self):
         """Resets emission counts and costs.
@@ -1919,13 +1917,10 @@ class CatmapEncoding(baseline.CorpusEncoding):
         self._emission_counts.clear()
         self._log_emissionprob_cache.clear()
 
-    def clear_emission_cache(self, morph=None):
+    def clear_emission_cache(self):
         """Clears the cache for emission probability values.
         Use if an incremental change invalidates cached values."""
-        if morph is None:
-            self._log_emissionprob_cache.clear()
-        else:
-            self._log_emissionprob_cache.clear_morph(morph)
+        self._log_emissionprob_cache.clear()
 
     # General methods
 
@@ -2102,35 +2097,6 @@ class CatmapAnnotatedCorpusEncoding(object):
             return
         self.logemissionsum += count * self.corpus_coding.log_emissionprob(
             category, morph)
-
-
-class EmissionCache(object):
-    """A cache for emission probabilities,
-    grouped by morph for partial cache invalidation.
-    """
-
-    def __init__(self):
-        self._emissions = dict()
-
-    def get(self, category, morph):
-        """Returns the cached logprob, or None if not in cache."""
-        if morph not in self._emissions:
-            return None
-        return self._emissions[morph].get(category, None)
-
-    def set(self, category, morph, val):
-        if morph not in self._emissions:
-            self._emissions[morph] = {category: val}
-            return
-        self._emissions[morph][category] = val
-
-    def clear_morph(self, morph):
-        if morph not in self._emissions:
-            return
-        del self._emissions[morph]
-
-    def clear(self):
-        self._emissions.clear()
 
 
 class CorpusWeightUpdater(object):

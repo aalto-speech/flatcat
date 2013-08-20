@@ -1867,6 +1867,8 @@ class CatmapEncoding(baseline.CorpusEncoding):
             morph -- string representation of the morph.
             diff_count -- the change in the number of occurences.
         """
+        if diff_count == 0:
+            return
         cat_index = get_categories().index(category)
         old_count = self._emission_counts[morph][cat_index]
         new_count = old_count + diff_count

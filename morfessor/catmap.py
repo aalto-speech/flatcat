@@ -780,7 +780,7 @@ class CatmapModel(object):
         """Recalculates derived datastructures cleared by pre_save."""
         self._calculate_morph_backlinks()
         self._intern_corpus()
-        self._morph_usage.calculate_usage_features()
+        self._calculate_usage_features()
 
     ### Public diagnostic methods
     #

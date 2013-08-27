@@ -164,8 +164,8 @@ class CatmapModel(object):
         # Should take exactly one argument: the model.
         self.operation_callbacks = []
         self.epoch_callbacks = []
-        self._changed_segmentations = set()
-        self._changed_segmentations_op = set()
+        self._changed_segmentations = None
+        self._changed_segmentations_op = None
 
         # Force these atoms to be kept as separate morphs.
         # Calling morfessor baseline with the same forcesplit value ensures
@@ -549,10 +549,9 @@ class CatmapModel(object):
                         For segmenting and tagging new words,
                         use viterbi_segment(compound).
         """
-        
+
         # Throw away old category information, if any
         segments = self.detag_word(segments)
-
         return self._viterbi_tag_helper(segments)
 
     def fast_tag_gaps(self, segments):
@@ -762,6 +761,26 @@ class CatmapModel(object):
         else:
             (self.operation_callbacks, self.epoch_callbacks) = callbacks
         return out
+
+    def pre_save(self):
+        """Call this before pickling to conserve memory by clearing
+        derived data structures.
+        Must call post_load on loaded model if this method is used.
+        """
+        # These will be restored
+        self.morph_backlinks.clear()
+        self._interned_morphs.clear()
+        self._morph_usage._clear()
+        # These are merely cleared
+        self._skipcounter.clear()
+        self._corpus_coding.clear_transition_cache()
+        self._corpus_coding.clear_emission_cache()
+
+    def post_load(self):
+        """Recalculates derived datastructures cleared by pre_save."""
+        self._calculate_morph_backlinks()
+        self._intern_corpus()
+        self._morph_usage.calculate_usage_features()
 
     ### Public diagnostic methods
     #
@@ -1399,7 +1418,9 @@ class CatmapModel(object):
                                 self._iteration_number,
                                 self._max_iterations,
                                 cost))
-        self._changed_segmentations = set()  # FIXME: use for convergence
+        if self._changed_segmentations is not None:
+            # FIXME: use for also for convergence, not just stats?
+            self._changed_segmentations.clear()
         while self._operation_number < len(self.training_operations):
             operation = self._resolve_operation(self._operation_number)
             min_epoch_cost_gain = self._training_params('min_epoch_cost_gain')
@@ -1462,7 +1483,8 @@ class CatmapModel(object):
         EpochNode = collections.namedtuple('EpochNode', ['cost',
                                                          'transform',
                                                          'targets'])
-        self._changed_segmentations_op = set()
+        if self._changed_segmentations_op is not None:
+            self._changed_segmentations_op.clear()
         if not self._online:
             transformation_generator = utils._generator_progress(
                 transformation_generator)
@@ -1545,8 +1567,9 @@ class CatmapModel(object):
                     temporaries.difference_update(
                         self.detag_word(new_analysis.analysis))
                 self._update_counts(best.transform.change_counts, 1)
-                self._changed_segmentations.update(best.targets)
-                self._changed_segmentations_op.update(best.targets)
+                if self._changed_segmentations is not None:
+                    self._changed_segmentations.update(best.targets)
+                    self._changed_segmentations_op.update(best.targets)
 
             if self._supervised:
                 for morph in changed_morphs:
@@ -2259,10 +2282,12 @@ class CorpusWeightUpdater(object):
             self.num_sets = 1
         self.io.write_binary_model_file(self.checkpointfile, smodel.model)
         first_weight = self._getter(smodel.model)
-        _logger.info('Initial {}: {}'.format(self._log_variable, first_weight))
+        _logger.info('Initial {}: {}'.format(self._log_variable,
+                                             first_weight))
         weight_prev = first_weight
         (_, _, f_prev, direction) = self._majority_probe(
-            0.0, first_weight, depth, -1, prepare_func=None, first_model=smodel)
+            0.0, first_weight, depth, -1,
+            prepare_func=None, first_model=smodel)
 
         _logger.info(
             'Initial {}: {}, f-measure: {}, direction: {}'.format(

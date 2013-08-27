@@ -54,6 +54,8 @@ class IterationStatistics(object):
     def set_names(self, model, training_operations):
         self.ops = training_operations
         self.categories = model.get_categories()
+        model._changed_segmentations = set()
+        model._changed_segmentations_op = set()
 
     def set_gold_standard(self, reference):
         self._reference = reference

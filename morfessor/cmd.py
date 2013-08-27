@@ -12,7 +12,7 @@ from .categorizationscheme import MorphUsageProperties, HeuristicPostprocessor
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
 from .io import MorfessorIO, CatmapIO
-from .utils import _generator_progress, LOGPROB_ZERO
+from .utils import _generator_progress, LOGPROB_ZERO, memlog
 
 PY3 = sys.version_info.major == 3
 
@@ -849,6 +849,7 @@ def catmap_main(args):
     if args.loadfile is not None:
         shared_model = catmap.SharedModel(
             io.read_binary_model_file(args.loadfile))
+        shared_model.model.post_load()
         model_initialized = True
     else:
         m_usage = MorphUsageProperties(
@@ -892,7 +893,8 @@ def catmap_main(args):
         # Starting from both tagged and untagged segmentation files,
         # but no trained model: have to initialize from the tagging.
         shared_model.model.reestimate_probabilities()
-        shared_model.model.initialize_hmm(min_difference_proportion=args.min_diff_prop)
+        shared_model.model.initialize_hmm(
+            min_difference_proportion=args.min_diff_prop)
         model_initialized = True
     for f in args.baselinefiles:
         _logger.info('Calling model.add_corpus_data')
@@ -932,11 +934,13 @@ def catmap_main(args):
             must_train = True
         else:
             shared_model.model.reestimate_probabilities()
-        shared_model.model.initialize_hmm(min_difference_proportion=args.min_diff_prop)
+        shared_model.model.initialize_hmm(
+            min_difference_proportion=args.min_diff_prop)
     elif len(args.baselinefiles) > 0 or len(args.loadsegfiles) > 0:
         # Extending initialized model with new data
         shared_model.model.viterbi_tag_corpus()
-        shared_model.model.initialize_hmm(min_difference_proportion=args.min_diff_prop)
+        shared_model.model.initialize_hmm(
+            min_difference_proportion=args.min_diff_prop)
         must_train = True
 
     # Heuristic nonmorpheme removal
@@ -1011,7 +1015,13 @@ def catmap_main(args):
     # Save model
     if args.savefile is not None:
         shared_model.model.toggle_callbacks(None)
+        memlog('Before pickle')
+        shared_model.model.pre_save()
         io.write_binary_model_file(args.savefile, shared_model.model)
+        memlog('After pickle')
+        if len(args.testfiles) > 0:
+            shared_model.model.post_load()
+            memlog('After postload')
 
     if args.savesegfile is not None:
         if heuristic is not None:

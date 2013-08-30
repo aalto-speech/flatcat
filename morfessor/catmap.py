@@ -2280,6 +2280,7 @@ class CorpusWeightUpdater(object):
             self.num_sets = len(smodel.model.training_focus_sets)
         else:
             self.num_sets = 1
+        smodel.model.pre_save()
         self.io.write_binary_model_file(self.checkpointfile, smodel.model)
         first_weight = self._getter(smodel.model)
         _logger.info('Initial {}: {}'.format(self._log_variable,
@@ -2317,6 +2318,7 @@ class CorpusWeightUpdater(object):
                 direction = self._reject_direction(prev_direction)
         # Start normal training from the checkpoint using the optimized weight
         smodel.model = self.io.read_binary_model_file(self.checkpointfile)
+        smodel.model.post_load()
         smodel.model._iteration_number = real_iteration_number
         smodel.model.training_focus = None
         smodel.model.toggle_callbacks(callbacks)
@@ -2362,6 +2364,7 @@ class CorpusWeightUpdater(object):
                 # Good steps are also reverted, to prevent accumulated gains
                 # and make the comparison fair.
                 model = self.io.read_binary_model_file(self.checkpointfile)
+                model.post_load()
             model.set_focus_sample(j)
             weight_next = weight_prev
             if prepare_func is not None:

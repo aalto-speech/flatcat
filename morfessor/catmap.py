@@ -2284,6 +2284,7 @@ class CorpusWeightUpdater(object):
             self.num_sets = 1
         smodel.model.pre_save()
         self.io.write_binary_model_file(self.checkpointfile, smodel.model)
+        smodel.model.post_load()
         first_weight = self._getter(smodel.model)
         _logger.info('Initial {}: {}'.format(self._log_variable,
                                              first_weight))

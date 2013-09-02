@@ -1038,7 +1038,9 @@ class CatmapModel(object):
             source = range(len(self.segmentations))
         else:
             source = self.training_focus
-        for i in source:
+        # Sort by count, ascending
+        source = sorted([(self.segmentations[i].count, i) for i in source])
+        for (_, i) in source:
             word = self.segmentations[i]
             changed_morphs = set(self.detag_word(word.analysis))
             vrt = ViterbiResegmentTransformation(word, self)

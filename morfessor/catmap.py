@@ -2206,9 +2206,67 @@ class CorpusWeightUpdater(object):
         self.num_sets = 0
         self._log_variable = 'corpus weight'
 
-    def calculate_update(self, model):
-        """Tune model corpus weight based on the precision and
-        recall of the development data, trying to keep them equal"""
+    def weight_learning(self, smodel, first=True):
+        """Perform weight learning on the given model.
+        Arguments:
+            smodel -- Wrapped initial model to perform weight learning on.
+                      Do not keep references to the model object within
+                      the wrapper, as it will not be updated and keeping
+                      references prevents it from being garbage collected.
+                      Instead carry on using the returned model.
+        Returns:
+            force_another -- If the optimal weight changed, at least one
+                             more iteration of learning should be performed,
+                             even though the convergence criteria
+                             were reached.
+        Note:
+            smodel.model -- A new model with the learned corpus weight.
+                            Any segmentation changes made during the learning
+                            have been reverted.
+        """
+        if first:
+            max_iters = self.iters_first
+            max_evals = self.evals_first
+        else:
+            max_iters = self.iters
+            max_evals = self.evals
+
+        if smodel.model.training_focus_sets is not None:
+            self.num_sets = len(smodel.model.training_focus_sets)
+        else:
+            self.num_sets = 1
+
+        callbacks = self._make_checkpoint()
+        initial = [getter() for getter in self.getters]
+        _logger.info('Initial weights: {}'.format(initial))
+
+        majority_vote = optimization.MajorityVote(self.evaluate_parameters,
+                                                  self.num_sets).evaluate
+        point = optimization.modified_powells(majority_vote, initial, max_iters, max_evals)
+
+        # Start normal training from the checkpoint using the optimized weight
+        smodel.model.training_focus = None
+        smodel.model.toggle_callbacks(callbacks)
+        for (i, val) in enumerate(point):
+            self.setters[i](val)
+        _logger.info('Learned weights: {}'.format(point))
+
+        return point != initial
+
+    def evaluate_parameters(self, point, focus):
+        self._load_checkpoint()
+        for (i, val) in enumerate(point):
+            self.setters[i](val)
+        self.smodel.model.set_focus_sample(focus)
+        for _ in range(depth):
+            self.smodel.model.weightlearn_probe()
+        (f, d, pre, rec) = self._evaluate()
+        direction_cues = [cue(f, d, pre, rec)
+                          for cue in self.cues]
+        return (f, direction_cues)
+
+    def _evaluate(self):
+        model = self.smodel.model
         tmp = self.annotations.items()
         wlist, annotations = zip(*tmp)
 
@@ -2228,7 +2286,20 @@ class CorpusWeightUpdater(object):
             direction = 1
         else:
             direction = -1
-        return (f, direction)
+        return (f, direction, pre, rec)
+
+    def _make_checkpoint(self):
+        callbacks = self.smodel.model.toggle_callbacks(None)
+        self.smodel.model._iteration_update(no_increment=True)
+        self.smodel.model.pre_save()
+        self.io.write_binary_model_file(self.checkpointfile, self.smodel.model)
+        return callbacks
+
+    def _load_checkpoint(self):
+        smodel.model = self.io.read_binary_model_file(self.checkpointfile)
+        smodel.model.post_load()
+        
+# Old very homebrew implementation
 
     def update_model(self, model, epochs, direction):
         """Calculates a new corpus coding weight,
@@ -2250,25 +2321,8 @@ class CorpusWeightUpdater(object):
         self._setter(model, weight)
         return weight
 
-    def weight_learning(self, smodel):
-        """Perform weight learning on the given model.
-        Arguments:
-            smodel -- Wrapped initial model to perform weight learning on.
-                      Do not keep references to the model object within
-                      the wrapper, as it will not be updated and keeping
-                      references prevents it from being garbage collected.
-                      Instead carry on using the returned model.
-        Returns:
-            force_another -- If the optimal weight changed, at least one
-                             more iteration of learning should be performed,
-                             even though the convergence criteria
-                             were reached.
-        Note:
-            smodel.model -- A new model with the learned corpus weight.
-                            Any segmentation changes made during the learning
-                            have been reverted.
-        """
 
+    def weight_learning(self, smodel):
         real_iteration_number = smodel.model._iteration_number
         if smodel.model._iteration_number == 1:
             epochs = self.epochs_first

@@ -24,10 +24,13 @@ class MajorityVote(object):
     def _early_abort(decisions):
         successes = sum(decisions)
         chances = self.num_sets - len(decisions)
-        return (successes + chances) >= self.limit
+        return (successes + chances) < self.limit
 
-def line_search_bisection(func, initial, vector, prev_best_f,
-                          direction_cues, max_evals):
+def line_search_bisection(func, initial, vector, prev_best_f, evals):
+    (a, x, b) = (-1., 0., 1.)
+    num_rejections = 0
+    for _ in range(evals):
+
     return (point, f, num_rejections)
 
 
@@ -41,5 +44,5 @@ def median(data):
     if length == 0:
         return None
     if not length % 2:
-        return (data[length / 2] + data[(length / 2) - 1]) / 2.0
+        return (data[length / 2] + data[(length / 2) - 1]) / 2.
     return data[length / 2]

@@ -76,9 +76,7 @@ class Intervals(object):
         cumulative = 0.
         for (v, c) in zip(self.vector, cues):
             if c is not None:
-                print(v, c, self.sign)
                 cumulative += v * c * self.sign
-        print('cumulative {}, rejected_prev {}, sign {}'.format(cumulative, self.rejected_prev, self.sign))
         if cumulative < 0:
             self._flip()
         elif cumulative == 0 and self.rejected_prev:
@@ -87,12 +85,14 @@ class Intervals(object):
     def _flip(self):
         (self.a, self.b) = (self.b, self.a)
         self.sign *= -1
-        print('flipped. Now ({}, {}, {}) sign {}'.format(self.b, self.x, self.a, self.sign))
 
 
 class LineSearchBisection(object):
-    def __init__(self, func):
+    def __init__(self, func, cb_eval=None, cb_acc=None, cb_rej=None):
         self.func = func
+        self.cb_eval = cb_eval
+        self.cb_acc = cb_acc
+        self.cb_rej = cb_rej
         
     def search(self, initial, vector, initial_cues, prev_best_f, evals,
                bidir=False):
@@ -102,24 +102,30 @@ class LineSearchBisection(object):
         best = initial
         best_f = prev_best_f
         best_cues = initial_cues
-        for _ in range(evals):
+        for i in range(evals):
             (cursor_x, cursor) = intervals.step()
+            if self.cb_eval is not None:
+                self.cb_eval(i, evals, cursor)
             (f, cursor_cues) = self.func(cursor, best_f)
-            print('at {}. comparing {} > {}'.format(cursor, f, best_f))
             if f > best_f:
                 intervals.accept(cursor_x)
                 best_f = f
                 best = cursor
                 best_cues = cursor_cues
+                if self.cb_acc is not None:
+                    self.cb_acc(i, evals, best, best_f, best_cues)
             else:
                 intervals.reject(cursor_x)
                 num_rejections += 1
+                if self.cb_rej is not None:
+                    self.cb_rej(i, evals, cursor, f, best, best_f, best_cues)
             intervals.use_direction_cue(best_cues)
 
         return (best, best_f, best_cues, num_rejections)
 
 
-def modified_powells(func, initial, max_iters, evals_per_vector, scale):
+def modified_powells(func, initial, max_iters, evals_per_vector, scale,
+                     cb_vec=None, cb_eval=None, cb_acc=None, cb_rej=None):
     # Initial vectors are aligned to the axes
     vectors = []
     for (i, iv) in enumerate(initial):
@@ -128,15 +134,21 @@ def modified_powells(func, initial, max_iters, evals_per_vector, scale):
     bidir = [True] * len(vectors)
 
     point = initial
+    if cb_eval is not None:
+        cb_eval('initial', None, point)
     (best_f, cues) = func(initial, None)
+    if cb_acc is not None:
+        cb_acc('initial', None, point, best_f, cues)
     best_vector = 0
     best_vector_increase = 0.
-    line = LineSearchBisection(func)
+    line = LineSearchBisection(func, cb_eval, cb_acc, cb_rej)
     num_rejections = 0
     num_evals = 0
     for iteration in range(max_iters):
         for (vec_num, vector) in enumerate(vectors):
-            print('* doing vector {}: {}.'.format(vec_num, vector))
+            if cb_vec is not None:
+                cb_vec(iteration, vec_num, len(vectors),
+                       vector, point, best_f)
             (point, f, cues, rej) = line.search(point,
                                                 vector,
                                                 cues,
@@ -152,20 +164,23 @@ def modified_powells(func, initial, max_iters, evals_per_vector, scale):
             best_f = f
             num_rejections += rej
             num_evals += evals_per_vector
+        if best_vector_increase == 0:
+            print('No improvement in this iteration')
+            return point
         # remove best vector, replace with combo
         vectors.pop(best_vector)
         bidir.pop(best_vector)
         scale = float(num_evals - num_rejections) / num_evals
-        print('evals {}, rejs {}, scale {}'.format(num_evals, num_rejections, scale))
         vectors.insert(0, [(x - y) * scale for (x, y) in zip(point, initial)])
         bidir.insert(0, False)
-        print(vectors[0])
+        best_vector_increase = 0.
         if point == initial:
             print('No improvement from initial point')
             return initial
 
     # finally search along the last combination vector
-    print('* doing final vector: {}'.format(vectors[0]))
+    if cb_vec is not None:
+        cb_vec('final', 0, 1, vectors[0], point, best_f)
     (point, f, cues, rej) = line.search(
         point, vectors[0], cues, best_f, evals_per_vector)
         

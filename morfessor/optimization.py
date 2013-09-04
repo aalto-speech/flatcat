@@ -119,48 +119,50 @@ class LineSearchBisection(object):
         return (best, best_f, best_cues, num_rejections)
 
 
-def modified_powells(func, initial, max_iters, max_evals, scale):
+def modified_powells(func, initial, max_iters, evals_per_vector, scale):
     # Initial vectors are aligned to the axes
     vectors = []
     for (i, iv) in enumerate(initial):
         vectors.append([0] * len(initial))
         vectors[i][i] = float(scale)
+    bidir = [True] * len(vectors)
 
-    # + 1 is for the final search along the combination vector
-    total_vector_loops = (max_iters * len(vectors)) + 1
-    evals_per_vector = int(math.ceil(float(max_evals - 1) / total_vector_loops))
-    print('loops: {}, evals per vec: {}'.format(total_vector_loops, evals_per_vector))
-    evals_left = max_evals - evals_per_vector - 1
     point = initial
     (best_f, cues) = func(initial, None)
     best_vector = 0
     best_vector_increase = 0.
     line = LineSearchBisection(func)
     num_rejections = 0
+    num_evals = 0
     for iteration in range(max_iters):
         for (vec_num, vector) in enumerate(vectors):
-            print('* doing vector {}: {}. evals_left {}'.format(vec_num, vector, evals_left))
-            if evals_left <= 0:
-                break
-            evals = min(evals_left, evals_per_vector)
-            (point, f, cues, rej) = line.search(
-                point, vector, cues, best_f, evals, (iteration == 0))
+            print('* doing vector {}: {}.'.format(vec_num, vector))
+            (point, f, cues, rej) = line.search(point,
+                                                vector,
+                                                cues,
+                                                best_f,
+                                                evals_per_vector,
+                                                bidir[vec_num])
+            # Only first search along combo vector is unidirectional
+            bidir[vec_num] = True
             assert f >= best_f
             if f - best_f > best_vector_increase:
                 best_vector = vec_num
                 best_vector_increase = f - best_f
             best_f = f
-            evals_left -= evals
             num_rejections += rej
+            num_evals += evals_per_vector
         # remove best vector, replace with combo
         vectors.pop(best_vector)
-        vectors.insert(0, [x - y for (x, y) in zip(point, initial)])
+        bidir.pop(best_vector)
+        scale = float(num_evals - num_rejections) / num_evals
+        print('evals {}, rejs {}, scale {}'.format(num_evals, num_rejections, scale))
+        vectors.insert(0, [(x - y) * scale for (x, y) in zip(point, initial)])
+        bidir.insert(0, False)
         print(vectors[0])
         if point == initial:
             print('No improvement from initial point')
             return initial
-        if evals_left <= 0:
-            break
 
     # finally search along the last combination vector
     print('* doing final vector: {}'.format(vectors[0]))

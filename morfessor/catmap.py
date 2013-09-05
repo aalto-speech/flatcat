@@ -2269,7 +2269,6 @@ class WeightLearning(object):
 
         callbacks = self._make_checkpoint()
         self.initial = [getter(self.smodel.model) for getter in self.getters]
-        _logger.info('WL Initial weights: {}'.format(self.initial))
         scale = 1. / min(1, self.smodel.model._iteration_number)
 
         majority_vote = optimization.MajorityVote(self.evaluate_parameters,
@@ -2283,8 +2282,10 @@ class WeightLearning(object):
                                               cb_eval=self._cb_eval,
                                               cb_acc=self._cb_acc,
                                               cb_rej=self._cb_rej)
+        point = self.project(point)
 
         # Start normal training from the checkpoint using the optimized weight
+        self._load_checkpoint()
         self.smodel.model.training_focus = None
         self.smodel.model.toggle_callbacks(callbacks)
         for (i, val) in enumerate(point):
@@ -2349,7 +2350,8 @@ class WeightLearning(object):
         self.smodel.model = self.io.read_binary_model_file(self.checkpointfile)
         self.smodel.model.post_load()
 
-    def _cb_vec(self, iteration, tot_iters, vec_num, tot_vecs, vector, point, best_f):
+    def _cb_vec(self, iteration, tot_iters, vec_num, tot_vecs,
+                vector, point, best_f, cues=None):
         if iteration == 'final':
             _logger.info(
                 'WL final iter. Searching along vector ({})'.format(vector))
@@ -2357,24 +2359,24 @@ class WeightLearning(object):
             _logger.info(
                 'WL iter {}/{}. Searching along vector {}/{} ({})'.format(
                     iteration + 1, tot_iters, vec_num + 1, tot_vecs, vector))
-        self._log_point('Current best weights', point, best_f)
+        self._log_point('Current best weights', point, best_f, cues)
 
     def _cb_eval(self, eval_num, tot_evals, point):
         if eval_num == 'initial':
             label = 'WL evaluating initial'
         else:
-            label = 'WL step {}/{}. Evaluating'.format(eval_num, tot_evals)
+            label = 'WL step {}/{}. Evaluating'.format(eval_num + 1, tot_evals)
         self._log_point(label, point)
 
     def _cb_acc(self, eval_num, tot_evals, point, f, cues):
         if eval_num == 'initial':
             label = 'WL initial point'
         else:
-            label = 'WL accepted step {}/{} to'.format(eval_num, tot_evals)
+            label = 'WL accepted step {}/{}'.format(eval_num + 1, tot_evals)
         self._log_point(label, point, f, cues)
 
     def _cb_rej(self, eval_num, tot_evals, point, f, best, best_f, best_cues):
-        label = 'WL rejected step {}/{} to'.format(eval_num, tot_evals)
+        label = 'WL rejected step {}/{}'.format(eval_num + 1, tot_evals)
         self._log_point(label, point, f)
         self._log_point('WL reverting to', best, best_f, best_cues)
         

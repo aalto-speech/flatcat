@@ -40,7 +40,7 @@ class MajorityVote(object):
             or (None, None) if aborted early
         """
         fs = []
-        cues = [[]] * len(point)
+        cues = [[] for _ in range(len(point))]
         decisions = []
         for j in range(self.num_sets):
             if self._early_abort(decisions):
@@ -53,7 +53,7 @@ class MajorityVote(object):
                 decisions.append(f > prev_best_f)
             for (i, d) in enumerate(cue):
                 cues[i].append(d)
-        # Direction cues are -1, 0 or 1,
+        # Direction cues are -1, 0, 1 or None
         # allowing majority vote by median
         direction_cues = [median(d) for d in cues]
         return (median(fs), direction_cues)
@@ -289,8 +289,6 @@ def modified_powells(func, initial, max_iters, evals_per_vector, scale=1.0,
         cb_eval('initial', None, point)
     # Evaluating the function at the initial point
     (best_f, cues) = func(initial, None)
-    if cb_acc is not None:
-        cb_acc('initial', None, point, best_f, cues)
     best_vector = 0
     line = LineSearchBisection(func, cb_eval, cb_acc, cb_rej)
     num_rejections = 0
@@ -299,8 +297,8 @@ def modified_powells(func, initial, max_iters, evals_per_vector, scale=1.0,
         best_vector_sq_step = 0.
         for (vec_num, vector) in enumerate(vectors):
             if cb_vec is not None:
-                cb_vec(iteration, vec_num, len(vectors),
-                       vector, point, best_f)
+                cb_vec(iteration, max_iters, vec_num, len(vectors),
+                       vector, point, best_f, cues)
             (point, f, cues, sq_step, rej) = line.search(point,
                                                          vector,
                                                          cues,
@@ -338,7 +336,7 @@ def modified_powells(func, initial, max_iters, evals_per_vector, scale=1.0,
 
     # Finally search along the last combination vector
     if cb_vec is not None:
-        cb_vec('final', max_iters, 0, 1, vectors[0], point, best_f)
+        cb_vec('final', max_iters, 0, 1, vectors[0], point, best_f, cues)
     (point, f, cues, rej) = line.search(
         point, vectors[0], cues, best_f, evals_per_vector)
         
@@ -373,7 +371,7 @@ def single_dimension(func, initial, evals, scale=1.0,
     line = LineSearchBisection(func, cb_eval, cb_acc, cb_rej)
 
     if cb_vec is not None:
-        cb_vec(0, 1, 0, 1, vector, point, best_f)
+        cb_vec(0, 1, 0, 1, vector, point, best_f, cues)
     (point, f, cues, sq_step, rej) = line.search(point,
                                                  vector,
                                                  cues,

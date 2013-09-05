@@ -708,15 +708,36 @@ Simple usage examples (training and testing):
             default=1.0, metavar='<float>',
             help="Corpus weight parameter (default %(default)s); "
             "sets the initial value if --develset is used.")
-    add_arg('--weightlearn-epochs-first', dest='weightlearn_epochs_first',
-            type=int, default=5, metavar='<int>',
-            help='Number of epochs of weight learning ' +
+    add_arg('--weightlearn-parameters', dest='weightlearn_params', type=str,
+            default='annotationweight,corpusweight',
+            metavar='<list>',
+            help='The sequence of parameters to optimize ' +
+                 'in weight learning. ' +
+                 'The format of the list is a string of (unquoted) ' +
+                 'parameter names separated by single commas (no space). ' +
+                 "(default '%(default)s').")
+    add_arg('--weightlearn-iters-first', dest='weightlearn_iters_first',
+            type=int, default=2, metavar='<int>',
+            help='Number of iterations of weight learning ' +
                  'in weight learning performed before the first training ' +
                  'iteration ' +
                  '(default %(default)s).')
-    add_arg('--weightlearn-epochs', dest='weightlearn_epochs',
+    add_arg('--weightlearn-iters', dest='weightlearn_iters',
+            type=int, default=1, metavar='<int>',
+            help='Number of iterations of weight learning ' +
+                 'in between-iteration weight updates ' +
+                 '(default %(default)s).')
+    add_arg('--weightlearn-evals-first', dest='weightlearn_evals_first',
+            type=int, default=5, metavar='<int>',
+            help='Number of objective function evaluations per line search ' +
+                 'in weight learning performed before the first training ' +
+                 'iteration. ' +    # FIXME total number of evals
+                 'Each function evaluation consists of partially training ' +
+                 'the model weightlearn-sample-sets times ' +
+                 '(default %(default)s).')
+    add_arg('--weightlearn-evals', dest='weightlearn_evals',
             type=int, default=3, metavar='<int>',
-            help='Number of epochs of weight learning ' +
+            help='Number of objective function evaluations per line search ' +
                  'in between-iteration weight updates ' +
                  '(default %(default)s).')
     add_arg('--weightlearn-depth-first', dest='weightlearn_depth_first',
@@ -730,7 +751,7 @@ Simple usage examples (training and testing):
             help='Number of times each training operation is performed' +
                  'in between-iteration weight updates ' +
                  '(default %(default)s).')
-    add_arg('--weightlearn-sample-size', dest='wlearn_sample_size', type=int,
+    add_arg('--weightlearn-sample-size', dest='weightlearn_sample_size', type=int,
             default=2000, metavar='<int>',
             help='A subset of this size is sampled (with repetition, ' +
             'weighting according to occurrence count) from the corpus. ' +
@@ -738,7 +759,7 @@ Simple usage examples (training and testing):
             'learning, the local search of the model training is restricted ' +
             'to this set, to reduce computation time. ' +
             '(default %(default)s); ')
-    add_arg('--weightlearn-sample-sets', dest='wlearn_sample_sets', type=int,
+    add_arg('--weightlearn-sample-sets', dest='weightlearn_sample_sets', type=int,
             default=5, metavar='<int>',
             help='Make a majority decision based on this number of ' +
             'weightlearning sample sets. ' +
@@ -952,33 +973,30 @@ def catmap_main(args):
 
     # Perform weight learning using development annotations
     if develannots is not None:
-        weight_updater_args = [
+        weight_learning = catmap.WeightLearning(
+            args.weightlearn_iters_first,
+            args.weightlearn_evals_first,
+            args.weightlearn_depth_first,
+            args.weightlearn_iters,
+            args.weightlearn_evals,
+            args.weightlearn_depth,
             develannots,
-            heuristic,
+            shared_model,
             io,
             args.checkpointfile,
-            args.weightlearn_epochs_first,
-            args.weightlearn_epochs,
-            args.weightlearn_depth_first,
-            args.weightlearn_depth]
-        corpus_weight_updater = catmap.CorpusWeightUpdater(
-            *weight_updater_args)
-        if shared_model.model._supervised:
-            anno_weight_updater = catmap.AnnotationWeightUpdater(
-                *weight_updater_args)
-            combo_updater = catmap.CombinationWeightUpdater([
-                anno_weight_updater,
-                corpus_weight_updater,
-                anno_weight_updater])
-            weight_learn_func = combo_updater.weight_learning
-        else:
-            weight_learn_func = corpus_weight_updater.weight_learning
+            heuristic)
+        for param in args.weightlearn_params.split(','):
+            if param == 'corpusweight':
+                weight_learning.add_corpus_weight()
+            elif param == 'annotationweight':
+                if shared_model.model._supervised:
+                    weight_learning.add_annotation_weight()
         shared_model.model.generate_focus_samples(
-            args.wlearn_sample_sets,
-            args.wlearn_sample_size)
+            args.weightlearn_sample_sets,
+            args.weightlearn_sample_size)
 
         _logger.info('Performing initial weight learning')
-        must_train = weight_learn_func(shared_model)
+        must_train = weight_learning.optimize(first=True)
 
         shared_model.model.training_focus = None
     else:
@@ -1007,7 +1025,7 @@ def catmap_main(args):
                                max_shift_distance=args.max_shift_distance,
                                min_shift_remainder=args.min_shift_remainder)
         ts = time.time()
-        catmap.train_batch(shared_model, weight_learn_func)
+        catmap.train_batch(shared_model, weight_learning)
         _logger.info('Final cost: {}'.format(shared_model.model.get_cost()))
         te = time.time()
         _logger.info('Training time: {:.3f}s'.format(te - ts))

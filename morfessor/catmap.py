@@ -19,6 +19,7 @@ import sys
 
 from . import baseline
 from . import utils
+from . import optimization
 from .categorizationscheme import MorphUsageProperties, WORD_BOUNDARY
 from .categorizationscheme import ByCategory, get_categories, CategorizedMorph
 from .categorizationscheme import DEFAULT_CATEGORY
@@ -42,7 +43,7 @@ SortedAnalysis = collections.namedtuple('SortedAnalysis',
                                          'index', 'brakdown'])
 
 
-def train_batch(smodel, weight_learn_func=None):
+def train_batch(smodel, weight_learning=None):
     """Perform batch training on the given model.
 
     This is a function instead of a method of CatmapModel,
@@ -63,9 +64,9 @@ def train_batch(smodel, weight_learn_func=None):
         limit = smodel.model._cost_convergence_limit(
             smodel.model._min_iter_cost_gain)
 
-        if (weight_learn_func is not None and
+        if (weight_learning is not None and
                 iteration < smodel.model._max_iterations - 1):
-            wl_force_another = weight_learn_func(smodel)
+            wl_force_another = weight_learning.optimize()
         u_force_another = smodel.model._iteration_update()
         post_update_cost = smodel.model.get_cost()
         if post_update_cost != cost:
@@ -2166,8 +2167,8 @@ class CatmapAnnotatedCorpusEncoding(object):
             category, morph)
 
 
-class CorpusWeightUpdater(object):
-    """Corpus weight learning.
+class WeightLearning(object):
+    """Corpus and annotation weight learning.
     Decisions are based on comparisons against a development set
     with a gold standard segmentation.
 
@@ -2182,38 +2183,66 @@ class CorpusWeightUpdater(object):
     by comparing the development set f-measures of the models
     partially trained with different corpus weights.
 
-    The step size is gradually decreased.
+    Arguments:  FIXME
+        smodel -- Wrapped initial model to perform weight learning on.
+                  Do not keep references to the model object within
+                  the wrapper, as it will not be updated and keeping
+                  references prevents it from being garbage collected.
+                  Instead carry on using the returned model.
     """
     def __init__(self,
-                 annotations,
-                 heuristic,
-                 io,
-                 checkpointfile,
-                 epochs_first=1,
-                 epochs=1,
-                 depth_first=1,
-                 depth=1,
-                 threshold=0.01):
-        self.annotations = annotations
-        self.heuristic = heuristic
+                 iters_first, evals_per_vector_first, depth_first,
+                 iters, evals_per_vector, depth,
+                 dev_annotations,
+                 smodel, io, checkpointfile,
+                 heuristic = None):
+        self.iters_first = iters_first
+        self.evals_first = evals_per_vector_first
+        self.depth_first = depth_first
+        self.iters = iters
+        self.evals = evals_per_vector
+        self.depth = depth
+        self.depth_current = depth_first
+        self.dev_annotations = dev_annotations
+        self.smodel = smodel
         self.io = io
         self.checkpointfile = checkpointfile
-        self.epochs_first = epochs_first
-        self.epochs = epochs
-        self.depth_first = depth_first
-        self.depth = depth
-        self.threshold = threshold
-        self.num_sets = 0
-        self._log_variable = 'corpus weight'
+        self.heuristic = heuristic
+        self.threshold = None
 
-    def weight_learning(self, smodel, first=True):
+        self.getters = []
+        self.setters = []
+        self.cues = []
+        self.dimensions = []
+
+    def add_corpus_weight(self, threshold=0.01):
+        self.threshold = threshold
+        self.getters.append(lambda model: model.get_corpus_coding_weight())
+        self.setters.append(
+            lambda model, value: model.set_corpus_coding_weight(value))
+        self.cues.append(lambda f, d, pre, rec: d)
+        self.dimensions.append('Corpus weight (alpha)')
+
+    def add_annotation_weight(self):
+        msg = 'Cannot learn annotation weight in unsupervised mode'
+        assert self.smodel.model._supervised, msg
+        self.getters.append(lambda model: model._annot_coding.weight)
+
+        def annotation_weight_setter(model, value):
+            model._annot_coding.weight = value
+
+        self.setters.append(annotation_weight_setter)
+        self.cues.append(lambda f, d, pre, rec: None)
+        self.dimensions.append('Annotation weight (beta)')
+
+    #def add_ppl_thresh(self):
+    #    self.getters.append(
+    #    self.setters.append(
+    #    self.cues.append(
+    #    self.dimensions.append('Perplexity threshold')
+
+    def optimize(self, first=True):
         """Perform weight learning on the given model.
-        Arguments:
-            smodel -- Wrapped initial model to perform weight learning on.
-                      Do not keep references to the model object within
-                      the wrapper, as it will not be updated and keeping
-                      references prevents it from being garbage collected.
-                      Instead carry on using the returned model.
         Returns:
             force_another -- If the optimal weight changed, at least one
                              more iteration of learning should be performed,
@@ -2226,39 +2255,60 @@ class CorpusWeightUpdater(object):
         """
         if first:
             max_iters = self.iters_first
-            max_evals = self.evals_first
+            evals_per_vector = self.evals_first
+            self.depth_current = self.depth_first
         else:
             max_iters = self.iters
-            max_evals = self.evals
+            evals_per_vector = self.evals
+            self.depth_current = self.depth
 
-        if smodel.model.training_focus_sets is not None:
-            self.num_sets = len(smodel.model.training_focus_sets)
+        if self.smodel.model.training_focus_sets is not None:
+            self.num_sets = len(self.smodel.model.training_focus_sets)
         else:
             self.num_sets = 1
 
         callbacks = self._make_checkpoint()
-        initial = [getter() for getter in self.getters]
-        _logger.info('Initial weights: {}'.format(initial))
+        self.initial = [getter(self.smodel.model) for getter in self.getters]
+        _logger.info('WL Initial weights: {}'.format(self.initial))
+        scale = 1. / min(1, self.smodel.model._iteration_number)
 
         majority_vote = optimization.MajorityVote(self.evaluate_parameters,
                                                   self.num_sets).evaluate
-        point = optimization.modified_powells(majority_vote, initial, max_iters, max_evals)
+        point = optimization.modified_powells(majority_vote,
+                                              self.deproject(self.initial),
+                                              max_iters,
+                                              evals_per_vector,
+                                              scale,
+                                              cb_vec=self._cb_vec,
+                                              cb_eval=self._cb_eval,
+                                              cb_acc=self._cb_acc,
+                                              cb_rej=self._cb_rej)
 
         # Start normal training from the checkpoint using the optimized weight
-        smodel.model.training_focus = None
-        smodel.model.toggle_callbacks(callbacks)
+        self.smodel.model.training_focus = None
+        self.smodel.model.toggle_callbacks(callbacks)
         for (i, val) in enumerate(point):
-            self.setters[i](val)
-        _logger.info('Learned weights: {}'.format(point))
+            self.setters[i](self.smodel.model, val)
+        _logger.info('WL Learned weights: {}'.format(point))
 
-        return point != initial
+        return point != self.initial
+
+    def project(self, point):
+        return [(math.exp(a) * ia)
+                for (a, ia) in zip(point, self.initial)]
+
+    def deproject(self, point):
+        return [(math.log(a) - math.log(ia))
+                for (a, ia) in zip(point, self.initial)]
+ 
 
     def evaluate_parameters(self, point, focus):
+        point = self.project(point)
         self._load_checkpoint()
         for (i, val) in enumerate(point):
-            self.setters[i](val)
+            self.setters[i](self.smodel.model, val)
         self.smodel.model.set_focus_sample(focus)
-        for _ in range(depth):
+        for _ in range(self.depth_current):
             self.smodel.model.weightlearn_probe()
         (f, d, pre, rec) = self._evaluate()
         direction_cues = [cue(f, d, pre, rec)
@@ -2267,7 +2317,7 @@ class CorpusWeightUpdater(object):
 
     def _evaluate(self):
         model = self.smodel.model
-        tmp = self.annotations.items()
+        tmp = self.dev_annotations.items()
         wlist, annotations = zip(*tmp)
 
         if self.heuristic is None:
@@ -2296,21 +2346,55 @@ class CorpusWeightUpdater(object):
         return callbacks
 
     def _load_checkpoint(self):
-        smodel.model = self.io.read_binary_model_file(self.checkpointfile)
-        smodel.model.post_load()
-        
-# Old very homebrew implementation
+        self.smodel.model = self.io.read_binary_model_file(self.checkpointfile)
+        self.smodel.model.post_load()
 
+    def _cb_vec(self, iteration, tot_iters, vec_num, tot_vecs, vector, point, best_f):
+        if iteration == 'final':
+            _logger.info(
+                'WL final iter. Searching along vector ({})'.format(vector))
+        else:
+            _logger.info(
+                'WL iter {}/{}. Searching along vector {}/{} ({})'.format(
+                    iteration + 1, tot_iters, vec_num + 1, tot_vecs, vector))
+        self._log_point('Current best weights', point, best_f)
+
+    def _cb_eval(self, eval_num, tot_evals, point):
+        if eval_num == 'initial':
+            label = 'WL evaluating initial'
+        else:
+            label = 'WL step {}/{}. Evaluating'.format(eval_num, tot_evals)
+        self._log_point(label, point)
+
+    def _cb_acc(self, eval_num, tot_evals, point, f, cues):
+        if eval_num == 'initial':
+            label = 'WL initial point'
+        else:
+            label = 'WL accepted step {}/{} to'.format(eval_num, tot_evals)
+        self._log_point(label, point, f, cues)
+
+    def _cb_rej(self, eval_num, tot_evals, point, f, best, best_f, best_cues):
+        label = 'WL rejected step {}/{} to'.format(eval_num, tot_evals)
+        self._log_point(label, point, f)
+        self._log_point('WL reverting to', best, best_f, best_cues)
+        
+    def _log_point(self, label, point, f=None, cues=None):
+        if f is None:
+            _logger.info('{} parameters:'.format(label))
+        else:
+            _logger.info('{}. F-measure {}. Parameters:'.format(label, f))
+        point = self.project(point)
+        if cues is None:
+            cues = [None] * len(point)
+        for (dim, val, cue) in zip(self.dimensions, point, cues):
+            if cue is None:
+                _logger.info('{}: {}'.format(dim, val))
+            else:
+                _logger.info('{}: {}. Direction cue: {}'.format(dim, val, cue))
+
+# Old very homebrew implementation
+"""
     def update_model(self, model, epochs, direction):
-        """Calculates a new corpus coding weight,
-        sets it in the model and returns the value.
-        Arguments:
-            model -- Model to be updated
-            epochs -- A parameter controlling the size of the step.
-                      Earlier steps are larger than later steps.
-            direction --  1 for oversegmentation (too small corpus weight)
-                         -1 for undersegmentation (too large corpus weight)
-        """
         weight = self._getter(model)
         if direction == 0:
             return weight
@@ -2386,30 +2470,21 @@ class CorpusWeightUpdater(object):
         return self._getter(smodel.model) != first_weight
 
     def _prepare_alternative(self, model, i, direction, weight_prev):
-        """Perform preparations that are necessary for an alternative,
-        but not for the initial corpus coding weight."""
         self._setter(model, weight_prev)
         weight_next = self.update_model(model, i, direction)
         return weight_next
 
     def _getter(self, model):
-        """Allows overriding for learning other parameters"""
         return model.get_corpus_coding_weight()
 
     def _setter(self, model, value):
-        """Allows overriding for learning other parameters"""
         model.set_corpus_coding_weight(value)
 
     def _reject_direction(self, prev_direction):
-        """Allows overriding for learning other parameters"""
         return prev_direction
 
     def _majority_probe(self, f_prev, weight_prev, depth, iteration,
                         prepare_func, first_model=None):
-        """Perform the probe for each weightlearning set,
-        and aggregate the results.
-        Returns: (accept, weight_next, f_mean, direction)
-        """
         fs = []
         directions = []
         decisions = []
@@ -2441,66 +2516,7 @@ class CorpusWeightUpdater(object):
             direction = direction / abs(direction)
         accept = (sum(decisions) >= (float(len(decisions)) / 2))
         return (accept, weight_next, f_mean, direction)
-
-
-class AnnotationWeightUpdater(CorpusWeightUpdater):
-    def __init__(self,
-                 annotations,
-                 heuristic,
-                 io,
-                 checkpointfile,
-                 epochs_first=1,
-                 epochs=1,
-                 depth_first=1,
-                 depth=1,
-                 threshold=0.01):
-        super(AnnotationWeightUpdater, self).__init__(
-                    annotations,
-                    heuristic,
-                    io,
-                    checkpointfile,
-                    epochs_first,
-                    epochs,
-                    depth_first,
-                    depth,
-                    threshold)
-        self.direction = 1
-        self._log_variable = 'annotation weight'
-
-    def weight_learning(self, smodel):
-        # Start with rule of thumb, unless startpoint is specified
-        smodel.model._annot_coding.update_weight()
-        smodel.model._annot_coding.do_update_weight = False
-
-        return super(AnnotationWeightUpdater, self).weight_learning(smodel)
-
-    def _getter(self, model):
-        model._annot_coding.do_update_weight = False
-        return model._annot_coding.weight
-
-    def _setter(self, model, value):
-        model._annot_coding.weight = value
-
-    def _reject_direction(self, prev_direction):
-        """Inverts the previous direction"""
-        self.direction *= -1
-        return self.direction
-
-    def calculate_update(self, model):
-        (f, _) = super(AnnotationWeightUpdater, self).calculate_update(model)
-        return (f, self.direction)
-
-
-class CombinationWeightUpdater(object):
-    def __init__(self, components):
-        self.components = components
-
-    def weight_learning(self, smodel):
-        forces = []
-        for component in self.components:
-            forces.append(component.weight_learning(smodel))
-        return any(forces)
-
+"""
 
 class ChangeCounts(object):
     """A data structure for the aggregated set of changes to

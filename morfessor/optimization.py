@@ -58,7 +58,7 @@ class MajorityVote(object):
         direction_cues = [median(d) for d in cues]
         return (median(fs), direction_cues)
 
-    def _early_abort(decisions):
+    def _early_abort(self, decisions):
         """Returns True if it is no longer possible to
         beat the previous best result."""
         successes = sum(decisions)
@@ -338,7 +338,7 @@ def modified_powells(func, initial, max_iters, evals_per_vector, scale=1.0,
 
     # Finally search along the last combination vector
     if cb_vec is not None:
-        cb_vec('final', 0, 1, vectors[0], point, best_f)
+        cb_vec('final', max_iters, 0, 1, vectors[0], point, best_f)
     (point, f, cues, rej) = line.search(
         point, vectors[0], cues, best_f, evals_per_vector)
         
@@ -373,7 +373,7 @@ def single_dimension(func, initial, evals, scale=1.0,
     line = LineSearchBisection(func, cb_eval, cb_acc, cb_rej)
 
     if cb_vec is not None:
-        cb_vec(0, 0, 1, vector, point, best_f)
+        cb_vec(0, 1, 0, 1, vector, point, best_f)
     (point, f, cues, sq_step, rej) = line.search(point,
                                                  vector,
                                                  cues,

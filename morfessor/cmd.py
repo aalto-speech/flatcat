@@ -764,6 +764,10 @@ Simple usage examples (training and testing):
             help='Make a majority decision based on this number of ' +
             'weightlearning sample sets. ' +
             '(default %(default)s); ')
+    add_arg('--weightlearn-cue-rejection-thresh', dest='weightlearn_cuethresh',
+            type=int, default=4, metavar='<int>',
+            help='Stop using the direction cue after this many rejected steps ' +
+            '(default %(default)s); ')
     add_arg('-W', '--annotationweight', dest="annotationweight",
             type=float, default=None, metavar='<float>',
             help="Corpus weight parameter for annotated data (if unset, the "
@@ -980,6 +984,7 @@ def catmap_main(args):
             args.weightlearn_iters,
             args.weightlearn_evals,
             args.weightlearn_depth,
+            args.weightlearn_cuethresh,
             develannots,
             shared_model,
             io,

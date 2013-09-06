@@ -128,13 +128,9 @@ class Intervals(object):
         self.a = x          # active interval shortened
         self.rejected_prev = True
 
-    def use_direction_cue(self, cues):
+    def use_direction_cue(self, cues, ignore=False):
         """Sets the direction (active part of the interval pair),
         using the direction cues."""
-        # FIXME: if eval limit is increased, consider having a
-        # treshold on the ratio of interval sizes for using the cues,
-        # To avoid wasting evals on fine combing one side of the best
-        # point while leaving the other side very rough.
         cumulative = 0.
         for (v, c) in zip(self.vector, cues):
             if c is not None:
@@ -143,8 +139,9 @@ class Intervals(object):
             # Direction cues, weighted by the contribution of their dimension
             # to the search direction, sum up to prefer the reverse side
             self._flip()
-        elif cumulative == 0 and self.rejected_prev:
-            # No dimensions returned any direction cues.
+        elif (cumulative == 0 or ignore) and self.rejected_prev:
+            # No dimensions returned any direction cues,
+            # or enough steps have been rejected for abandoning the cue.
             # Falling back to alternating the search direction when a step
             # is rejected
             self._flip()
@@ -166,12 +163,17 @@ class LineSearchBisection(object):
         func -- The objective function (A function taking as first argument
                 the point to be evaluated, and as second argument the
                 best value found this far).
+        cue_rejection_thresh -- Ignore the direction cue for remaining
+                                steps if this many steps have been rejected.
+                                Default: None (always follow cue)
         cb_eval -- Called before each function evaluation.
         cb_acc -- Called when a step is accepted.
         cb_rej -- Called when a step is rejected.
     """
-    def __init__(self, func, cb_eval=None, cb_acc=None, cb_rej=None):
+    def __init__(self, func, cue_rejection_thresh=None,
+                 cb_eval=None, cb_acc=None, cb_rej=None):
         self.func = func
+        self.cue_rejection_thresh = cue_rejection_thresh
         self.cb_eval = cb_eval
         self.cb_acc = cb_acc
         self.cb_rej = cb_rej
@@ -223,13 +225,16 @@ class LineSearchBisection(object):
                 if self.cb_rej is not None:
                     self.cb_rej(i, evals, cursor, f, best, best_f, best_cues)
             # Possibly reverse the direction of the search
-            intervals.use_direction_cue(best_cues)
+            ignore = (self.cue_rejection_thresh is not None and 
+                      num_rejections >= self.cue_rejection_thresh)
+            intervals.use_direction_cue(best_cues, ignore)
 
         sq_step = sum(((i - b) ** 2) for (i, b) in zip(initial, best))
         return (best, best_f, best_cues, sq_step, num_rejections)
 
 
 def modified_powells(func, initial, max_iters, evals_per_vector, scale=1.0,
+                     cue_rejection_thresh=None,
                      cb_vec=None, cb_eval=None, cb_acc=None, cb_rej=None):
     """A variant of Powell's algorithm.
     Powell's algorithm finds the maximum of a multivariate function,
@@ -264,6 +269,9 @@ def modified_powells(func, initial, max_iters, evals_per_vector, scale=1.0,
                             evals_per_vector
                                     # for the final line search
         scale -- A scaling factor for the initial steps (Default 1.0)
+        cue_rejection_thresh -- Ignore the direction cue for remaining
+                                steps if this many steps have been rejected.
+                                Default: None (always follow cue)
         cb_vec -- Called before performing a line search.
         cb_eval -- Called before each function evaluation.
         cb_acc -- Called when a step is accepted.
@@ -275,6 +283,7 @@ def modified_powells(func, initial, max_iters, evals_per_vector, scale=1.0,
                                 initial,
                                 max_iters * evals_per_vector,
                                 scale,
+                                cue_rejection_thresh,
                                 cb_vec, cb_eval, cb_acc, cb_rej)
 
     # Initial vectors are aligned to the axes
@@ -290,7 +299,8 @@ def modified_powells(func, initial, max_iters, evals_per_vector, scale=1.0,
     # Evaluating the function at the initial point
     (best_f, cues) = func(initial, None)
     best_vector = 0
-    line = LineSearchBisection(func, cb_eval, cb_acc, cb_rej)
+    line = LineSearchBisection(func, cue_rejection_thresh,
+                               cb_eval, cb_acc, cb_rej)
     num_rejections = 0
     num_evals = 0
     for iteration in range(max_iters):
@@ -337,13 +347,14 @@ def modified_powells(func, initial, max_iters, evals_per_vector, scale=1.0,
     # Finally search along the last combination vector
     if cb_vec is not None:
         cb_vec('final', max_iters, 0, 1, vectors[0], point, best_f, cues)
-    (point, f, cues, rej) = line.search(
+    (point, f, cues, sq_step, rej) = line.search(
         point, vectors[0], cues, best_f, evals_per_vector)
         
     return point
 
 
 def single_dimension(func, initial, evals, scale=1.0,
+                     cue_rejection_thresh=None,
                      cb_vec=None, cb_eval=None, cb_acc=None, cb_rej=None):
     """Optimize a single dimensional function using line search.
 
@@ -368,7 +379,8 @@ def single_dimension(func, initial, evals, scale=1.0,
     (best_f, cues) = func(initial, None)
     if cb_acc is not None:
         cb_acc('initial', None, point, best_f, cues)
-    line = LineSearchBisection(func, cb_eval, cb_acc, cb_rej)
+    line = LineSearchBisection(func, cue_rejection_thresh,
+                               cb_eval, cb_acc, cb_rej)
 
     if cb_vec is not None:
         cb_vec(0, 1, 0, 1, vector, point, best_f, cues)

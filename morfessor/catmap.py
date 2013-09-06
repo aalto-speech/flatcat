@@ -2193,6 +2193,7 @@ class WeightLearning(object):
     def __init__(self,
                  iters_first, evals_per_vector_first, depth_first,
                  iters, evals_per_vector, depth,
+                 cue_rejection_thresh,
                  dev_annotations,
                  smodel, io, checkpointfile,
                  heuristic = None):
@@ -2202,7 +2203,7 @@ class WeightLearning(object):
         self.iters = iters
         self.evals = evals_per_vector
         self.depth = depth
-        self.depth_current = depth_first
+        self.cue_rejection_thresh = cue_rejection_thresh
         self.dev_annotations = dev_annotations
         self.smodel = smodel
         self.io = io
@@ -2214,6 +2215,8 @@ class WeightLearning(object):
         self.setters = []
         self.cues = []
         self.dimensions = []
+
+        self.depth_current = depth_first
 
     def add_corpus_weight(self, threshold=0.01):
         self.threshold = threshold
@@ -2278,6 +2281,7 @@ class WeightLearning(object):
                                               max_iters,
                                               evals_per_vector,
                                               scale,
+                                              self.cue_rejection_thresh,
                                               cb_vec=self._cb_vec,
                                               cb_eval=self._cb_eval,
                                               cb_acc=self._cb_acc,

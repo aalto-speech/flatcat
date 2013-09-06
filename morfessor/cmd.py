@@ -1005,7 +1005,7 @@ def catmap_main(args):
 
         shared_model.model.training_focus = None
     else:
-        weight_learn_func = None
+        weight_learning = None
 
     # Train model, if there is new data to train on
     if args.trainmode == 'none':

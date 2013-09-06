@@ -1045,9 +1045,10 @@ class CatmapModel(object):
             word = self.segmentations[i]
             changed_morphs = set(self.detag_word(word.analysis))
             vrt = ViterbiResegmentTransformation(word, self)
-            changed_morphs = set(self.detag_word(vrt.result))
+            changed_morphs.update(self.detag_word(vrt.result))
 
-            yield ([vrt], set([i]), changed_morphs, set())
+            if word.analysis != vrt.result:
+                yield ([vrt], set([i]), changed_morphs, set())
 
     ### Private: reestimation
     #

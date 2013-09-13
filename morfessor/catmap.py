@@ -339,7 +339,6 @@ class CatmapModel(object):
             for _ in utils._progress(range(epoch_interval)):
                 try:
                     is_anno, _, w, atoms = next(data)
-                    print(is_anno, w, atoms)
                 except StopIteration:
                     more_tokens = False
                     break
@@ -358,7 +357,11 @@ class CatmapModel(object):
 
                 i_word = word_backlinks.get(w, None)
                 if add_count > 0:
-                    i_word = self._online_unlabeled_token(w, add_count, i_word)
+                    if is_anno:
+                        i_word = self._online_labeled_token(w, atoms, i_word)
+                    else:
+                        i_word = self._online_unlabeled_token(w, add_count,
+                                                              i_word)
                     word_backlinks[w] = i_word
                 segments = self.segmentations[i_word].analysis
 
@@ -380,6 +383,68 @@ class CatmapModel(object):
         newcost = self.get_cost()
         _logger.info("Tokens processed: %s\tCost: %s" % (token_num, newcost))
         return epochs, newcost
+
+    def _online_labeled_token(self, word, segments, i_word=None):
+        if not self._supervised:
+            self._annot_coding = CatmapAnnotatedCorpusEncoding(
+                                    self._corpus_coding,
+                                    weight=None)
+            self._supervised = True
+
+        if segments[0].category is None:
+            self._annotations_tagged = False
+
+        add_annotation_entry = False
+        count_diff = collections.Counter()
+        changes_unannot = ChangeCounts()
+        changes_annot = ChangeCounts()
+
+        if i_word is not None:
+            old_analysis = self.segmentations[i_word].analysis
+            changes_unannot.update(old_analysis, -1, corpus_index=i_word)
+            for morph in self.detag_word(old_analysis):
+                count_diff[morph] -= 1
+            if self._is_annotation(i_word):
+                # Correcting an earlier annotation
+                changes_annot.update(old_analysis, -1, corpus_index=i_word)
+            else:
+                # An incorrect segmentation is in the corpus
+                add_annotation_entry = True
+                # FIXME: replacing the unannotated corpus word with correct
+                # version (and propagating change?)
+        else:
+            # Just add to annotations
+            add_annotation_entry = True
+
+        for morph in self.detag_word(segments):
+            count_diff[morph] += 1
+        for (morph, count) in count_diff.items():
+            if count == 0:
+                continue
+            self._modify_morph_count(morph, count)
+
+        if segments[0].category is None:
+            new_analysis = self.viterbi_tag(segments)
+        else:
+            new_analysis = segments
+
+        changes_unannot.update(new_analysis, 1, corpus_index=i_word)
+        changes_annot.update(new_analysis, 1, corpus_index=i_word)
+        self._update_counts(changes_unannot, 1)
+        self._annot_coding.update_counts(changes_annot)
+        self._annot_coding.reset_contributions()
+
+        if add_annotation_entry:
+            i_word = len(self.annotations)
+            self.segmentations.insert(i_word, WordAnalysis(1, new_analysis))
+            self.annotations.append((word, WordAnalysis(1, segments)))
+            self._annot_coding.boundaries += 1
+            self._calculate_morph_backlinks()
+        else:
+            self.segmentations[i_word] = WordAnalysis(1, new_analysis)
+            self.annotations[i_word] = (word, WordAnalysis(1, segments))
+
+        return i_word
 
     def _online_unlabeled_token(self, word, add_count, i_word=None):
         skip_this = False
@@ -2107,6 +2172,21 @@ class CatmapAnnotatedCorpusEncoding(object):
 
         for (pair, count) in counts.transitions.items():
             self._transition_counts[pair] = count
+            assert self._transition_counts[pair] >= 0
+
+    def update_counts(self, counts):
+        """Updates the counts of emissions and transitions occurring
+        in the annotated corpus, building on earlier counts."""
+        for (cmorph, delta) in counts.emissions.items():
+            cat_index = get_categories().index(cmorph.category)
+            new_count = self._emission_counts[cmorph.morph][cat_index] + delta
+            assert new_count >= 0
+            new_counts = self._emission_counts[cmorph.morph]._replace(
+                **{cmorph.category: new_count})
+            self._emission_counts[cmorph.morph] = new_counts
+
+        for (pair, delta) in counts.transitions.items():
+            self._transition_counts[pair] += delta
             assert self._transition_counts[pair] >= 0
 
     def reset_contributions(self):

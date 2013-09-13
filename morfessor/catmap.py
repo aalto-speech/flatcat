@@ -321,9 +321,7 @@ class CatmapModel(object):
         self._skipcounter = collections.Counter()
         if count_modifier is not None:
             counts = {}
-        word_backlinks = {}
-        for (i, seg) in enumerate(self.segmentations):
-            word_backlinks[''.join(self.detag_word(seg.analysis))] = i
+        (word_backlinks, anno_backlinks) = self._online_backlinks()
 
         _logger.info("Starting online training")
 
@@ -356,14 +354,29 @@ class CatmapModel(object):
                     add_count = 1
 
                 i_word = word_backlinks.get(w, None)
+                i_anno = anno_backlinks.get(w, None)
                 if add_count > 0:
                     if is_anno:
-                        i_word = self._online_labeled_token(w, atoms, i_word)
+                        (i_word, i_anno, recalculate) = self._online_labeled_token(
+                            w, atoms, i_word, i_anno)
+                        print((i_word, i_anno, recalculate))
+                        print(self.segmentations[i_word], self.segmentations[i_anno])
+                        if recalculate:
+                            (word_backlinks, anno_backlinks) = (
+                                self._online_backlinks())
                     else:
                         i_word = self._online_unlabeled_token(w, add_count,
                                                               i_word)
-                    word_backlinks[w] = i_word
-                segments = self.segmentations[i_word].analysis
+                        print(i_word)
+                        i_anno = None
+                    if i_word is not None:
+                        word_backlinks[w] = i_word
+                    if i_anno is not None:
+                        anno_backlinks[w] = i_anno
+                if i_word is not None:
+                    segments = self.segmentations[i_word].analysis
+                else:
+                    segments = self.segmentations[i_anno].analysis
 
                 _logger.debug("#%s: %s -> %s" %
                               (token_num, w, segments))
@@ -384,7 +397,18 @@ class CatmapModel(object):
         _logger.info("Tokens processed: %s\tCost: %s" % (token_num, newcost))
         return epochs, newcost
 
-    def _online_labeled_token(self, word, segments, i_word=None):
+    def _online_backlinks(self):
+        word_backlinks = {}
+        anno_backlinks = {}
+        for (i, seg) in enumerate(self.segmentations):
+            joined = ''.join(self.detag_word(seg.analysis))
+            if self._is_annotation(i):
+                anno_backlinks[joined] = i
+            else:
+                word_backlinks[joined] = i
+        return (word_backlinks, anno_backlinks)
+
+    def _online_labeled_token(self, word, segments, i_word=None, i_anno=None):
         if not self._supervised:
             self._annot_coding = CatmapAnnotatedCorpusEncoding(
                                     self._corpus_coding,
@@ -400,15 +424,15 @@ class CatmapModel(object):
         changes_annot = ChangeCounts()
 
         if i_word is not None:
+            # An incorrect segmentation is in the corpus
             old_analysis = self.segmentations[i_word].analysis
             changes_unannot.update(old_analysis, -1, corpus_index=i_word)
             for morph in self.detag_word(old_analysis):
                 count_diff[morph] -= 1
-            if self._is_annotation(i_word):
+            if i_anno is not None:
                 # Correcting an earlier annotation
-                changes_annot.update(old_analysis, -1, corpus_index=i_word)
+                changes_annot.update(old_analysis, -1, corpus_index=i_anno)
             else:
-                # An incorrect segmentation is in the corpus
                 add_annotation_entry = True
                 # FIXME: replacing the unannotated corpus word with correct
                 # version (and propagating change?)
@@ -428,23 +452,24 @@ class CatmapModel(object):
         else:
             new_analysis = segments
 
+        if add_annotation_entry:
+            i_anno = len(self.annotations)
+            self.segmentations.insert(i_anno, WordAnalysis(1, new_analysis))
+            self.annotations.append((word, WordAnalysis(1, segments)))
+            self._annot_coding.boundaries += 1
+            self._calculate_morph_backlinks()
+            i_word += 1
+        else:
+            self.segmentations[i_anno] = WordAnalysis(1, new_analysis)
+            self.annotations[i_anno] = (word, WordAnalysis(1, segments))
+
         changes_unannot.update(new_analysis, 1, corpus_index=i_word)
-        changes_annot.update(new_analysis, 1, corpus_index=i_word)
+        changes_annot.update(new_analysis, 1, corpus_index=i_anno)
         self._update_counts(changes_unannot, 1)
         self._annot_coding.update_counts(changes_annot)
         self._annot_coding.reset_contributions()
 
-        if add_annotation_entry:
-            i_word = len(self.annotations)
-            self.segmentations.insert(i_word, WordAnalysis(1, new_analysis))
-            self.annotations.append((word, WordAnalysis(1, segments)))
-            self._annot_coding.boundaries += 1
-            self._calculate_morph_backlinks()
-        else:
-            self.segmentations[i_word] = WordAnalysis(1, new_analysis)
-            self.annotations[i_word] = (word, WordAnalysis(1, segments))
-
-        return i_word
+        return (i_word, i_anno, add_annotation_entry)
 
     def _online_unlabeled_token(self, word, add_count, i_word=None):
         skip_this = False

@@ -1018,7 +1018,7 @@ def catmap_main(args):
         data = io.read_corpus_files('-')
         shared_model.model.train_online(data, count_modifier=dampfunc,
                            epoch_interval=args.epochinterval,
-                           max_epochs=args.max_epochs)
+                           max_epochs=(args.max_iterations * args.max_epochs))
     if args.trainmode in ('batch', 'online+batch'):
         shared_model.model.batch_parameters(
                                min_epoch_cost_gain=args.min_epoch_cost_gain,

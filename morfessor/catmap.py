@@ -328,12 +328,13 @@ class CatmapModel(object):
         _logger.info("Starting online training")
 
         epochs = 0
-        i = 0
+        token_num = 0
         more_tokens = True
         self.reestimate_probabilities()
         while more_tokens:
             newcost = self.get_cost()
-            _logger.info("Tokens processed: %s\tCost: %s" % (i, newcost))
+            _logger.info(
+                "Tokens processed: %s\tCost: %s" % (token_num, newcost))
 
             for _ in utils._progress(range(epoch_interval)):
                 try:
@@ -346,60 +347,23 @@ class CatmapModel(object):
                     if not w in counts:
                         c = 0
                         counts[w] = 1
-                        addc = 1
+                        add_count = 1
                     else:
                         c = counts[w]
                         counts[w] = c + 1
-                        addc = count_modifier(c + 1) - count_modifier(c)
+                        add_count = count_modifier(c + 1) - count_modifier(c)
                 else:
-                    addc = 1
-                if addc > 0:
-                    skip_this = False
-                    if (self._use_skips and
-                            w in word_backlinks and
-                            self._test_skip(w)):
-                        # Only increase the word count, don't analyze
-                        skip_this = True
+                    add_count = 1
 
-                    if skip_this:
-                        i_new = word_backlinks[w]
-                        segments = self.segmentations[i_new].analysis
-                    else:
-                        segments, _ = self.viterbi_segment(w)
-
-                    change_counts = ChangeCounts()
-                    if w in word_backlinks:
-                        i_new = word_backlinks[w]
-                        old_seg = self.segmentations[i_new]
-                        change_counts.update(old_seg.analysis,
-                                             -old_seg.count,
-                                             corpus_index=i_new)
-                        for morph in self.detag_word(old_seg.analysis):
-                            self._modify_morph_count(morph, -old_seg.count)
-                        self.segmentations[i_new] = WordAnalysis(
-                            old_seg.count + addc,
-                            segments)
-                        self._corpus_coding.boundaries += addc
-                    else:
-                        self.add_corpus_data([WordAnalysis(addc, segments)])
-                        i_new = len(self.segmentations) - 1
-                        word_backlinks[w] = i_new
-                    new_count = self.segmentations[i_new].count
-                    change_counts.update(self.segmentations[i_new].analysis,
-                                         new_count, corpus_index=i_new)
-                    for morph in self.detag_word(segments):
-                        self._modify_morph_count(morph, new_count)
-
-                    self._update_counts(change_counts, 1)
-
-                    if not skip_this:
-                        self.training_focus = set((i_new,))
-                        self._single_epoch_iteration()
-                segments = self.segmentations[i_new].analysis
+                i_word = word_backlinks.get(w, None)
+                if add_count > 0:
+                    i_word = self._online_unlabeled_token(w, add_count, i_word)
+                    word_backlinks[w] = i_word
+                segments = self.segmentations[i_word].analysis
 
                 _logger.debug("#%s: %s -> %s" %
-                              (i, w, segments))
-                i += 1
+                              (token_num, w, segments))
+                token_num += 1
 
             # also reestimates the probabilities
             _logger.info("Epoch reached, resegmenting corpus")
@@ -413,8 +377,51 @@ class CatmapModel(object):
 
         self.reestimate_probabilities()
         newcost = self.get_cost()
-        _logger.info("Tokens processed: %s\tCost: %s" % (i, newcost))
+        _logger.info("Tokens processed: %s\tCost: %s" % (token_num, newcost))
         return epochs, newcost
+
+    def _online_unlabeled_token(self, word, add_count, i_word=None):
+        skip_this = False
+        if (self._use_skips and
+                i_word is not None and
+                self._test_skip(word)):
+            # Only increase the word count, don't analyze
+            skip_this = True
+
+        if skip_this:
+            segments = self.segmentations[i_word].analysis
+        else:
+            segments, _ = self.viterbi_segment(word)
+
+        change_counts = ChangeCounts()
+        if i_word is not None:
+            # The word is already in the corpus
+            old_seg = self.segmentations[i_word]
+            change_counts.update(old_seg.analysis,
+                                 -old_seg.count,
+                                 corpus_index=i_word)
+            for morph in self.detag_word(old_seg.analysis):
+                self._modify_morph_count(morph, -old_seg.count)
+            self.segmentations[i_word] = WordAnalysis(
+                old_seg.count + add_count,
+                segments)
+            self._corpus_coding.boundaries += add_count
+        else:
+            self.add_corpus_data([WordAnalysis(add_count, segments)])
+            i_word = len(self.segmentations) - 1
+        new_count = self.segmentations[i_word].count
+        change_counts.update(self.segmentations[i_word].analysis,
+                                new_count, corpus_index=i_word)
+        for morph in self.detag_word(segments):
+            self._modify_morph_count(morph, new_count)
+
+        self._update_counts(change_counts, 1)
+
+        if not skip_this:
+            self.training_focus = set((i_word,))
+            self._single_epoch_iteration()
+        assert i_word is not None
+        return i_word
 
     def viterbi_segment(self, segments):
         """Simultaneously segment and tag a word using the learned model.

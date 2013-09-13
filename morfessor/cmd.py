@@ -1015,7 +1015,10 @@ def catmap_main(args):
         _logger.info('Using loaded model without training')
     if args.trainmode in ('online', 'online+batch'):
         # Always reads from stdin
-        data = io.read_corpus_files('-')
+        data = io.read_combined_file('-',
+                                     annotation_prefix='<',
+                                     construction_sep=' ',
+                                     analysis_sep=',')
         shared_model.model.train_online(data, count_modifier=dampfunc,
                            epoch_interval=args.epochinterval,
                            max_epochs=(args.max_iterations * args.max_epochs))

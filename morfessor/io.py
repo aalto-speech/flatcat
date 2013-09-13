@@ -41,7 +41,7 @@ class MorfessorIO:
         self.encoding = encoding
         self.construction_separator = construction_separator
         self.comment_start = comment_start
-        self.compound_separator = compound_separator
+        self.compound_sep = re.compile(compound_separator, re.UNICODE)
         self.atom_separator = atom_separator
         if atom_separator is not None:
             self._atom_sep_re = re.compile(atom_separator, re.UNICODE)
@@ -108,9 +108,8 @@ class MorfessorIO:
 
         """
         _logger.info("Reading corpus from '%s'..." % file_name)
-        compound_sep = re.compile(self.compound_separator, re.UNICODE)
         for line in self._read_text_file(file_name):
-            for compound in compound_sep.split(line):
+            for compound in self.compound_sep.split(line):
                 if len(compound) > 0:
                     yield 1, compound, self._split_atoms(compound)
         _logger.info("Done.")
@@ -383,7 +382,7 @@ class CatmapIO(MorfessorIO):
             yield(int(count), tuple(cmorphs))
         _logger.info("Done.")
 
-    def read_annotations_file(self, file_name, construction_separator=' ',
+    def read_annotations_file(self, file_name, construction_sep=' ',
                               analysis_sep=','):
         """Read an annotations file.
 
@@ -397,18 +396,38 @@ class CatmapIO(MorfessorIO):
         _logger.info("Reading annotations from '%s'..." % file_name)
         for line in self._read_text_file(file_name):
             compound, analyses_line = line.split(None, 1)
-
-            if analysis_sep is not None:
-                analyses = analyses_line.split(analysis_sep)
-            else:
-                analyses = [analyses_line]
-
-            for analysis in analyses:
-                segments = analysis.split(construction_separator)
-                annotations[compound].append([self._morph_or_cmorph(x)
-                                              for x in segments])
+            analysis = self._read_annotation(analyses_line,
+                                             construction_sep,
+                                             analysis_sep)
+            annotations[compound].append(analysis)
         _logger.info("Done.")
         return annotations
+
+    def read_combined_file(self, file_name, annotation_prefix='<',
+                           construction_sep=' ',
+                           analysis_sep=','):
+        for line in self._read_text_file(file_name):
+            if line.startswith(annotation_prefix):
+                analysis = self._read_annotation(
+                    line[len(annotation_prefix):],
+                    construction_sep=construction_sep,
+                    analysis_sep=analysis_sep)
+                compound = ''.join([x.morph for x in analysis])
+                yield (True, 1, compound, analysis)
+            else:
+                for compound in self.compound_sep.split(line):
+                    if len(compound) > 0:
+                        yield (False, 1, compound, self._split_atoms(compound))
+
+    def _read_annotation(self, line, construction_sep, analysis_sep):
+        if analysis_sep is not None:
+            analyses = line.split(analysis_sep)
+        else:
+            analyses = [line]
+
+        for analysis in analyses:
+            segments = analysis.split(construction_sep)
+            return [self._morph_or_cmorph(x) for x in segments]
 
     def _morph_or_cmorph(self, morph_cat):
         """Parses a string describing a morph, either tagged

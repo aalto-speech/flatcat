@@ -338,7 +338,8 @@ class CatmapModel(object):
 
             for _ in utils._progress(range(epoch_interval)):
                 try:
-                    _, _, w = next(data)
+                    is_anno, _, w, atoms = next(data)
+                    print(is_anno, w, atoms)
                 except StopIteration:
                     more_tokens = False
                     break

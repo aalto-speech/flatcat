@@ -1,12 +1,11 @@
-from __future__ import unicode_literals
-import collections
-import logging
-import math
-
 """A scheme for assigning categories to morphs.
 To change the number or meaning of categories,
 only this file should need to be modified.
 """
+from __future__ import unicode_literals
+import collections
+import logging
+import math
 
 from . import utils
 
@@ -14,6 +13,10 @@ _logger = logging.getLogger(__name__)
 
 
 class WordBoundary(object):
+    """A special symbol for marking word boundaries.
+    Using an object of this type allows arbitrary characters in the corpus,
+    while using a string e.g. '#' instead causes that char to be reserved.
+    """
     def __repr__(self):
         return '#'
 

@@ -1,5 +1,3 @@
-import math
-
 """Optimization algorithms designed for very heavy objective functions.
 A hard limit can be placed on the number of evaluations of
 the objective function.
@@ -9,6 +7,8 @@ The algorithms have been reimplemented here instead of using a library
 like scipy, due to the abovementioned limitations caused by the
 unusually heavy objective functions.
 """
+
+import math
 
 class MajorityVote(object):
     """Wraps an objective function in a majority voting scheme.
@@ -329,7 +329,6 @@ def modified_powells(func, initial, max_iters, evals_per_vector, scale=1.0,
             return point
 
         # Remove vector that contributed the most during this iteration
-        # FIXME: should be based on length, not f!
         vectors.pop(best_vector)
         bidir.pop(best_vector)
         # Replace with the vector formed by the displacement

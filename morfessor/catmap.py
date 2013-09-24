@@ -357,8 +357,9 @@ class CatmapModel(object):
                 i_anno = anno_backlinks.get(w, None)
                 if add_count > 0:
                     if is_anno:
-                        (i_word, i_anno, recalculate) = self._online_labeled_token(
-                            w, atoms, i_word, i_anno)
+                        (i_word, i_anno,
+                            recalculate) = self._online_labeled_token(
+                                w, atoms, i_word, i_anno)
                         if recalculate:
                             (word_backlinks, anno_backlinks) = (
                                 self._online_backlinks())
@@ -1004,7 +1005,6 @@ class CatmapModel(object):
                            as tuples of CategorizedMorphs.
         """
 
-        # FIXME random shuffle or sort by bigram frequency?
         bigram_freqs = collections.Counter()
         for (count, segments) in self._training_focus_filter():
             segments = _wb_wrap(segments)
@@ -1045,7 +1045,6 @@ class CatmapModel(object):
         """Generates splits of seen morphs into two submorphs.
         Use with _transformation_epoch
         """
-        # FIXME random shuffle or sort by length/frequency?
         if self.training_focus is None:
             unsorted = self._morph_usage.seen_morphs()
         else:
@@ -2197,7 +2196,6 @@ class CatmapAnnotatedCorpusEncoding(object):
         self._transition_counts = collections.Counter()
 
         for (cmorph, new_count) in counts.emissions.items():
-            cat_index = get_categories().index(cmorph.category)
             assert new_count >= 0
             new_counts = self._emission_counts[cmorph.morph]._replace(
                 **{cmorph.category: new_count})
@@ -2338,6 +2336,9 @@ class WeightLearning(object):
         self.dimensions = []
 
         self.depth_current = depth_first
+
+        self.initial = None
+        self.num_sets = None
 
     def add_corpus_weight(self, threshold=0.01):
         self.threshold = threshold
@@ -2519,131 +2520,6 @@ class WeightLearning(object):
             else:
                 _logger.info('{}: {}. Direction cue: {}'.format(dim, val, cue))
 
-# Old very homebrew implementation
-"""
-    def update_model(self, model, epochs, direction):
-        weight = self._getter(model)
-        if direction == 0:
-            return weight
-        if direction > 0:
-            weight *= 1 + 2.0 / epochs
-        else:
-            weight *= 1.0 / (1 + 2.0 / epochs)
-        self._setter(model, weight)
-        return weight
-
-
-    def weight_learning(self, smodel):
-        real_iteration_number = smodel.model._iteration_number
-        if smodel.model._iteration_number == 1:
-            epochs = self.epochs_first
-            depth = self.depth_first
-        else:
-            epochs = self.epochs
-            depth = self.depth
-        callbacks = smodel.model.toggle_callbacks(None)
-        smodel.model._iteration_update(no_increment=True)
-        if smodel.model.training_focus_sets is not None:
-            self.num_sets = len(smodel.model.training_focus_sets)
-        else:
-            self.num_sets = 1
-        smodel.model.pre_save()
-        self.io.write_binary_model_file(self.checkpointfile, smodel.model)
-        smodel.model.post_load()
-        first_weight = self._getter(smodel.model)
-        _logger.info('Initial {}: {}'.format(self._log_variable,
-                                             first_weight))
-        weight_prev = first_weight
-        (_, _, f_prev, direction) = self._majority_probe(
-            0.0, first_weight, depth, -1,
-            prepare_func=None, first_model=smodel)
-
-        _logger.info(
-            'Initial {}: {}, f-measure: {}, direction: {}'.format(
-                self._log_variable, weight_prev, f_prev, direction))
-
-        for i in range(epochs):
-            if direction == 0:
-                break
-            prepare_func = lambda m: self._prepare_alternative(
-                m, i + real_iteration_number * 2, direction, weight_prev)
-            prev_direction = direction
-            (accept, weight_next, f, direction) = self._majority_probe(
-                f_prev, weight_prev, depth, i, prepare_func)
-            _logger.info(
-                'Weight learning iteration {}: '.format(i) +
-                '{} {}, f-measure: {}, direction: {}'.format(
-                    self._log_variable, weight_next, f, direction))
-            if accept:
-                # Accept the step
-                _logger.info('Accepted the step to {}'.format(weight_next))
-                weight_prev = weight_next
-                f_prev = f
-            else:
-                _logger.info('Rejected the step, ' +
-                    'reverting to weight {}'.format(weight_prev))
-                # Discard the step and try again with a smaller step
-                direction = self._reject_direction(prev_direction)
-        # Start normal training from the checkpoint using the optimized weight
-        smodel.model = self.io.read_binary_model_file(self.checkpointfile)
-        smodel.model.post_load()
-        smodel.model._iteration_number = real_iteration_number
-        smodel.model.training_focus = None
-        smodel.model.toggle_callbacks(callbacks)
-        self._setter(smodel.model, weight_prev)
-        _logger.info('Final learned {} {}'.format(self._log_variable,
-                                                  weight_prev))
-
-        return self._getter(smodel.model) != first_weight
-
-    def _prepare_alternative(self, model, i, direction, weight_prev):
-        self._setter(model, weight_prev)
-        weight_next = self.update_model(model, i, direction)
-        return weight_next
-
-    def _getter(self, model):
-        return model.get_corpus_coding_weight()
-
-    def _setter(self, model, value):
-        model.set_corpus_coding_weight(value)
-
-    def _reject_direction(self, prev_direction):
-        return prev_direction
-
-    def _majority_probe(self, f_prev, weight_prev, depth, iteration,
-                        prepare_func, first_model=None):
-        fs = []
-        directions = []
-        decisions = []
-        for j in range(self.num_sets):
-            if j == 0 and first_model is not None:
-                model = first_model.model
-            else:
-                # Revert the changes by reloading the checkpoint model.
-                # Good steps are also reverted, to prevent accumulated gains
-                # and make the comparison fair.
-                model = self.io.read_binary_model_file(self.checkpointfile)
-                model.post_load()
-            model.set_focus_sample(j)
-            weight_next = weight_prev
-            if prepare_func is not None:
-                weight_next = prepare_func(model)
-            for _ in range(depth):
-                model.weightlearn_probe()
-            (f, direction) = self.calculate_update(model)
-            fs.append(f)
-            directions.append(direction)
-            decisions.append(f > f_prev)
-            _logger.info(
-                'Weight learning iter {}, set {}: f {}, dir {}'.format(
-                    iteration, j, f, direction))
-        f_mean = sum(fs) / len(fs)
-        direction = sum(directions)
-        if direction != 0:
-            direction = direction / abs(direction)
-        accept = (sum(decisions) >= (float(len(decisions)) / 2))
-        return (accept, weight_next, f_mean, direction)
-"""
 
 class ChangeCounts(object):
     """A data structure for the aggregated set of changes to

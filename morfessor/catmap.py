@@ -52,36 +52,36 @@ def train_batch(smodel, weight_learning=None):
     This procedure makes it necessary to move the control flow
     outside the object, to allow it to be garbage collected.
     """
-    smodel.model._iteration_update(no_increment=True)
+    smodel.model._epoch_update(no_increment=True)
     previous_cost = smodel.model.get_cost()
     wl_force_another = False
     u_force_another = False
-    for iteration in range(smodel.model._max_iterations):
-        smodel.model._train_iteration()
+    for epoch in range(smodel.model._max_epochs):
+        smodel.model._train_epoch()
 
         cost = smodel.model.get_cost()
         cost_diff = cost - previous_cost
         limit = smodel.model._cost_convergence_limit(
-            smodel.model._min_iter_cost_gain)
+            smodel.model._min_epoch_cost_gain)
 
         if (weight_learning is not None and
-                iteration < smodel.model._max_iterations - 1):
+                epoch < smodel.model._max_epochs - 1):
             wl_force_another = weight_learning.optimize()
-        u_force_another = smodel.model._iteration_update()
+        u_force_another = smodel.model._epoch_update()
         post_update_cost = smodel.model.get_cost()
         if post_update_cost != cost:
-            _logger.info('cost from {} to {} in iter update'.format(
+            _logger.info('Cost from {} to {} in epoch update'.format(
                 cost, post_update_cost))
             cost = post_update_cost
 
         converged = ((not wl_force_another) and
                      (not u_force_another) and
                      (-cost_diff <= limit))
-        smodel.model._display_cost(cost_diff, limit, 'iteration',
-                        iteration, smodel.model._max_iterations, converged)
+        smodel.model._display_cost(cost_diff, limit, 'epoch',
+                        epoch, smodel.model._max_epochs, converged)
         if converged:
             _logger.info('{:24s} Cost: {}'.format(
-                'final iteration.', cost))
+                'final epoch.', cost))
             break
         previous_cost = cost
 
@@ -127,44 +127,44 @@ class CatmapModel(object):
         self._corpus_coding = CatmapEncoding(morph_usage, self._lexicon_coding,
                                              weight=corpusweight)
 
-        # Counters for the current iteration and operation within
-        # that iteration. These describe the stage of training
+        # Counters for the current epoch and operation within
+        # that epoch. These describe the stage of training
         # to allow resuming training of a pickled model.
         # The exact point in training is described by 3 numbers:
-        #   - the epoch number (each epoch is one pass over the data
+        #   - the xyzzy number (each xyzzy is one pass over the data
         #     while performing one type of operation).
-        #     The epoch number is not restored when loading.
-        #   - the operation number (epochs performing the same operation
+        #     The xyzzy number is not restored when loading.
+        #   - the operation number (xyzzys performing the same operation
         #     are repeated until convergence, before moving to
         #     the next operation)
-        #   - the iteration number (an iteration consists of the sequence
+        #   - the epoch number (an epoch consists of the sequence
         #     of all training operations)
-        self._iteration_number = 0
+        self._epoch_number = 0
         self._operation_number = 0
 
         # The sequence of training operations.
         # Valid training operations are strings for which CatmapModel
         # has a function named _op_X_generator, where X is the string
         # which returns a transform generator suitable for
-        # passing to _transformation_epoch.
+        # passing to _operation_loop.
         # This is done using strings indstead of bound methods,
         # to enable pickling of the model object.
         self.training_operations = self.DEFAULT_TRAIN_OPS
 
         # Training sequence parameters.
-        self._max_iterations = 10
-        self._min_iter_cost_gain = 0.0
+        self._max_epochs = 5
         self._min_epoch_cost_gain = 0.0
-        self._max_epochs_first = 1
-        self._max_epochs = 1
-        self._max_resegment_epochs = 1
+        self._min_xyzzy_cost_gain = 0.0
+        self._max_xyzzys_first = 1
+        self._max_xyzzys = 1
+        self._max_resegment_xyzzys = 1
         self._min_shift_remainder = 2
         self._max_shift = 2
 
         # Callbacks for cleanup/bookkeeping after each operation.
         # Should take exactly one argument: the model.
         self.operation_callbacks = []
-        self.epoch_callbacks = []
+        self.xyzzy_callbacks = []
         self._changed_segmentations = None
         self._changed_segmentations_op = None
 
@@ -291,24 +291,26 @@ class CatmapModel(object):
             min_difference_proportion=min_difference_proportion,
             min_cost_gain=-10.0)     # Cost gain will be ~zero.
 
-        for callback in self.epoch_callbacks:
+        for callback in self.xyzzy_callbacks:
             callback(self)
 
-        self._iteration_number = 1
+        self._epoch_number = 1
 
-    def batch_parameters(self, min_epoch_cost_gain=0.0025,
-                         min_iter_cost_gain=0.005,
-                         max_iterations=10, max_epochs_first=1, max_epochs=1,
-                         max_resegment_epochs=1,
+    def batch_parameters(self, min_xyzzy_cost_gain=0.0025,
+                         min_epoch_cost_gain=0.005,
+                         max_epochs=5,
+                         max_xyzzys_first=1,
+                         max_xyzzys=1,
+                         max_resegment_xyzzys=1,
                          max_shift_distance=2,
                          min_shift_remainder=2):
         """Set parameters for batch Cat-MAP training of the model."""
+        self._min_xyzzy_cost_gain = min_xyzzy_cost_gain
         self._min_epoch_cost_gain = min_epoch_cost_gain
-        self._min_iter_cost_gain = min_iter_cost_gain
-        self._max_iterations = max_iterations
-        self._max_epochs_first = max_epochs_first
         self._max_epochs = max_epochs
-        self._max_resegment_epochs = max_resegment_epochs
+        self._max_xyzzys_first = max_xyzzys_first
+        self._max_xyzzys = max_xyzzys
+        self._max_resegment_xyzzys = max_resegment_xyzzys
         self._max_shift = max_shift_distance
         self._min_shift_remainder = min_shift_remainder
         self._online = False
@@ -519,7 +521,7 @@ class CatmapModel(object):
 
         if not skip_this:
             self.training_focus = set((i_word,))
-            self._single_epoch_iteration()
+            self._single_iteration_epoch()
         assert i_word is not None
         return i_word
 
@@ -795,9 +797,9 @@ class CatmapModel(object):
 
     def weightlearn_probe(self):
         """Partial training used in weight learning."""
-        self._single_epoch_iteration()
+        self._single_iteration_epoch()
         self.reestimate_probabilities()
-        self._iteration_update(no_increment=True)
+        self._epoch_update(no_increment=True)
 
     def get_learned_params(self):
         """Returns a dict of learned and estimated parameters."""
@@ -862,12 +864,12 @@ class CatmapModel(object):
         unable to restore instance methods. If you need callbacks in a loaded
         model, you have to readd them after loading.
         """
-        out = (self.operation_callbacks, self.epoch_callbacks)
+        out = (self.operation_callbacks, self.xyzzy_callbacks)
         if callbacks is None:
             self.operation_callbacks = []
-            self.epoch_callbacks = []
+            self.xyzzy_callbacks = []
         else:
-            (self.operation_callbacks, self.epoch_callbacks) = callbacks
+            (self.operation_callbacks, self.xyzzy_callbacks) = callbacks
         return out
 
     def pre_save(self):
@@ -1043,7 +1045,7 @@ class CatmapModel(object):
 
     def _op_split_generator(self):
         """Generates splits of seen morphs into two submorphs.
-        Use with _transformation_epoch
+        Use with _operation_loop
         """
         if self.training_focus is None:
             unsorted = self._morph_usage.seen_morphs()
@@ -1052,8 +1054,8 @@ class CatmapModel(object):
             for (count, segmentation) in self._training_focus_filter():
                 for morph in self.detag_word(segmentation):
                     unsorted.add(morph)
-        epoch_morphs = sorted(unsorted, key=len)
-        for morph in epoch_morphs:
+        xyzzy_morphs = sorted(unsorted, key=len)
+        for morph in xyzzy_morphs:
             if len(morph) == 1:
                 continue
             if self._morph_usage.count(morph) == 0:
@@ -1089,7 +1091,7 @@ class CatmapModel(object):
     def _op_join_generator(self):
         """Generates joins of consecutive morphs into a supermorph.
         Can make different join decisions in different contexts.
-        Use with _transformation_epoch
+        Use with _operation_loop
         """
 
         def join_helper(prefix, suffix):
@@ -1101,7 +1103,7 @@ class CatmapModel(object):
 
     def _op_shift_generator(self):
         """Generates operations that shift the split point in a bigram.
-        Use with _transformation_epoch
+        Use with _operation_loop
         """
 
         def shift_helper(prefix, suffix):
@@ -1138,7 +1140,7 @@ class CatmapModel(object):
     def _op_resegment_generator(self):
         """Generates special transformations that resegment and tag
         all words in the corpus using viterbi_segment.
-        Use with _transformation_epoch
+        Use with _operation_loop
         """
         if self.training_focus is None:
             source = range(len(self.segmentations))
@@ -1246,11 +1248,11 @@ class CatmapModel(object):
             for morph in self.detag_word(segmentation.analysis):
                 self.morph_backlinks[morph].add(i)
 
-    def _iteration_update(self, no_increment=False):
-        """Updates performed between training iterations.
+    def _epoch_update(self, no_increment=False):
+        """Updates performed between training epochs.
         Set the no_increment flag to suppress incrementing
-        the iteration number, which is needed when the update is
-        performed several times during one iteration e.g. in weight learning.
+        the epoch number, which is needed when the update is
+        performed several times during one epoch e.g. in weight learning.
         """
 
         force_another = False
@@ -1268,7 +1270,7 @@ class CatmapModel(object):
 
         self._operation_number = 0
         if not no_increment:
-            self._iteration_number += 1
+            self._epoch_number += 1
         return force_another
 
     def _update_annotation_choices(self):
@@ -1393,7 +1395,7 @@ class CatmapModel(object):
             min_cost_gain -- Stop iterating if cost reduction between
                              iterations is below this limit * #boundaries.
                              Default 0.005.
-            max_iterations -- Maximum number of iterations (epochs). Default 5.
+            max_iterations -- Maximum number of iterations. Default 5.
         """
 
         previous_cost = self.get_cost()
@@ -1401,7 +1403,7 @@ class CatmapModel(object):
             cost = self.get_cost()
             msg = ('{:9s} {:2d}/{:<2d}          Cost: {:' +
                    self._cost_field_fmt(cost) + 'f}.')
-            _logger.info(msg.format('epoch',
+            _logger.info(msg.format('xyzzy',
                                     iteration + 1, max_iterations,
                                     cost))
 
@@ -1411,7 +1413,7 @@ class CatmapModel(object):
             # perform update between optimization iterations
             if update_func is not None:
                 _logger.info('{:24s} Cost: {}'.format(
-                    'Before epoch update.', cost))
+                    'Before xyzzy update.', cost))
 
             # perform update between optimization iterations
             if update_func is not None:
@@ -1419,18 +1421,18 @@ class CatmapModel(object):
             else:
                 force_another = False
 
-            for callback in self.epoch_callbacks:
+            for callback in self.xyzzy_callbacks:
                 callback(self, iteration)
 
             cost = self.get_cost()
             cost_diff = cost - previous_cost
             limit = self._cost_convergence_limit(min_cost_gain)
             converged = (not force_another) and -cost_diff <= limit
-            self._display_cost(cost_diff, limit, 'epoch',
+            self._display_cost(cost_diff, limit, 'xyzzy',
                            iteration, max_iterations, converged)
             if converged:
                 _logger.info('{:24s} Cost: {}'.format(
-                    'final epoch.', cost))
+                    'final xyzzy.', cost))
                 return
             previous_cost = cost
 
@@ -1474,7 +1476,7 @@ class CatmapModel(object):
         for iteration in range(max_iterations):
             _logger.info(
                 'Iteration {:2d} ({}). {:2d}/{:<2d}'.format(
-                    self._iteration_number, train_func.__name__,
+                    self._epoch_number, train_func.__name__,
                     iteration + 1, max_iterations))
 
             # perform the optimization
@@ -1511,8 +1513,8 @@ class CatmapModel(object):
                                     cost_diff))
             previous_cost = cost
 
-    def _train_iteration(self):
-        """One iteration of training, which may contain several epochs
+    def _train_epoch(self):
+        """One epoch of training, which may contain several xyzzys
         of each operation in sequence.
 
         The model must have been initialized, either by loading a baseline
@@ -1523,46 +1525,46 @@ class CatmapModel(object):
         cost = self.get_cost()
         msg = ('{:9s} {:2d}/{:<2d}          Cost: {:' +
                 self._cost_field_fmt(cost) + 'f}.')
-        _logger.info(msg.format('iteration',
-                                self._iteration_number,
-                                self._max_iterations,
+        _logger.info(msg.format('epoch',
+                                self._epoch_number,
+                                self._max_epochs,
                                 cost))
         if self._changed_segmentations is not None:
             # FIXME: use for also for convergence, not just stats?
             self._changed_segmentations.clear()
         while self._operation_number < len(self.training_operations):
             operation = self._resolve_operation(self._operation_number)
-            min_epoch_cost_gain = self._training_params('min_epoch_cost_gain')
-            max_epochs = self._training_params('max_epochs')
+            min_xyzzy_cost_gain = self._training_params('min_xyzzy_cost_gain')
+            max_xyzzys = self._training_params('max_xyzzys')
             if self._training_params('must_reestimate'):
                 update_func = self.reestimate_probabilities
             else:
                 update_func = None
 
-            msg = 'Iteration {:2d}, operation {:2d} ({}), max {:2d} epoch(s).'
+            msg = 'Epoch {:2d}, operation {:2d} ({}), max {:2d} xyzzy(s).'
             _logger.info(msg.format(
-                    self._iteration_number, self._operation_number,
+                    self._epoch_number, self._operation_number,
                     self.training_operations[self._operation_number],
-                    max_epochs))
+                    max_xyzzys))
             utils.memlog('see above')
             self._convergence_of_cost(
-                lambda: self._transformation_epoch(operation()),
+                lambda: self._operation_loop(operation()),
                 update_func=update_func,
-                min_cost_gain=min_epoch_cost_gain,
-                max_iterations=max_epochs)
+                min_cost_gain=min_xyzzy_cost_gain,
+                max_iterations=max_xyzzys)
             self.reestimate_probabilities()
             self._operation_number += 1
             for callback in self.operation_callbacks:
                 callback(self)
 
-    def _single_epoch_iteration(self):
-        """One iteration of training, with exactly one epoch of each
+    def _single_iteration_epoch(self):
+        """One epoch of training, with exactly one xyzzy of each
         operation and no convergence checks or update passes."""
         for i in range(len(self.training_operations)):
             operation = self._resolve_operation(i)
-            self._transformation_epoch(operation())
+            self._operation_loop(operation())
 
-    def _transformation_epoch(self, transformation_generator):
+    def _operation_loop(self, transformation_generator):
         """Performs each experiment yielded by the transform generator,
         in sequence, always choosing the alternative that minimizes the
         model cost, or making no change if all choices would increase the
@@ -1589,7 +1591,7 @@ class CatmapModel(object):
                                    contexts.
         """
 
-        EpochNode = collections.namedtuple('EpochNode', ['cost',
+        TransformationNode = collections.namedtuple('TransformationNode', ['cost',
                                                          'transform',
                                                          'targets'])
         if self._changed_segmentations_op is not None:
@@ -1603,7 +1605,7 @@ class CatmapModel(object):
             if len(transform_group) == 0:
                 continue
             # Cost of doing nothing
-            best = EpochNode(self.get_cost(), None, set())
+            best = TransformationNode(self.get_cost(), None, set())
 
             # All transforms in group must match the same words,
             # we can use just the first transform
@@ -1647,7 +1649,7 @@ class CatmapModel(object):
                         self._annot_coding.modify_contribution(morph, 1)
                 cost = self.get_cost()
                 if cost < best.cost:
-                    best = EpochNode(cost, transform, matched_targets)
+                    best = TransformationNode(cost, transform, matched_targets)
                 # Revert change to encoding
                 if self._supervised:
                     for morph in changed_morphs:
@@ -1756,24 +1758,24 @@ class CatmapModel(object):
     def _training_params(self, param_name):
         """Parameters for the training operators
         (calls to _convergence_of_cost).
-        Can depend on the _iteration_number and _operation_number.
+        Can depend on the _epoch_number and _operation_number.
         Customize this if you need more finegrained control of the training.
         """
 
+        if param_name == 'min_xyzzy_cost_gain':
+            return self._min_xyzzy_cost_gain
         if param_name == 'min_epoch_cost_gain':
             return self._min_epoch_cost_gain
-        if param_name == 'min_iter_cost_gain':
-            return self._min_iter_cost_gain
-        if param_name == 'max_epochs':
+        if param_name == 'max_xyzzys':
             if (self.training_operations[self._operation_number] ==
                 'resegment'):
-                return self._max_resegment_epochs
-            if self._iteration_number == 1:
-                # Perform more epochs in the first iteration.
-                # 0 is pre-iteration, 1 is the first actual iteration.
-                return self._max_epochs_first
+                return self._max_resegment_xyzzys
+            if self._epoch_number == 1:
+                # Perform more xyzzys in the first epoch.
+                # 0 is pre-epoch, 1 is the first actual epoch.
+                return self._max_xyzzys_first
             # After that do just one of each operation.
-            return self._max_epochs
+            return self._max_xyzzys
         # FIXME This is a bit of ugliness I hope to get rid of
         if param_name == 'must_reestimate':
             return (self.training_operations[self._operation_number] ==
@@ -2370,7 +2372,7 @@ class WeightLearning(object):
         """Perform weight learning on the given model.
         Returns:
             force_another -- If the optimal weight changed, at least one
-                             more iteration of learning should be performed,
+                             more epoch of learning should be performed,
                              even though the convergence criteria
                              were reached.
         Note:
@@ -2394,7 +2396,7 @@ class WeightLearning(object):
 
         callbacks = self._make_checkpoint()
         self.initial = [getter(self.smodel.model) for getter in self.getters]
-        scale = 1. / min(1, self.smodel.model._iteration_number)
+        scale = 1. / min(1, self.smodel.model._epoch_number)
 
         majority_vote = optimization.MajorityVote(self.evaluate_parameters,
                                                   self.num_sets).evaluate
@@ -2467,7 +2469,7 @@ class WeightLearning(object):
 
     def _make_checkpoint(self):
         callbacks = self.smodel.model.toggle_callbacks(None)
-        self.smodel.model._iteration_update(no_increment=True)
+        self.smodel.model._epoch_update(no_increment=True)
         self.smodel.model.pre_save()
         self.io.write_binary_model_file(self.checkpointfile, self.smodel.model)
         return callbacks
@@ -2726,7 +2728,7 @@ class ViterbiResegmentTransformation(object):
         """Apply the new segmentation ot the counts.
         Note that the segmentation was performed already at __init__,
         which means that the morph count changes between the beginning
-        of the _transformation_epoch loop
+        of the _operation_loop loop
         and the call to apply do not affect the segmentation.
         """
         if self.rule.num_matches(word.analysis) == 0:

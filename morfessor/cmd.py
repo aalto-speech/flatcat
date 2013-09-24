@@ -6,12 +6,12 @@ import random
 import sys
 import time
 
-from . import get_version, _logger, catmap
+from . import get_version, _logger, flatcat
 from .baseline import BaselineModel
 from .categorizationscheme import MorphUsageProperties, HeuristicPostprocessor
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
-from .io import MorfessorIO, CatmapIO
+from .io import MorfessorIO, FlatcatIO
 from .utils import _generator_progress, LOGPROB_ZERO, memlog
 
 PY3 = sys.version_info.major == 3
@@ -182,9 +182,9 @@ Interactive use (read corpus from user):
             metavar='<int>',
             help="compound frequency threshold for batch training (default "
                  "%(default)s)")
-    add_arg('--max-epochs', dest='maxepochs', type=int, default=None,
+    add_arg('--max-iterations', dest='maxiterations', type=int, default=None,
             metavar='<int>',
-            help='hard maximum of epochs in training')
+            help='hard maximum of iterations in training')
     add_arg('--nosplit-re', dest="nosplit", type=str, default=None,
             metavar='<regexp>',
             help="if the expression matches the two surrounding characters, "
@@ -442,10 +442,10 @@ def main(args):
         _logger.info("Done.")
 
 
-def get_catmap_argparser():
+def get_flatcat_argparser():
     import argparse
     parser = argparse.ArgumentParser(
-        prog='catmap.py',
+        prog='flatcat.py',
         description="""
 Morfessor Categories-MAP {version}
 
@@ -645,45 +645,45 @@ Simple usage examples (training and testing):
     # Options for controlling training iteration sequence
     add_arg = parser.add_argument_group(
         'training iteration sequence options').add_argument
-    add_arg('--min-epoch-cost-gain', dest='min_epoch_cost_gain', type=float,
+    add_arg('--min-iteration-cost-gain', dest='min_iteration_cost_gain', type=float,
             default=0.0025, metavar='<float>',
-            help='Stop iterating if cost reduction between epochs ' +
+            help='Stop training if cost reduction between iterations ' +
                  'is below this limit * #boundaries. ' +
                  '(default %(default)s).')
-    add_arg('--min-iteration-cost-gain', dest='min_iter_cost_gain', type=float,
+    add_arg('--min-epoch-cost-gain', dest='min_epoch_cost_gain', type=float,
             default=0.005, metavar='<float>',
-            help='Stop iterating if cost reduction between iterations ' +
+            help='Stop training if cost reduction between epochs ' +
                  'is below this limit * #boundaries. ' +
                  '(default %(default)s).')
     add_arg('--min-difference-proportion', dest='min_diff_prop', type=float,
             default=0.005, metavar='<float>',
-            help='Stop iterating if proportion of words with changed ' +
+            help='Stop training if proportion of words with changed ' +
                  'segmentation or category tags is below this limit. ' +
                  '(default %(default)s).')
-    add_arg('--max-iterations', dest='max_iterations', type=int, default=7,
+    add_arg('--max-epochs', dest='max_epochs', type=int, default=7,
             metavar='<int>',
-            help='Maximum number of iterations. (default %(default)s).')
-    add_arg('--max-epochs-first', dest='max_epochs_first', type=int, default=1,
+            help='Maximum number of epochs. (default %(default)s).')
+    add_arg('--max-iterations-first', dest='max_iterations_first', type=int, default=1,
             metavar='<int>',
-            help='Maximum number of epochs of each operation in ' +
-                 'the first iteration. ' +
+            help='Maximum number of iterations of each operation in ' +
+                 'the first epoch. ' +
                  '(default %(default)s).')
-    add_arg('--max-epochs', dest='max_epochs', type=int, default=1,
+    add_arg('--max-iterations', dest='max_iterations', type=int, default=1,
             metavar='<int>',
-            help='Maximum number of epochs of each operation in ' +
-                 'the subsequent iterations. ' +
+            help='Maximum number of iterations of each operation in ' +
+                 'the subsequent epochs. ' +
                  '(default %(default)s).')
-    add_arg('--max-resegment-epochs', dest='max_resegment_epochs',
+    add_arg('--max-resegment-iterations', dest='max_resegment_iterations',
             type=int, default=2, metavar='<int>',
-            help='Maximum number of epochs of resegmentation in ' +
-                 'all iterations. Resegmentation is the heaviest operation. ' +
+            help='Maximum number of iterations of resegmentation in ' +
+                 'all epochs. Resegmentation is the heaviest operation. ' +
                  '(default %(default)s).')
     add_arg('--training-operations', dest='training_operations', type=str,
-            default=','.join(catmap.CatmapModel.DEFAULT_TRAIN_OPS),
+            default=','.join(flatcat.FlatcatModel.DEFAULT_TRAIN_OPS),
             metavar='<list>',
             help='The sequence of training operations. ' +
                  'Valid training operations are strings for which ' +
-                 'CatmapModel has a function named _op_X_generator. ' +
+                 'FlatcatModel has a function named _op_X_generator. ' +
                  'The format of the list is a string of (unquoted) ' +
                  'operation names separated by single commas (no space). ' +
                  "(default '%(default)s').")
@@ -720,7 +720,7 @@ Simple usage examples (training and testing):
             type=int, default=2, metavar='<int>',
             help='Number of iterations of weight learning ' +
                  'in weight learning performed before the first training ' +
-                 'iteration ' +
+                 'epoch ' +
                  '(default %(default)s).')
     add_arg('--weightlearn-iters', dest='weightlearn_iters',
             type=int, default=1, metavar='<int>',
@@ -804,7 +804,7 @@ Simple usage examples (training and testing):
     return parser
 
 
-def catmap_main(args):
+def flatcat_main(args):
     # FIXME contains lots of copy-pasta from morfessor.main (refactor)
     if args.verbose >= 2:
         loglevel = logging.DEBUG
@@ -864,7 +864,7 @@ def catmap_main(args):
         raise ArgumentException('either model file, '
             'tagged segmentation or baseline segmentation must be defined.')
 
-    io = CatmapIO(encoding=args.encoding,
+    io = FlatcatIO(encoding=args.encoding,
                   compound_separator=args.cseparator,
                   category_separator=args.catseparator)
 
@@ -872,7 +872,7 @@ def catmap_main(args):
     model_initialized = False
     training_ops = args.training_operations.split(',')
     if args.loadfile is not None:
-        shared_model = catmap.SharedModel(
+        shared_model = flatcat.SharedModel(
             io.read_binary_model_file(args.loadfile))
         shared_model.model.post_load()
         model_initialized = True
@@ -886,7 +886,7 @@ def catmap_main(args):
             min_perplexity_length=args.min_ppl_length)
         # Make sure that the current model can be garbage collected
         # if it needs to be reloaded from disk
-        shared_model = catmap.SharedModel(catmap.CatmapModel(
+        shared_model = flatcat.SharedModel(flatcat.FlatcatModel(
                             m_usage,
                             forcesplit=args.forcesplit,
                             nosplit=args.nosplit,
@@ -897,7 +897,7 @@ def catmap_main(args):
     stats = None
     if args.stats_file is not None:
         stats = IterationStatistics()
-        shared_model.model.epoch_callbacks.append(stats.callback)
+        shared_model.model.iteration_callbacks.append(stats.callback)
         stats.set_names(shared_model.model, training_ops)
 
         if args.statsannotfile is not None:
@@ -977,7 +977,7 @@ def catmap_main(args):
 
     # Perform weight learning using development annotations
     if develannots is not None:
-        weight_learning = catmap.WeightLearning(
+        weight_learning = flatcat.WeightLearning(
             args.weightlearn_iters_first,
             args.weightlearn_evals_first,
             args.weightlearn_depth_first,
@@ -1020,20 +1020,20 @@ def catmap_main(args):
                                      construction_sep=' ',
                                      analysis_sep=',')
         shared_model.model.train_online(data, count_modifier=dampfunc,
-                           epoch_interval=args.epochinterval,
-                           max_epochs=(args.max_iterations * args.max_epochs))
+                           iteration_interval=args.iterationinterval,
+                           max_iterations=(args.max_iterations * args.max_iterations))
     if args.trainmode in ('batch', 'online+batch'):
         shared_model.model.batch_parameters(
+                               min_iteration_cost_gain=args.min_iteration_cost_gain,
                                min_epoch_cost_gain=args.min_epoch_cost_gain,
-                               min_iter_cost_gain=args.min_iter_cost_gain,
-                               max_iterations=args.max_iterations,
-                               max_epochs_first=args.max_epochs_first,
                                max_epochs=args.max_epochs,
-                               max_resegment_epochs=args.max_resegment_epochs,
+                               max_iterations_first=args.max_iterations_first,
+                               max_iterations=args.max_iterations,
+                               max_resegment_iterations=args.max_resegment_iterations,
                                max_shift_distance=args.max_shift_distance,
                                min_shift_remainder=args.min_shift_remainder)
         ts = time.time()
-        catmap.train_batch(shared_model, weight_learning)
+        flatcat.train_batch(shared_model, weight_learning)
         _logger.info('Final cost: {}'.format(shared_model.model.get_cost()))
         te = time.time()
         _logger.info('Training time: {:.3f}s'.format(te - ts))

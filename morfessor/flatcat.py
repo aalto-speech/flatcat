@@ -5,7 +5,7 @@ Morfessor 2.0 Categories-MAP variant.
 from __future__ import unicode_literals
 
 # FIXME: decide on a public api
-#__all__ = ['CatmapIO', 'CatmapModel']
+#__all__ = 
 
 __author__ = 'Stig-Arne Gronroos'
 __author_email__ = "morfessor@cis.hut.fi"
@@ -46,7 +46,7 @@ SortedAnalysis = collections.namedtuple('SortedAnalysis',
 def train_batch(smodel, weight_learning=None):
     """Perform batch training on the given model.
 
-    This is a function instead of a method of CatmapModel,
+    This is a function instead of a method of FlatcatModel,
     because of the probe weight learning,
     which reloads models from pickles.
     This procedure makes it necessary to move the control flow
@@ -95,7 +95,7 @@ class SharedModel(object):
         self.model = model
 
 
-class CatmapModel(object):
+class FlatcatModel(object):
     """Morfessor Categories-MAP model class."""
 
     word_boundary = WORD_BOUNDARY
@@ -122,19 +122,19 @@ class CatmapModel(object):
         self.morph_backlinks = collections.defaultdict(set)
 
         # Cost variables
-        self._lexicon_coding = CatmapLexiconEncoding(morph_usage)
-        # Catmap encoding also stores the HMM parameters
-        self._corpus_coding = CatmapEncoding(morph_usage, self._lexicon_coding,
+        self._lexicon_coding = FlatcatLexiconEncoding(morph_usage)
+        # Flatcat encoding also stores the HMM parameters
+        self._corpus_coding = FlatcatEncoding(morph_usage, self._lexicon_coding,
                                              weight=corpusweight)
 
         # Counters for the current epoch and operation within
         # that epoch. These describe the stage of training
         # to allow resuming training of a pickled model.
         # The exact point in training is described by 3 numbers:
-        #   - the xyzzy number (each xyzzy is one pass over the data
+        #   - the iteration number (each iteration is one pass over the data
         #     while performing one type of operation).
-        #     The xyzzy number is not restored when loading.
-        #   - the operation number (xyzzys performing the same operation
+        #     The iteration number is not restored when loading.
+        #   - the operation number (iterations performing the same operation
         #     are repeated until convergence, before moving to
         #     the next operation)
         #   - the epoch number (an epoch consists of the sequence
@@ -143,7 +143,7 @@ class CatmapModel(object):
         self._operation_number = 0
 
         # The sequence of training operations.
-        # Valid training operations are strings for which CatmapModel
+        # Valid training operations are strings for which FlatcatModel
         # has a function named _op_X_generator, where X is the string
         # which returns a transform generator suitable for
         # passing to _operation_loop.
@@ -154,17 +154,17 @@ class CatmapModel(object):
         # Training sequence parameters.
         self._max_epochs = 5
         self._min_epoch_cost_gain = 0.0
-        self._min_xyzzy_cost_gain = 0.0
-        self._max_xyzzys_first = 1
-        self._max_xyzzys = 1
-        self._max_resegment_xyzzys = 1
+        self._min_iteration_cost_gain = 0.0
+        self._max_iterations_first = 1
+        self._max_iterations = 1
+        self._max_resegment_iterations = 1
         self._min_shift_remainder = 2
         self._max_shift = 2
 
         # Callbacks for cleanup/bookkeeping after each operation.
         # Should take exactly one argument: the model.
         self.operation_callbacks = []
-        self.xyzzy_callbacks = []
+        self.iteration_callbacks = []
         self._changed_segmentations = None
         self._changed_segmentations_op = None
 
@@ -259,7 +259,7 @@ class CatmapModel(object):
                 WordAnalysis(1, alternatives[0]))
             self.annotations.append((word, alternatives))
         self._calculate_morph_backlinks()
-        self._annot_coding = CatmapAnnotatedCorpusEncoding(
+        self._annot_coding = FlatcatAnnotatedCorpusEncoding(
                                 self._corpus_coding,
                                 weight=annotatedcorpusweight)
         self._annot_coding.boundaries = len(self.annotations)
@@ -291,26 +291,26 @@ class CatmapModel(object):
             min_difference_proportion=min_difference_proportion,
             min_cost_gain=-10.0)     # Cost gain will be ~zero.
 
-        for callback in self.xyzzy_callbacks:
+        for callback in self.iteration_callbacks:
             callback(self)
 
         self._epoch_number = 1
 
-    def batch_parameters(self, min_xyzzy_cost_gain=0.0025,
+    def batch_parameters(self, min_iteration_cost_gain=0.0025,
                          min_epoch_cost_gain=0.005,
                          max_epochs=5,
-                         max_xyzzys_first=1,
-                         max_xyzzys=1,
-                         max_resegment_xyzzys=1,
+                         max_iterations_first=1,
+                         max_iterations=1,
+                         max_resegment_iterations=1,
                          max_shift_distance=2,
                          min_shift_remainder=2):
         """Set parameters for batch Cat-MAP training of the model."""
-        self._min_xyzzy_cost_gain = min_xyzzy_cost_gain
+        self._min_iteration_cost_gain = min_iteration_cost_gain
         self._min_epoch_cost_gain = min_epoch_cost_gain
         self._max_epochs = max_epochs
-        self._max_xyzzys_first = max_xyzzys_first
-        self._max_xyzzys = max_xyzzys
-        self._max_resegment_xyzzys = max_resegment_xyzzys
+        self._max_iterations_first = max_iterations_first
+        self._max_iterations = max_iterations
+        self._max_resegment_iterations = max_resegment_iterations
         self._max_shift = max_shift_distance
         self._min_shift_remainder = min_shift_remainder
         self._online = False
@@ -412,7 +412,7 @@ class CatmapModel(object):
 
     def _online_labeled_token(self, word, segments, i_word=None, i_anno=None):
         if not self._supervised:
-            self._annot_coding = CatmapAnnotatedCorpusEncoding(
+            self._annot_coding = FlatcatAnnotatedCorpusEncoding(
                                     self._corpus_coding,
                                     weight=None)
             self._supervised = True
@@ -676,7 +676,7 @@ class CatmapModel(object):
             return True
 
         return self._viterbi_tag_helper(segments, constraint,
-                                        CatmapModel.detag_morph)
+                                        FlatcatModel.detag_morph)
 
     def _viterbi_tag_helper(self, segments,
                             constraint=None, mapping=lambda x: x):
@@ -864,12 +864,12 @@ class CatmapModel(object):
         unable to restore instance methods. If you need callbacks in a loaded
         model, you have to readd them after loading.
         """
-        out = (self.operation_callbacks, self.xyzzy_callbacks)
+        out = (self.operation_callbacks, self.iteration_callbacks)
         if callbacks is None:
             self.operation_callbacks = []
-            self.xyzzy_callbacks = []
+            self.iteration_callbacks = []
         else:
-            (self.operation_callbacks, self.xyzzy_callbacks) = callbacks
+            (self.operation_callbacks, self.iteration_callbacks) = callbacks
         return out
 
     def pre_save(self):
@@ -1054,8 +1054,8 @@ class CatmapModel(object):
             for (count, segmentation) in self._training_focus_filter():
                 for morph in self.detag_word(segmentation):
                     unsorted.add(morph)
-        xyzzy_morphs = sorted(unsorted, key=len)
-        for morph in xyzzy_morphs:
+        iteration_morphs = sorted(unsorted, key=len)
+        for morph in iteration_morphs:
             if len(morph) == 1:
                 continue
             if self._morph_usage.count(morph) == 0:
@@ -1385,7 +1385,7 @@ class CatmapModel(object):
         the morphs already stored in the lexicon.
 
         Arguments:
-            train_func -- A method of CatmapModel which causes some part of
+            train_func -- A method of FlatcatModel which causes some part of
                           the model to be trained.
             update_func -- Updates to the model between iterations,
                            that should not be considered in the convergence
@@ -1403,7 +1403,7 @@ class CatmapModel(object):
             cost = self.get_cost()
             msg = ('{:9s} {:2d}/{:<2d}          Cost: {:' +
                    self._cost_field_fmt(cost) + 'f}.')
-            _logger.info(msg.format('xyzzy',
+            _logger.info(msg.format('iteration',
                                     iteration + 1, max_iterations,
                                     cost))
 
@@ -1413,7 +1413,7 @@ class CatmapModel(object):
             # perform update between optimization iterations
             if update_func is not None:
                 _logger.info('{:24s} Cost: {}'.format(
-                    'Before xyzzy update.', cost))
+                    'Before iteration update.', cost))
 
             # perform update between optimization iterations
             if update_func is not None:
@@ -1421,18 +1421,18 @@ class CatmapModel(object):
             else:
                 force_another = False
 
-            for callback in self.xyzzy_callbacks:
+            for callback in self.iteration_callbacks:
                 callback(self, iteration)
 
             cost = self.get_cost()
             cost_diff = cost - previous_cost
             limit = self._cost_convergence_limit(min_cost_gain)
             converged = (not force_another) and -cost_diff <= limit
-            self._display_cost(cost_diff, limit, 'xyzzy',
+            self._display_cost(cost_diff, limit, 'iteration',
                            iteration, max_iterations, converged)
             if converged:
                 _logger.info('{:24s} Cost: {}'.format(
-                    'final xyzzy.', cost))
+                    'final iteration.', cost))
                 return
             previous_cost = cost
 
@@ -1457,9 +1457,9 @@ class CatmapModel(object):
         Neither train_func nor resegment_func may require any arguments.
 
         Arguments:
-            train_func -- A method of CatmapModel which causes some aspect
+            train_func -- A method of FlatcatModel which causes some aspect
                           of the model to be trained.
-            resegment_func -- A method of CatmapModel that resegments or
+            resegment_func -- A method of FlatcatModel that resegments or
                               retags the segmentations, to produce the
                               results to compare. Should return the number
                               of changed words.
@@ -1514,11 +1514,11 @@ class CatmapModel(object):
             previous_cost = cost
 
     def _train_epoch(self):
-        """One epoch of training, which may contain several xyzzys
+        """One epoch of training, which may contain several iterations
         of each operation in sequence.
 
         The model must have been initialized, either by loading a baseline
-        segmentation or a pretrained catmap model from pickle or tagged
+        segmentation or a pretrained flatcat model from pickle or tagged
         segmentation file, and calling initialize_baseline and/or
         initialize_hmm
         """
@@ -1534,31 +1534,31 @@ class CatmapModel(object):
             self._changed_segmentations.clear()
         while self._operation_number < len(self.training_operations):
             operation = self._resolve_operation(self._operation_number)
-            min_xyzzy_cost_gain = self._training_params('min_xyzzy_cost_gain')
-            max_xyzzys = self._training_params('max_xyzzys')
+            min_iteration_cost_gain = self._training_params('min_iteration_cost_gain')
+            max_iterations = self._training_params('max_iterations')
             if self._training_params('must_reestimate'):
                 update_func = self.reestimate_probabilities
             else:
                 update_func = None
 
-            msg = 'Epoch {:2d}, operation {:2d} ({}), max {:2d} xyzzy(s).'
+            msg = 'Epoch {:2d}, operation {:2d} ({}), max {:2d} iteration(s).'
             _logger.info(msg.format(
                     self._epoch_number, self._operation_number,
                     self.training_operations[self._operation_number],
-                    max_xyzzys))
+                    max_iterations))
             utils.memlog('see above')
             self._convergence_of_cost(
                 lambda: self._operation_loop(operation()),
                 update_func=update_func,
-                min_cost_gain=min_xyzzy_cost_gain,
-                max_iterations=max_xyzzys)
+                min_cost_gain=min_iteration_cost_gain,
+                max_iterations=max_iterations)
             self.reestimate_probabilities()
             self._operation_number += 1
             for callback in self.operation_callbacks:
                 callback(self)
 
     def _single_iteration_epoch(self):
-        """One epoch of training, with exactly one xyzzy of each
+        """One epoch of training, with exactly one iteration of each
         operation and no convergence checks or update passes."""
         for i in range(len(self.training_operations)):
             operation = self._resolve_operation(i)
@@ -1762,20 +1762,20 @@ class CatmapModel(object):
         Customize this if you need more finegrained control of the training.
         """
 
-        if param_name == 'min_xyzzy_cost_gain':
-            return self._min_xyzzy_cost_gain
+        if param_name == 'min_iteration_cost_gain':
+            return self._min_iteration_cost_gain
         if param_name == 'min_epoch_cost_gain':
             return self._min_epoch_cost_gain
-        if param_name == 'max_xyzzys':
+        if param_name == 'max_iterations':
             if (self.training_operations[self._operation_number] ==
                 'resegment'):
-                return self._max_resegment_xyzzys
+                return self._max_resegment_iterations
             if self._epoch_number == 1:
-                # Perform more xyzzys in the first epoch.
+                # Perform more iterations in the first epoch.
                 # 0 is pre-epoch, 1 is the first actual epoch.
-                return self._max_xyzzys_first
+                return self._max_iterations_first
             # After that do just one of each operation.
-            return self._max_xyzzys
+            return self._max_iterations
         # FIXME This is a bit of ugliness I hope to get rid of
         if param_name == 'must_reestimate':
             return (self.training_operations[self._operation_number] ==
@@ -1848,26 +1848,26 @@ class CatmapModel(object):
 
     @staticmethod
     def detag_word(segments):
-        return [CatmapModel.detag_morph(x) for x in segments]
+        return [FlatcatModel.detag_morph(x) for x in segments]
 
     @staticmethod
     def detag_list(segmentations):
         """Removes category tags from a segmented corpus."""
         for rcount, segments in segmentations:
-            yield ((rcount, [CatmapModel.detag_morph(x) for x in segments]))
+            yield ((rcount, [FlatcatModel.detag_morph(x) for x in segments]))
 
     @property
     def word_tokens(self):
         return self._corpus_coding.boundaries
 
 
-class CatmapLexiconEncoding(baseline.LexiconEncoding):
+class FlatcatLexiconEncoding(baseline.LexiconEncoding):
     """Extends LexiconEncoding to include the coding costs of the
     encoding cost of morph usage (context) features.
     """
 
     def __init__(self, morph_usage):
-        super(CatmapLexiconEncoding, self).__init__()
+        super(FlatcatLexiconEncoding, self).__init__()
         self._morph_usage = morph_usage
         self.logfeaturesum = 0.0
 
@@ -1881,11 +1881,11 @@ class CatmapLexiconEncoding(baseline.LexiconEncoding):
         self.atoms.clear()
 
     def add(self, morph):
-        super(CatmapLexiconEncoding, self).add(morph)
+        super(FlatcatLexiconEncoding, self).add(morph)
         self.logfeaturesum += self._morph_usage.feature_cost(morph)
 
     def remove(self, morph):
-        super(CatmapLexiconEncoding, self).remove(morph)
+        super(FlatcatLexiconEncoding, self).remove(morph)
         self.logfeaturesum -= self._morph_usage.feature_cost(morph)
 
     def get_cost(self):
@@ -1903,12 +1903,12 @@ class CatmapLexiconEncoding(baseline.LexiconEncoding):
                  + self.frequency_distribution_cost())
 
     def get_codelength(self, morph):
-        cost = super(CatmapLexiconEncoding, self).get_codelength(morph)
+        cost = super(FlatcatLexiconEncoding, self).get_codelength(morph)
         cost += self._morph_usage.feature_cost(morph)
         return cost
 
 
-class CatmapEncoding(baseline.CorpusEncoding):
+class FlatcatEncoding(baseline.CorpusEncoding):
     """Class for calculating the encoding costs of the grammar and the
     corpus. Also stores the HMM parameters.
 
@@ -1918,7 +1918,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
 
     def __init__(self, morph_usage, lexicon_encoding, weight=1.0):
         self._morph_usage = morph_usage
-        super(CatmapEncoding, self).__init__(lexicon_encoding, weight)
+        super(FlatcatEncoding, self).__init__(lexicon_encoding, weight)
 
         # Counts of emissions observed in the tagged corpus.
         # A dict of ByCategory objects indexed by morph. Counts occurences.
@@ -2109,7 +2109,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
                 self.log_emissionprob(next_cat, morph))
 
     def update_count(self, construction, old_count, new_count):
-        raise Exception('Inherited method not appropriate for CatmapEncoding')
+        raise Exception('Inherited method not appropriate for FlatcatEncoding')
 
     def logtransitionsum(self):
         """Returns the term of the cost function associated with the
@@ -2166,7 +2166,7 @@ class CatmapEncoding(baseline.CorpusEncoding):
                 )
 
 
-class CatmapAnnotatedCorpusEncoding(object):
+class FlatcatAnnotatedCorpusEncoding(object):
     """Class for calculating the cost of encoding the annotated corpus"""
     def __init__(self, corpus_coding, weight=None):
         self.corpus_coding = corpus_coding

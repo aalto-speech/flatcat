@@ -335,7 +335,7 @@ class MorfessorIO:
         raise UnicodeError("Can not determine encoding of input files")
 
 
-class CatmapIO(MorfessorIO):
+class FlatcatIO(MorfessorIO):
     """Extends data file formats to include category tags."""
 
     def __init__(self, encoding=None, construction_separator=' + ',

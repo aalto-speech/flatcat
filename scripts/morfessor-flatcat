@@ -4,13 +4,13 @@ import sys
 
 from morfessor import cmd
 from morfessor.exception import ArgumentException
-from morfessor.catmap import _logger
+from morfessor.flatcat import _logger
 
 def main(argv):
-    parser = cmd.get_catmap_argparser()
+    parser = cmd.get_flatcat_argparser()
     try:
         args = parser.parse_args(argv)
-        cmd.catmap_main(args)
+        cmd.flatcat_main(args)
     except ArgumentException as e:
         parser.error(e)
     except Exception as e:

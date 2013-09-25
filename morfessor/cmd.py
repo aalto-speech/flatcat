@@ -645,21 +645,6 @@ Simple usage examples (training and testing):
     # Options for controlling training iteration sequence
     add_arg = parser.add_argument_group(
         'training iteration sequence options').add_argument
-    add_arg('--min-iteration-cost-gain', dest='min_iteration_cost_gain', type=float,
-            default=0.0025, metavar='<float>',
-            help='Stop training if cost reduction between iterations ' +
-                 'is below this limit * #boundaries. ' +
-                 '(default %(default)s).')
-    add_arg('--min-epoch-cost-gain', dest='min_epoch_cost_gain', type=float,
-            default=0.005, metavar='<float>',
-            help='Stop training if cost reduction between epochs ' +
-                 'is below this limit * #boundaries. ' +
-                 '(default %(default)s).')
-    add_arg('--min-difference-proportion', dest='min_diff_prop', type=float,
-            default=0.005, metavar='<float>',
-            help='Stop training if proportion of words with changed ' +
-                 'segmentation or category tags is below this limit. ' +
-                 '(default %(default)s).')
     add_arg('--max-epochs', dest='max_epochs', type=int, default=7,
             metavar='<int>',
             help='Maximum number of epochs. (default %(default)s).')
@@ -677,6 +662,21 @@ Simple usage examples (training and testing):
             type=int, default=2, metavar='<int>',
             help='Maximum number of iterations of resegmentation in ' +
                  'all epochs. Resegmentation is the heaviest operation. ' +
+                 '(default %(default)s).')
+    add_arg('--min-epoch-cost-gain', dest='min_epoch_cost_gain', type=float,
+            default=0.005, metavar='<float>',
+            help='Stop training if cost reduction between epochs ' +
+                 'is below this limit * #boundaries. ' +
+                 '(default %(default)s).')
+    add_arg('--min-iteration-cost-gain', dest='min_iteration_cost_gain', type=float,
+            default=0.0025, metavar='<float>',
+            help='Stop training if cost reduction between iterations ' +
+                 'is below this limit * #boundaries. ' +
+                 '(default %(default)s).')
+    add_arg('--min-difference-proportion', dest='min_diff_prop', type=float,
+            default=0.005, metavar='<float>',
+            help='Stop training if proportion of words with changed ' +
+                 'segmentation or category tags is below this limit. ' +
                  '(default %(default)s).')
     add_arg('--training-operations', dest='training_operations', type=str,
             default=','.join(flatcat.FlatcatModel.DEFAULT_TRAIN_OPS),

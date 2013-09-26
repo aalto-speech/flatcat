@@ -104,7 +104,8 @@ class MorfessorIO:
     def read_corpus_file(self, file_name):
         """Read one corpus file.
 
-        Yield for each compound found (1, compound, compound_atoms).
+        For each compound, yield (1, compound, compound_atoms).
+        After each line, yield (0, "\n", ()).
 
         """
         _logger.info("Reading corpus from '%s'..." % file_name)
@@ -112,6 +113,7 @@ class MorfessorIO:
             for compound in self.compound_sep.split(line):
                 if len(compound) > 0:
                     yield 1, compound, self._split_atoms(compound)
+            yield 0, "\n", ()
         _logger.info("Done.")
 
     def read_corpus_list_file(self, file_name):

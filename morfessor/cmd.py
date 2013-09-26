@@ -447,7 +447,7 @@ def get_flatcat_argparser():
     parser = argparse.ArgumentParser(
         prog='flatcat.py',
         description="""
-Morfessor Categories-MAP {version}
+Morfessor FlatCat {version}
 
 Copyright (c) 2013, Stig-Arne Gronroos
 All rights reserved.
@@ -479,7 +479,7 @@ Simple usage examples (training and testing):
     add_arg('-L', '--load-segmentation', dest="loadsegfiles", default=[],
             action='append', metavar='<file>',
             help='load existing model from tagged segmentation ' +
-                 'file (Morfessor 2.0 Categories-MAP format). ' +
+                 'file (Morfessor 2.0 FlatCat format). ' +
                  'The probabilities are not stored in the file, ' +
                  'and must be re-estimated. ' +
                  'Can be used together with --load, ' +

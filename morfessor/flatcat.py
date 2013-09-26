@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Morfessor 2.0 Categories-MAP variant.
+Morfessor 2.0 FlatCat variant.
 """
 from __future__ import unicode_literals
 
@@ -52,6 +52,13 @@ def train_batch(smodel, weight_learning=None):
     This procedure makes it necessary to move the control flow
     outside the object, to allow it to be garbage collected.
     """
+    if not isinstance(smodel, SharedModel):
+        if weight_learning is not None:
+            _logger.warning('train_batch called directly with model ' +
+                'instead of wrapped in SharedModel, ' +
+                'and doing weight learning. ' +
+                'This WILL waste memory.')
+        smodel = SharedModel(smodel)
     smodel.model._epoch_update(no_increment=True)
     previous_cost = smodel.model.get_cost()
     wl_force_another = False
@@ -96,7 +103,7 @@ class SharedModel(object):
 
 
 class FlatcatModel(object):
-    """Morfessor Categories-MAP model class."""
+    """Morfessor FlatCat model class."""
 
     word_boundary = WORD_BOUNDARY
 
@@ -314,6 +321,10 @@ class FlatcatModel(object):
         self._max_shift = max_shift_distance
         self._min_shift_remainder = min_shift_remainder
         self._online = False
+
+    def train_batch(self):
+        """Convenience method for batch training without weight learning."""
+        train_batch(self)
 
     def train_online(self, data, count_modifier=None, epoch_interval=10000,
                      max_epochs=None):

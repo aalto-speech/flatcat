@@ -2297,6 +2297,7 @@ class FlatcatAnnotatedCorpusEncoding(object):
             return
         self.logemissionsum += count * self.corpus_coding.log_emissionprob(
             category, morph)
+        assert self.logemissionsum >= 0
 
 
 class WeightLearning(object):

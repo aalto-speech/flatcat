@@ -186,9 +186,9 @@ Interactive use (read corpus from user):
             metavar='<int>',
             help="compound frequency threshold for batch training (default "
                  "%(default)s)")
-    add_arg('--max-iterations', dest='maxiterations', type=int, default=None,
+    add_arg('--max-epochs', dest='maxepochs', type=int, default=None,
             metavar='<int>',
-            help='hard maximum of iterations in training')
+            help='hard maximum of epochs in training')
     add_arg('--nosplit-re', dest="nosplit", type=str, default=None,
             metavar='<regexp>',
             help="if the expression matches the two surrounding characters, "

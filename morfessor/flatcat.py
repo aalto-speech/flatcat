@@ -799,6 +799,8 @@ class FlatcatModel(object):
         self._calculate_usage_features()
         self._calculate_transition_counts()
         self._calculate_emission_counts()
+        if self._supervised:
+            self._annot_coding.reset_contributions()
 
     def map_segmentations(self, func):
         """Apply a mapping to the analysis part of segmentations.
@@ -1627,6 +1629,7 @@ class FlatcatModel(object):
 
             detagged = self.detag_word(transform_group[0].rule)
             if self._supervised:
+                logemissionsum_initial = self._annot_coding.logemissionsum
                 # Old contribution to annotation cost needs to be
                 # removed before the probability changes
                 # (when using ML-estimate, this needs to be done for
@@ -1656,6 +1659,7 @@ class FlatcatModel(object):
                     # contribution to annotation cost needs to be readded
                     # after the emission probability has been updated
                     # (ordering with _update_counts relevant for ML-estimate)
+                    logemissionsum_tmp = self._annot_coding.logemissionsum
                     for morph in changed_morphs:
                         self._annot_coding.modify_contribution(morph, 1)
                 cost = self.get_cost()
@@ -1663,8 +1667,10 @@ class FlatcatModel(object):
                     best = TransformationNode(cost, transform, matched_targets)
                 # Revert change to encoding
                 if self._supervised:
-                    for morph in changed_morphs:
-                        self._annot_coding.modify_contribution(morph, -1)
+                    # Numerically more stable than adding with reverse sign
+                    self._annot_coding.logemissionsum = logemissionsum_tmp
+                    #for morph in changed_morphs:
+                    #    self._annot_coding.modify_contribution(morph, -1)
                 self._update_counts(transform.change_counts, -1)
                 for morph in self.detag_word(transform.result):
                     self._modify_morph_count(morph, -num_matches)
@@ -1673,6 +1679,8 @@ class FlatcatModel(object):
                 # Best option was to do nothing. Revert morph count.
                 for morph in self.detag_word(transform_group[0].rule):
                     self._modify_morph_count(morph, num_matches)
+                if self._supervised:
+                    self._annot_coding.logemissionsum = logemissionsum_initial
             else:
                 # A real change was the best option
                 best.transform.reset_counts()
@@ -1692,10 +1700,9 @@ class FlatcatModel(object):
                 if self._changed_segmentations is not None:
                     self._changed_segmentations.update(best.targets)
                     self._changed_segmentations_op.update(best.targets)
-
-            if self._supervised:
-                for morph in changed_morphs:
-                    self._annot_coding.modify_contribution(morph, 1)
+                if self._supervised:
+                    for morph in changed_morphs:
+                        self._annot_coding.modify_contribution(morph, 1)
 
             self._morph_usage.remove_temporaries(temporaries)
 
@@ -2297,7 +2304,9 @@ class FlatcatAnnotatedCorpusEncoding(object):
             return
         self.logemissionsum += count * self.corpus_coding.log_emissionprob(
             category, morph)
-        assert self.logemissionsum >= 0
+        #msg = 'logemissionsum {} < 0 when changing contrib of {}/{} {}'.format(
+        #    self.logemissionsum, morph, category, count)
+        #assert self.logemissionsum >= 0, msg
 
 
 class WeightLearning(object):

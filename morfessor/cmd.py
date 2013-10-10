@@ -554,6 +554,10 @@ Simple usage examples (training and testing):
             action='store_true',
             help='output category tags in test data. ' +
                  'Default is to output only the morphs')
+    add_arg('--output-newlines', dest='outputnewlines', default=False,
+            action='store_true',
+            help="for each newline in input, print newline in --output file "
+            "(default: '%(default)s')")
 
     # Options for training and segmentation
     add_arg = parser.add_argument_group(
@@ -1083,6 +1087,11 @@ def flatcat_main(args):
         with io._open_text_file_write(args.outfile) as fobj:
             testdata = io.read_corpus_files(args.testfiles)
             for count, compound, atoms in _generator_progress(testdata):
+                if len(atoms) == 0:
+                    # Newline in corpus
+                    if args.outputnewlines:
+                        fobj.write("\n")
+                    continue
                 constructions, logp = shared_model.model.viterbi_segment(atoms)
                 if heuristic is not None:
                     constructions = heuristic.remove_nonmorfemes(

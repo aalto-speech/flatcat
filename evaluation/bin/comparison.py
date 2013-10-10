@@ -53,6 +53,9 @@ def load_seg(filename):
         if line[0] == '#':
             continue
         line = line.rstrip()
+        if len(line) == 0:
+            continue
+        print(line)
         w, a = line.split('\t')
         segs[w] = a
     fobj.close()

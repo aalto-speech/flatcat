@@ -79,132 +79,104 @@ NON_MORPHEME_PENALTY = 50
 
 
 class HeuristicPostprocessor(object):
-    DEFAULT_OPERATIONS = ['missing-stem', 'longest-to-stem',
-                          'join-two', 'join-all']
-
     def __init__(self, operations=None, max_join_stem_len=4):
         self.temporaries = set()
         self.max_join_stem_len = max_join_stem_len
-        if operations is None:
-            self.operations = HeuristicPostprocessor.DEFAULT_OPERATIONS
-        else:
-            self.operations = operations
+        self.operations = []
 
     def remove_nonmorfemes(self, analysis, model):
         """Remove nonmorfemes from the analysis by joining or retagging
         morphs, using heuristics."""
-        if len(self.operations) == 0:
+
+        # Nothing to do if there are no nonmorphemes
+        if all([m.category != 'ZZZ' for m in analysis]):
             return analysis
 
-        while True:
-            # Repeat until there are no nonmorphemes left
-            if all([m.category != 'ZZZ' for m in analysis]):
-                return analysis
-            alternatives = []
-            self.temporaries = set()
+        if len(analysis) == 1:
+            return [CategorizedMorph(analysis[0].morph, 'STM')]
 
-            # If there are no stems, try making the longest morph
-            # into a stem.
-            # This can also modify the tag of a morph with other than ZZZ
-            if 'missing-stem' in self.operations:
-                longest_index = None
-                longest_len = 0
-                for (i, m) in enumerate(analysis):
-                    if m.category == 'STM':
-                        # Not applicable: there is a stem already
-                        longest_index = None
-                        break
-                    if len(m) > longest_len:
-                        longest_index = i
-                        longest_len = len(m)
-                if longest_index is not None:
-                    tmp = list(analysis)
-                    tmp[longest_index] = CategorizedMorph(
-                                            tmp[longest_index].morph,
-                                            'STM')
-                    alternatives.append(AnalysisAlternative(tmp, 0))
+        # Word internal PRE/SUF taggings are uncertain
+        # in the presence of nonmorphemes
+        self._remove_uncertain_tags(analysis)
 
-            # Otherwise try making the longest nonmorpheme into a stem.
-            # penalized because there is already a stem.
-            if longest_index is None and 'longest-to-stem' in self.operations:
-                longest_index = None
-                longest_len = 0
-                for (i, m) in enumerate(analysis):
-                    if m.category != 'ZZZ':
-                        continue
-                    if len(m) > longest_len:
-                        longest_index = i
-                        longest_len = len(m)
-                if longest_index is not None:
-                    tmp = list(analysis)
-                    tmp[longest_index] = CategorizedMorph(
-                                            tmp[longest_index].morph,
-                                            'STM')
-                    alternatives.append(AnalysisAlternative(
-                        tmp,
-                        NON_MORPHEME_PENALTY / 2))
+        # Sequencs of ZZZs can be safely joined
+        analysis = self._join_sequences(analysis, model.forcesplit)
 
-            # Try joining each nonmorpheme in both directions,
-            if 'join-two' in self.operations:
-                for i in range(len(analysis) - 1):
-                    if (analysis[i].morph in model.forcesplit or
-                            analysis[i + 1].morph in model.forcesplit):
-                        # Unless forcesplit prevents it
-                        continue
-                    if (self._accept_join(analysis[i], analysis[i + 1]) or
-                            self._accept_join(analysis[i + 1], analysis[i])):
-                        alternatives.append(AnalysisAlternative(
-                            self._join_at(analysis, i), 0))
+        # Resulting long ZZZs are stems
+        self._long_to_stem(analysis, 4)
 
-            # Try joining all sequences of 3 or more nonmorphemes
-            if 'join-all' in self.operations:
-                concatenated = []
-                tmp = []
-                for m in analysis:
-                    if (m.category == 'ZZZ' and
-                            m.morph not in model.forcesplit):
-                        concatenated.append(m.morph)
-                    else:
-                        if len(concatenated) >= 3:
-                            morph = CategorizedMorph(''.join(concatenated),
-                                                     'STM')
-                            tmp.append(morph)
-                            self.temporaries.add(morph)
-                            concatenated = []
-                        tmp.append(m)
-                if len(concatenated) >= 3:
-                    morph = CategorizedMorph(''.join(concatenated), 'STM')
-                    tmp.append(morph)
-                    self.temporaries.add(morph)
-                    concatenated = []
-                if len(concatenated) == 0 and len(tmp) > 0:
-                    alternatives.append(AnalysisAlternative(tmp, 0))
+        # Might be done at this point
+        if all([m.category != 'ZZZ' for m in analysis]):
+            return analysis
 
-            if len(alternatives) == 0:
-                return analysis
+        # If not: stronger measures are needed
+        # Force join remaining
+        analysis = self._force_join(analysis, model.forcesplit)
 
-            # Add penalties for number of remaining nonmorphemes
-            with_penalties = []
-            for (analysis, penalty) in alternatives:
-                for cmorph in analysis:
-                    if (cmorph.category == 'ZZZ' and
-                            cmorph.morph not in model.forcesplit):
-                        penalty += NON_MORPHEME_PENALTY
-                with_penalties.append(AnalysisAlternative(analysis, penalty))
+        # Retag with non-morphemes forbidden
+        analysis = model.viterbi_tag(analysis, forbid_zzz=True)
+        return analysis
 
-            for morph in self.temporaries:
-                # Allow new morphs to be formed by joining
-                model._modify_morph_count(morph.morph, 1)
-                model._corpus_coding.update_emission_count(
-                    morph.category, morph.morph, 1)
-            alternatives = model.best_analysis(with_penalties)
-            for morph in self.temporaries:
-                # Remove temporary morphs
-                model._modify_morph_count(morph.morph, -1)
-                model._corpus_coding.update_emission_count(
-                    morph.category, morph.morph, -1)
+    def _remove_uncertain_tags(self, analysis):
+        #In-place
+        for i in range(len(analysis)):
+            if (i > 0 and
+                    analysis[i - 1].category == 'ZZZ' and
+                    analysis[i].category == 'PRE'):
+                analysis[i].category = 'ZZZ'
+            if (i < len(analysis) - 1 and
+                    analysis[i + 1].category == 'ZZZ' and
+                    analysis[i].category == 'SUF'):
+                analysis[i].category = 'ZZZ'
 
-            analysis = alternatives[0][1]
+    def _join_sequences(self, analysis, forcesplit):
+        prev = None
+        out = []
+        for m in analysis:
+            if (prev is None or
+                    (m.category != 'ZZZ' or m.morph in forcesplit) or
+                    (prev.morph in forcesplit) or
+                    (prev.category != 'ZZZ')):
+                if prev is not None:
+                    out.append(prev)
+                prev = m
+                continue
+            # prev is also a non-morpheme, and eligible for joining
+            prev = CategorizedMorph(prev.morph + m.morph, 'ZZZ')
+        if prev is not None:
+            out.append(prev)
+        return out
+
+    def _long_to_stem(self, analysis, min_len):
+        #In-place
+        for m in analysis:
+            if m.category == 'ZZZ' and len(m.morph) >= min_len:
+                m.category = 'STM'
+
+    def _force_join(self, analysis, forcesplit):
+        prev = None
+        out = []
+        if len(analysis) < 2:
+            return analysis
+        if (analysis[0].category == 'ZZZ' and
+                analysis[0].morph not in forcesplit and
+                analysis[1].morph not in forcesplit):
+            analysis = self._join_at(analysis, 0)
+        for m in analysis:
+            if prev is None:
+                prev = m
+                continue
+            if ((m.category != 'ZZZ' or m.morph in forcesplit) or
+                    (prev.morph in forcesplit)):
+                if prev is not None:
+                    out.append(prev)
+                prev = m
+                continue
+            # prev is eligible for joining
+            prev = CategorizedMorph(prev.morph + m.morph, 'ZZZ')
+        if prev is not None:
+            out.append(prev)
+        return out
 
     def _join_at(self, analysis, i):
         tag = analysis[i].category
@@ -219,19 +191,6 @@ class HeuristicPostprocessor(object):
         if len(analysis) > (i + 2):
             out.extend(analysis[(i + 2):])
         return out
-
-    def _accept_join(self, joiner, target):
-        if joiner.category != 'ZZZ':
-            # Only nonmorphemes can be joined
-            return False
-        if target.category == 'ZZZ':
-            # Both parts are nonmorphemes: can join regardless of length
-            return True
-        if target.category == 'STM' and len(target) <= self.max_join_stem_len:
-            # Can join to short enough stems
-            return True
-        # Otherwise don't accept join
-        return False
 
 
 class MorphContextBuilder(object):
@@ -269,6 +228,12 @@ class MorphUsageProperties(object):
                         ('PRE', WORD_BOUNDARY),
                         ('PRE', 'SUF'),
                         (WORD_BOUNDARY, 'SUF'))
+
+    # Adding these transitions removes the use of non-morphemes
+    forbid_zzz = ((WORD_BOUNDARY, 'ZZZ'),
+                  ('PRE', 'ZZZ'),
+                  ('STM', 'ZZZ'),
+                  ('SUF', 'ZZZ'))
 
     # Cache for memoized valid transitions
     _valid_transitions = None

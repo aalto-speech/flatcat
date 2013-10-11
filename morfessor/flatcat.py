@@ -660,7 +660,7 @@ class FlatcatModel(object):
             pos -= len(backtrace.backpointer[1])
         return result, best.cost
 
-    def viterbi_tag(self, segments):
+    def viterbi_tag(self, segments, forbid_zzz=False):
         """Tag a pre-segmented word using the learned model.
 
         Arguments:
@@ -669,11 +669,13 @@ class FlatcatModel(object):
                         training data.
                         For segmenting and tagging new words,
                         use viterbi_segment(compound).
+            forbid_zzz -- If True, no morph can be tagged as a
+                          non-morpheme.
         """
 
         # Throw away old category information, if any
         segments = self.detag_word(segments)
-        return self._viterbi_tag_helper(segments)
+        return self._viterbi_tag_helper(segments, forbid_zzz=forbid_zzz)
 
     def fast_tag_gaps(self, segments):
         """Tag the gaps in a pre-segmented word where most morphs are already
@@ -690,7 +692,8 @@ class FlatcatModel(object):
                                         FlatcatModel.detag_morph)
 
     def _viterbi_tag_helper(self, segments,
-                            constraint=None, mapping=lambda x: x):
+                            constraint=None, mapping=lambda x: x,
+                            forbid_zzz=False):
         # To make sure that internally impossible states are penalized
         # even more than impossible states caused by zero parameters.
         extrazero = LOGPROB_ZERO ** 2
@@ -704,6 +707,10 @@ class FlatcatModel(object):
         for (prev_cat, next_cat) in MorphUsageProperties.zero_transitions:
             forbidden.append((categories.index(prev_cat),
                               categories.index(next_cat)))
+        if forbid_zzz:
+            for (prev_cat, next_cat) in MorphUsageProperties.forbid_zzz:
+                forbidden.append((categories.index(prev_cat),
+                                  categories.index(next_cat)))
 
         # Grid consisting of
         # the lowest accumulated cost ending in each possible state.
@@ -978,6 +985,9 @@ class FlatcatModel(object):
             seg = self.segmentations[i]
             out.append((i, seg.count, seg.analysis))
         return sorted(out)
+
+    def morph_count(self, morph):
+        return self._morph_usage.count(morph)
 
     def violated_annotations(self):
         """Yields all segmentations which have an associated annotation,

@@ -619,20 +619,6 @@ Simple usage examples (training and testing):
             action='store_true',
             help='use heuristic postprocessing to remove nonmorfemes ' +
                  'from output segmentations.')
-    add_arg('--nonmorpheme-heuristics', dest='heuristic_ops', type=str,
-            default=','.join(HeuristicPostprocessor.DEFAULT_OPERATIONS),
-            metavar='<list>',
-            help='List of heuristics to use for removal of non-morfemes. ' +
-                 'The format of the list is a string of (unquoted) ' +
-                 'operation names separated by single commas (no space). ' +
-                 'Has no effect unless used together with ' +
-                 '--remove-nonmorphemes.' +
-                 " (default '%(default)s').")
-    add_arg('--max-heuristic-join-stem-length', dest='max_join_stem_len',
-            type=int, default=4, metavar='<int>',
-            help='Stems longer than this length are ' +
-                 'not considered for heuristic joining with nonmorphemes. ' +
-                 '(default %(default)s).')
     add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
             metavar='<int>',
             help="compound frequency threshold (default %(default)s).")
@@ -984,9 +970,7 @@ def flatcat_main(args):
     # Heuristic nonmorpheme removal
     heuristic = None
     if args.rm_nonmorph:
-        heuristic_ops = args.heuristic_ops.split(',')
-        heuristic = HeuristicPostprocessor(operations=heuristic_ops,
-                        max_join_stem_len=args.max_join_stem_len)
+        heuristic = HeuristicPostprocessor()
 
     # Perform weight learning using development annotations
     if develannots is not None:

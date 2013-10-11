@@ -55,8 +55,11 @@ def load_seg(filename):
         line = line.rstrip()
         if len(line) == 0:
             continue
-        print(line)
-        w, a = line.split('\t')
+        if '\t' in line:
+            w, a = line.split('\t')
+        else:
+            a = line
+            w = a.split(', ')[0].translate(None, ' ')
         segs[w] = a
     fobj.close()
     return segs

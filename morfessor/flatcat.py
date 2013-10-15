@@ -1342,6 +1342,8 @@ class FlatcatModel(object):
                 continue
             self._modify_morph_count(morph, count)
         self._update_counts(changes_unannot, 1)
+        self._calculate_transition_counts()
+        self._calculate_emission_counts()
         self._annot_coding.set_counts(changes_annot)
         self._annot_coding.reset_contributions()
 

@@ -250,7 +250,6 @@ class FlatcatModel(object):
                 self.morph_backlinks[morph].add(i)
             i += 1
             self._corpus_coding.boundaries += count
-        utils.memlog('After adding corpus data')
 
     def add_annotations(self, annotations, annotatedcorpusweight=None):
         """Adds data to the annotated corpus."""
@@ -327,7 +326,7 @@ class FlatcatModel(object):
         train_batch(self)
 
     def train_online(self, data, count_modifier=None, epoch_interval=10000,
-                     max_epochs=None):
+                     max_epochs=None, result_callback=None):
         """Adapt the model in online fashion."""
 
         self._online = True
@@ -391,6 +390,11 @@ class FlatcatModel(object):
 
                 _logger.debug("#%s: %s -> %s" %
                               (token_num, w, segments))
+                if result_callback is not None:
+                    result_callback(token_num,
+                                    w,
+                                    segments,
+                                    self.detag_word(segments))
                 token_num += 1
 
             # also reestimates the probabilities

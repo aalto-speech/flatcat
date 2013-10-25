@@ -1017,7 +1017,7 @@ def flatcat_main(args):
                                      construction_sep=' ',
                                      analysis_sep=',')
         shared_model.model.train_online(data, count_modifier=dampfunc,
-                           iteration_interval=args.iterationinterval,
+                           epoch_interval=args.epochinterval,
                            max_epochs=(args.max_iterations * args.max_epochs))
     if args.trainmode in ('batch', 'online+batch'):
         shared_model.model.batch_parameters(

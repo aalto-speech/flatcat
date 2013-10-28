@@ -415,9 +415,12 @@ class FlatcatModel(object):
         return epochs, newcost
 
     def _online_backlinks(self):
+        self.morph_backlinks.clear()
         word_backlinks = {}
         anno_backlinks = {}
         for (i, seg) in enumerate(self.segmentations):
+            for morph in self.detag_word(seg.analysis):
+                self.morph_backlinks[morph].add(i)
             joined = ''.join(self.detag_word(seg.analysis))
             if self._is_annotation(i):
                 anno_backlinks[joined] = i

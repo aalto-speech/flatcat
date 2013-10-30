@@ -468,7 +468,7 @@ Command-line arguments:
 Simple usage examples (training and testing):
 
   %(prog)s -B baseline_segmentation.txt -p 10 -s model.pickled
-  %(prog)s -l model.pickled -T test_corpus.txt -o test_corpus.segmented
+  %(prog)s -m none -l model.pickled -T test_corpus.txt -o test_corpus.segmented
 
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,

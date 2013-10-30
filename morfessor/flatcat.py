@@ -443,20 +443,26 @@ class FlatcatModel(object):
         changes_unannot = ChangeCounts()
         changes_annot = ChangeCounts()
         unannot_count = 0
+        changed_morphs = set()
 
         if i_word is not None:
             # An incorrect segmentation is in the corpus
             old_analysis = self.segmentations[i_word].analysis
             unannot_count = self.segmentations[i_word].count
-            changes_unannot.update(old_analysis, -1, corpus_index=i_word)
+            changes_unannot.update(old_analysis,
+                                   -unannot_count,
+                                   corpus_index=i_word)
             for morph in self.detag_word(old_analysis):
                 count_diff[morph] -= unannot_count
+                changed_morphs.add(morph)
             if i_anno is not None:
                 old_annotation = self.segmentations[i_anno].analysis
                 # Correcting an earlier annotation
-                changes_annot.update(old_annotation, -1, corpus_index=i_anno)
+                changes_annot.update(old_annotation,
+                                     -self.segmentations[i_anno].count,
+                                     corpus_index=i_anno)
                 for morph in self.detag_word(old_annotation):
-                    count_diff[morph] -= 1
+                    count_diff[morph] -= self.segmentations[i_anno].count
             else:
                 add_annotation_entry = True
         else:
@@ -479,7 +485,9 @@ class FlatcatModel(object):
         if i_word is not None:
             self.segmentations[i_word] = WordAnalysis(unannot_count,
                                                       new_analysis)
-            changes_unannot.update(new_analysis, 1, corpus_index=i_word)
+            changes_unannot.update(new_analysis,
+                                   unannot_count,
+                                   corpus_index=i_word)
         if add_annotation_entry:
             i_anno = len(self.annotations)
             self.segmentations.insert(i_anno, WordAnalysis(1, new_analysis))
@@ -497,6 +505,12 @@ class FlatcatModel(object):
         self._update_counts(changes_unannot, 1)
         self._annot_coding.update_counts(changes_annot)
         self._annot_coding.reset_contributions()
+
+        if i_anno is not None:
+            self.training_focus = set([i_anno])
+            for morph in changed_morphs:
+                self.training_focus.update(self.morph_backlinks[morph])
+            self._single_iteration_epoch()
 
         return (i_word, i_anno, add_annotation_entry)
 

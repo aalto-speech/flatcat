@@ -192,7 +192,8 @@ class FlatcatModel(object):
         # Variables for semi-supervised training
         self._supervised = False
         self._annot_coding = None
-        self.annotations = []           # (word, (analysis1, analysis2...))
+        # [word, (analysis1, analysis2...), current]
+        self.annotations = []
         self._annotations_tagged = False
 
         # Variables for online learning
@@ -264,7 +265,7 @@ class FlatcatModel(object):
             self.segmentations.insert(
                 len(self.annotations),
                 WordAnalysis(1, alternatives[0]))
-            self.annotations.append((word, alternatives))
+            self.annotations.append([word, alternatives, None])
         self._calculate_morph_backlinks()
         self._annot_coding = FlatcatAnnotatedCorpusEncoding(
                                 self._corpus_coding,
@@ -446,6 +447,7 @@ class FlatcatModel(object):
         unannot_count = 0
         changed_morphs = set()
 
+        assert i_word is None or i_word != i_anno
         if i_word is not None:
             # An incorrect segmentation is in the corpus
             old_analysis = self.segmentations[i_word].analysis
@@ -457,13 +459,13 @@ class FlatcatModel(object):
                 count_diff[morph] -= unannot_count
                 changed_morphs.add(morph)
             if i_anno is not None:
-                old_annotation = self.segmentations[i_anno].analysis
+                (_, _, old_annotation) = self.annotations[i_anno]
                 # Correcting an earlier annotation
                 changes_annot.update(old_annotation,
-                                     -self.segmentations[i_anno].count,
+                                     -1,
                                      corpus_index=i_anno)
                 for morph in self.detag_word(old_annotation):
-                    count_diff[morph] -= self.segmentations[i_anno].count
+                    count_diff[morph] -= 1
             else:
                 add_annotation_entry = True
         else:
@@ -492,14 +494,14 @@ class FlatcatModel(object):
         if add_annotation_entry:
             i_anno = len(self.annotations)
             self.segmentations.insert(i_anno, WordAnalysis(1, new_analysis))
-            self.annotations.append((word, [segments]))
+            self.annotations.append([word, [segments], new_analysis])
             self._annot_coding.boundaries += 1
             self._calculate_morph_backlinks()
             if i_word is not None:
                 i_word += 1
         else:
             self.segmentations[i_anno] = WordAnalysis(1, new_analysis)
-            self.annotations[i_anno] = (word, [segments])
+            self.annotations[i_anno] = [word, [segments], new_analysis]
 
         if i_anno is not None:
             changes_annot.update(new_analysis, 1, corpus_index=i_anno)
@@ -1015,7 +1017,7 @@ class FlatcatModel(object):
         """Yields all segmentations which have an associated annotation,
         but are currently segmented in a way that is not included in the
         annotation alternatives."""
-        for (i, anno) in enumerate(self.annotations):
+        for (i, anno, _) in enumerate(self.annotations):
             (_, alternatives) = anno
             alts_de = [self.detag_word(alt) for alt in alternatives]
             seg_de = self.detag_word(self.segmentations[i].analysis)
@@ -1333,14 +1335,13 @@ class FlatcatModel(object):
         # might no longer match the annotation due to performed operations
         changes_annot = ChangeCounts()
         for (i, annotation) in enumerate(self.annotations):
-            (_, alternatives) = annotation
+            (_, alternatives, old_active) = annotation
 
             if not self._annotations_tagged:
                 alternatives = [self.viterbi_tag(alt) for alt in alternatives]
 
             sorted_alts = self.best_analysis([AnalysisAlternative(alt, 0)
                                               for alt in alternatives])
-            old_active = self.segmentations[i].analysis
             new_active = sorted_alts[0].analysis
 
             if old_active is not None:

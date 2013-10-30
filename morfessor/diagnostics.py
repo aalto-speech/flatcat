@@ -202,7 +202,8 @@ class epochStatisticsPlotter(object):
         for i in range(len(self.stats.epoch_numbers)):
             by_epoch[self.stats.epoch_numbers[i]] += self.stats.durations[i]
             by_op[self.stats.operation_numbers[i]] += self.stats.durations[i]
-            by_iteration[self.stats.iteration_numbers[i]] += self.stats.durations[i]
+            by_iteration[
+                self.stats.iteration_numbers[i]] += self.stats.durations[i]
 
         plt.subplot(2, 2, 1)
         plt.plot(self.stats.durations, marker='+')

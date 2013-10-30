@@ -10,6 +10,7 @@ unusually heavy objective functions.
 
 import math
 
+
 class MajorityVote(object):
     """Wraps an objective function in a majority voting scheme.
     Arguments:
@@ -145,7 +146,7 @@ class Intervals(object):
             # Falling back to alternating the search direction when a step
             # is rejected
             self._flip()
-    
+
     def _flip(self):
         (self.a, self.b) = (self.b, self.a)
         self.sign *= -1
@@ -177,7 +178,7 @@ class LineSearchBisection(object):
         self.cb_eval = cb_eval
         self.cb_acc = cb_acc
         self.cb_rej = cb_rej
-        
+
     def search(self, initial, vector, initial_cues, prev_best_f, evals,
                bidir=False):
         """
@@ -225,7 +226,7 @@ class LineSearchBisection(object):
                 if self.cb_rej is not None:
                     self.cb_rej(i, evals, cursor, f, best, best_f, best_cues)
             # Possibly reverse the direction of the search
-            ignore = (self.cue_rejection_thresh is not None and 
+            ignore = (self.cue_rejection_thresh is not None and
                       num_rejections >= self.cue_rejection_thresh)
             intervals.use_direction_cue(best_cues, ignore)
 
@@ -348,7 +349,7 @@ def modified_powells(func, initial, max_iters, evals_per_vector, scale=1.0,
         cb_vec('final', max_iters, 0, 1, vectors[0], point, best_f, cues)
     (point, f, cues, sq_step, rej) = line.search(
         point, vectors[0], cues, best_f, evals_per_vector)
-        
+
     return point
 
 

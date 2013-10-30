@@ -647,8 +647,8 @@ Simple usage examples (training and testing):
     add_arg('--max-epochs', dest='max_epochs', type=int, default=7,
             metavar='<int>',
             help='Maximum number of epochs. (default %(default)s).')
-    add_arg('--max-iterations-first', dest='max_iterations_first', type=int, default=1,
-            metavar='<int>',
+    add_arg('--max-iterations-first', dest='max_iterations_first',
+            type=int, default=1, metavar='<int>',
             help='Maximum number of iterations of each operation in ' +
                  'the first epoch. ' +
                  '(default %(default)s).')
@@ -667,8 +667,8 @@ Simple usage examples (training and testing):
             help='Stop training if cost reduction between epochs ' +
                  'is below this limit * #boundaries. ' +
                  '(default %(default)s).')
-    add_arg('--min-iteration-cost-gain', dest='min_iteration_cost_gain', type=float,
-            default=0.0025, metavar='<float>',
+    add_arg('--min-iteration-cost-gain', dest='min_iteration_cost_gain',
+            type=float, default=0.0025, metavar='<float>',
             help='Stop training if cost reduction between iterations ' +
                  'is below this limit * #boundaries. ' +
                  '(default %(default)s).')
@@ -750,22 +750,22 @@ Simple usage examples (training and testing):
             help='Number of times each training operation is performed' +
                  'in between-iteration weight updates ' +
                  '(default %(default)s).')
-    add_arg('--weightlearn-sample-size', dest='weightlearn_sample_size', type=int,
-            default=2000, metavar='<int>',
+    add_arg('--weightlearn-sample-size', dest='weightlearn_sample_size',
+            type=int, default=2000, metavar='<int>',
             help='A subset of this size is sampled (with repetition, ' +
             'weighting according to occurrence count) from the corpus. ' +
             'When evaluating a value for the corpus weight during weight '
             'learning, the local search of the model training is restricted ' +
             'to this set, to reduce computation time. ' +
             '(default %(default)s); ')
-    add_arg('--weightlearn-sample-sets', dest='weightlearn_sample_sets', type=int,
-            default=5, metavar='<int>',
+    add_arg('--weightlearn-sample-sets', dest='weightlearn_sample_sets',
+            type=int, default=5, metavar='<int>',
             help='Make a majority decision based on this number of ' +
             'weightlearning sample sets. ' +
             '(default %(default)s); ')
     add_arg('--weightlearn-cue-rejection-thresh', dest='weightlearn_cuethresh',
             type=int, default=4, metavar='<int>',
-            help='Stop using the direction cue after this many rejected steps ' +
+            help='Stop using the direction cue after this many rejected steps '
             '(default %(default)s); ')
     add_arg('-W', '--annotationweight', dest="annotationweight",
             type=float, default=None, metavar='<float>',
@@ -1021,14 +1021,14 @@ def flatcat_main(args):
                            max_epochs=(args.max_iterations * args.max_epochs))
     if args.trainmode in ('batch', 'online+batch'):
         shared_model.model.batch_parameters(
-                               min_iteration_cost_gain=args.min_iteration_cost_gain,
-                               min_epoch_cost_gain=args.min_epoch_cost_gain,
-                               max_epochs=args.max_epochs,
-                               max_iterations_first=args.max_iterations_first,
-                               max_iterations=args.max_iterations,
-                               max_resegment_iterations=args.max_resegment_iterations,
-                               max_shift_distance=args.max_shift_distance,
-                               min_shift_remainder=args.min_shift_remainder)
+                        min_iteration_cost_gain=args.min_iteration_cost_gain,
+                        min_epoch_cost_gain=args.min_epoch_cost_gain,
+                        max_epochs=args.max_epochs,
+                        max_iterations_first=args.max_iterations_first,
+                        max_iterations=args.max_iterations,
+                        max_resegment_iterations=args.max_resegment_iterations,
+                        max_shift_distance=args.max_shift_distance,
+                        min_shift_remainder=args.min_shift_remainder)
         ts = time.time()
         flatcat.train_batch(shared_model, weight_learning)
         _logger.info('Final cost: {}'.format(shared_model.model.get_cost()))

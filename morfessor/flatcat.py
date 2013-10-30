@@ -5,7 +5,7 @@ Morfessor 2.0 FlatCat variant.
 from __future__ import unicode_literals
 
 # FIXME: decide on a public api
-#__all__ = 
+#__all__ =
 
 __author__ = 'Stig-Arne Gronroos'
 __author_email__ = "morfessor@cis.hut.fi"
@@ -131,8 +131,9 @@ class FlatcatModel(object):
         # Cost variables
         self._lexicon_coding = FlatcatLexiconEncoding(morph_usage)
         # Flatcat encoding also stores the HMM parameters
-        self._corpus_coding = FlatcatEncoding(morph_usage, self._lexicon_coding,
-                                             weight=corpusweight)
+        self._corpus_coding = FlatcatEncoding(morph_usage,
+                                              self._lexicon_coding,
+                                              weight=corpusweight)
 
         # Counters for the current epoch and operation within
         # that epoch. These describe the stage of training
@@ -1580,7 +1581,8 @@ class FlatcatModel(object):
             self._changed_segmentations.clear()
         while self._operation_number < len(self.training_operations):
             operation = self._resolve_operation(self._operation_number)
-            min_iteration_cost_gain = self._training_params('min_iteration_cost_gain')
+            min_iteration_cost_gain = self._training_params(
+                'min_iteration_cost_gain')
             max_iterations = self._training_params('max_iterations')
             if self._training_params('must_reestimate'):
                 update_func = self.reestimate_probabilities
@@ -1637,9 +1639,10 @@ class FlatcatModel(object):
                                    contexts.
         """
 
-        TransformationNode = collections.namedtuple('TransformationNode', ['cost',
-                                                         'transform',
-                                                         'targets'])
+        TransformationNode = collections.namedtuple('TransformationNode',
+                                                    ['cost',
+                                                     'transform',
+                                                     'targets'])
         if self._changed_segmentations_op is not None:
             self._changed_segmentations_op.clear()
         if not self._online:
@@ -2337,9 +2340,6 @@ class FlatcatAnnotatedCorpusEncoding(object):
             return
         self.logemissionsum += count * self.corpus_coding.log_emissionprob(
             category, morph)
-        #msg = 'logemissionsum {} < 0 when changing contrib of {}/{} {}'.format(
-        #    self.logemissionsum, morph, category, count)
-        #assert self.logemissionsum >= 0, msg
 
 
 class WeightLearning(object):
@@ -2371,7 +2371,7 @@ class WeightLearning(object):
                  cue_rejection_thresh,
                  dev_annotations,
                  smodel, io, checkpointfile,
-                 heuristic = None):
+                 heuristic=None):
         self.iters_first = iters_first
         self.evals_first = evals_per_vector_first
         self.depth_first = depth_first
@@ -2483,7 +2483,6 @@ class WeightLearning(object):
     def deproject(self, point):
         return [(math.log(a) - math.log(ia))
                 for (a, ia) in zip(point, self.initial)]
- 
 
     def evaluate_parameters(self, point, focus):
         point = self.project(point)
@@ -2561,7 +2560,7 @@ class WeightLearning(object):
         label = 'WL rejected step {}/{}'.format(eval_num + 1, tot_evals)
         self._log_point(label, point, f)
         self._log_point('WL reverting to', best, best_f, best_cues)
-        
+
     def _log_point(self, label, point, f=None, cues=None):
         if f is None:
             _logger.info('{} parameters:'.format(label))

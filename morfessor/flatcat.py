@@ -441,79 +441,59 @@ class FlatcatModel(object):
             self._annotations_tagged = False
 
         add_annotation_entry = False
-        count_diff = collections.Counter()
-        changes_unannot = ChangeCounts()
         changes_annot = ChangeCounts()
-        unannot_count = 0
-        changed_morphs = set()
 
-        assert i_word is None or i_word != i_anno
-        if i_word is not None:
-            # An incorrect segmentation is in the corpus
-            old_analysis = self.segmentations[i_word].analysis
-            unannot_count = self.segmentations[i_word].count
-            changes_unannot.update(old_analysis,
-                                   -unannot_count,
-                                   corpus_index=i_word)
-            for morph in self.detag_word(old_analysis):
-                count_diff[morph] -= unannot_count
-                changed_morphs.add(morph)
-            if i_anno is not None:
-                (_, _, old_annotation) = self.annotations[i_anno]
-                # Correcting an earlier annotation
-                changes_annot.update(old_annotation,
-                                     -1,
-                                     corpus_index=i_anno)
-                for morph in self.detag_word(old_annotation):
-                    count_diff[morph] -= 1
-            else:
-                add_annotation_entry = True
+        if i_anno is not None:
+            (_, _, old_annotation) = self.annotations[i_anno]
+            # Correcting an earlier annotation
+            changes_annot.update(old_annotation,
+                                 -1,
+                                 corpus_index=i_anno)
         else:
-            # Just add to annotations
             add_annotation_entry = True
 
-        for morph in self.detag_word(segments):
-            count_diff[morph] += 1 + unannot_count
-        for (morph, count) in count_diff.items():
-            if count == 0:
-                continue
-            self._modify_morph_count(morph, count)
-
         if segments[0].category is None:
+            # FIXME: problem if new morphs are introduced
             new_analysis = self.viterbi_tag(segments)
         else:
             new_analysis = segments
 
-        # replacing the unannotated corpus word with corrected version
-        if i_word is not None:
-            self.segmentations[i_word] = WordAnalysis(unannot_count,
-                                                      new_analysis)
-            changes_unannot.update(new_analysis,
-                                   unannot_count,
-                                   corpus_index=i_word)
         if add_annotation_entry:
             i_anno = len(self.annotations)
             self.segmentations.insert(i_anno, WordAnalysis(1, new_analysis))
-            self.annotations.append([word, [segments], new_analysis])
+            self.annotations.append([word, [segments], list(new_analysis)])
             self._annot_coding.boundaries += 1
-            self._calculate_morph_backlinks()
+            self._annot_coding.update_weight()
+            for morph in self.detag_word(segments):
+                self._modify_morph_count(morph, 1)
+            self._calculate_morph_backlinks()   # wasteful: could increment
             if i_word is not None:
                 i_word += 1
         else:
-            self.segmentations[i_anno] = WordAnalysis(1, new_analysis)
             self.annotations[i_anno] = [word, [segments], new_analysis]
 
         if i_anno is not None:
             changes_annot.update(new_analysis, 1, corpus_index=i_anno)
-        self._update_counts(changes_unannot, 1)
         self._annot_coding.update_counts(changes_annot)
         self._annot_coding.reset_contributions()
 
+        self.training_focus = set()
         if i_anno is not None:
-            self.training_focus = set([i_anno])
-            for morph in changed_morphs:
-                self.training_focus.update(self.morph_backlinks[morph])
-            self._single_iteration_epoch()
+            self.training_focus.add(i_anno)
+        if i_word is not None:
+            self.training_focus.add(i_word)
+        self._single_iteration_epoch()
+        if i_word is not None:
+            for _ in range(3):
+                if (self.detag_word(self.segmentations[i_word].analysis)
+                        == self.detag_word(segments)):
+                    break
+                self._annot_coding.do_update_weight = False
+                self._annot_coding.weight *= 1.5
+                _logger.info("Corpus weight of annotated data increased to "
+                    "{} in order to enforce feedback.".format(
+                        self._annot_coding.weight))
+                self._single_iteration_epoch()
 
         return (i_word, i_anno, add_annotation_entry)
 

@@ -13,10 +13,10 @@ def read_data(name):
         data['not_under'] = set([line.rstrip() for line in f])
     with open('{}_not_overseg'.format(name), 'r') as f:
         data['not_over'] = set([line.rstrip() for line in f])
-    selfintersect(data)
+    make_disjoint(data)
     return data
 
-def selfintersect(data):
+def make_disjoint(data):
     data['both'] = data['over'].intersection(data['under'])
     data['perfect'] = data['not_over'].intersection(data['not_under'])
 
@@ -64,11 +64,15 @@ def load_seg(filename):
     fobj.close()
     return segs
 
-def write_files(compared, segs_mine, segs_theirs, segs_gold, field_len=10):
+def write_files(compared,
+                mine_name, segs_mine,
+                theirs_name, segs_theirs,
+                segs_gold, field_len=10):
     field = '{:' + str(field_len) + 's}'
     pattern = field * 4 + '\n'
     for result_type in compared:
-        with open('compared_{}'.format(result_type), 'w') as f:
+        with open('{}_{}_compared_{}'.format(
+                mine_name, theirs_name, result_type), 'w') as f:
             f.write('# Word, My, Theirs, Gold\n')
             for word in compared[result_type]:
                 f.write(pattern.format(word, segs_mine[word],
@@ -76,7 +80,7 @@ def write_files(compared, segs_mine, segs_theirs, segs_gold, field_len=10):
                                              segs_gold[word]))
 
 def main(argv):
-    usage = """Usage: %prog -g goldFile -p predFile [options]"""
+    usage = """Usage: %prog -g goldFile -p predFile -T theirsFile -m name -t name"""
 
     parser = OptionParser(usage=usage)
     parser.add_option("-g", "--goldFile", dest="goldFile",
@@ -111,7 +115,10 @@ def main(argv):
 
     compared = compare(mine, theirs)
 
-    write_files(compared, segs_mine, segs_theirs, segs_gold, field_len)
+    write_files(compared,
+                options.mine_name, segs_mine,
+                options.theirs_name, segs_theirs,
+                segs_gold, field_len)
 
 if __name__ == "__main__":
     main(sys.argv)

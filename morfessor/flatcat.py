@@ -45,6 +45,7 @@ SortedAnalysis = collections.namedtuple('SortedAnalysis',
 Annotation = collections.namedtuple('Annotation',
                                     ['alternatives', 'current', 'i_unannot'])
 
+
 def train_batch(smodel, weight_learning=None):
     """Perform batch training on the given model.
 
@@ -441,7 +442,6 @@ class FlatcatModel(object):
 
             # Correcting an earlier annotation
             changes_annot.update(annotation.current, -1)
-                                 
         else:
             add_annotation_entry = True
 

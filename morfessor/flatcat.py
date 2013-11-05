@@ -548,6 +548,20 @@ class FlatcatModel(object):
             # Merge potential segments
             word = ''.join(segments)
 
+        # Return the best alternative from annotations if the word occurs there
+        # FIXME: non-strict annotations flag to turn this off?
+        if word in self.annotations:
+            annotation = self.annotations[word]
+            alternatives = annotation.alternatives
+
+            if not self._annotations_tagged:
+                alternatives = [self.viterbi_tag(alt) for alt in alternatives]
+
+            sorted_alts = self.best_analysis([AnalysisAlternative(alt, 0)
+                                              for alt in alternatives])
+            best = sorted_alts[0]
+            return best.analysis, best.cost
+
         # To make sure that internally impossible states are penalized
         # even more than impossible states caused by zero parameters.
         extrazero = LOGPROB_ZERO ** 2
@@ -1301,7 +1315,7 @@ class FlatcatModel(object):
         # (starting from zero, as the analysis in self.segmentations
         # might no longer match the annotation due to performed operations
         changes_annot = ChangeCounts()
-        for annotation in self.annotations:
+        for annotation in self.annotations.values():
             alternatives = annotation.alternatives
             old_active = annotation.current
 

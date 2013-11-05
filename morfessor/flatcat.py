@@ -867,8 +867,9 @@ class FlatcatModel(object):
 
     def generate_focus_samples(self, num_sets, num_samples):
         """Generates subsets of the corpus by weighted sampling."""
-        if num_samples > len(self.segmentations):
-            # No point sampling a larger set than the corpus
+        if num_samples == 0 or num_samples > len(self.segmentations):
+            # Setting num_samples to zero means full set is preferred
+            # Also: no point sampling a larger set than the corpus
             self.training_focus = None
             self.training_focus_sets = None
         else:

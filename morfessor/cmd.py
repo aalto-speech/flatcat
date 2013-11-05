@@ -765,11 +765,14 @@ Simple usage examples (training and testing):
             'When evaluating a value for the corpus weight during weight '
             'learning, the local search of the model training is restricted ' +
             'to this set, to reduce computation time. ' +
+            'Setting this to zero uses the whole corpus.' +
             '(default %(default)s); ')
     add_arg('--weightlearn-sample-sets', dest='weightlearn_sample_sets',
             type=int, default=5, metavar='<int>',
             help='Make a majority decision based on this number of ' +
             'weightlearning sample sets. ' +
+            'If the whole corpus is used for weight learning, ' +
+            'this parameter has no effect. '
             '(default %(default)s); ')
     add_arg('--weightlearn-cue-rejection-thresh', dest='weightlearn_cuethresh',
             type=int, default=4, metavar='<int>',

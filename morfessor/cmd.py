@@ -558,6 +558,14 @@ Simple usage examples (training and testing):
             action='store_true',
             help="for each newline in input, print newline in --output file "
             "(default: '%(default)s')")
+    add_arg('--filter-categories', dest='filter_categories', type=str,
+            default='', metavar='<list>',
+            help='A list of morph categories to omit from the output ' +
+                 'of the test data. Can be used e.g. for approximating ' +
+                 'stemming by specifying "PRE,SUF" or "SUF". ' +
+                 'The format of the list is a string of (unquoted) ' +
+                 'category tags separated by single commas (no space). ' +
+                 'Default: do not filter any categories.')
 
     # Options for training and segmentation
     add_arg = parser.add_argument_group(
@@ -1068,6 +1076,11 @@ def flatcat_main(args):
             csep = unicode(csep)
         outformat = outformat.replace(r"\n", "\n")
         outformat = outformat.replace(r"\t", "\t")
+        if len(args.filter_categories) > 0:
+            filter_tags = [x.upper()
+                           for x in args.filter_categories.split(',')]
+        else:
+            filter_tags = None
         with io._open_text_file_write(args.outfile) as fobj:
             testdata = io.read_corpus_files(args.testfiles)
             for count, compound, atoms in _generator_progress(testdata):
@@ -1088,6 +1101,9 @@ def flatcat_main(args):
                 else:
                     def _output_morph(cmorph):
                         return cmorph.morph
+                if filter_tags is not None:
+                    constructions = [cmorph for cmorph in constructions
+                                     if cmorph.category not in filter_tags]
                 constructions = [_output_morph(cmorph)
                                  for cmorph in constructions]
                 analysis = csep.join(constructions)

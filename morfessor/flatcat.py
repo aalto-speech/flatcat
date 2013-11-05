@@ -380,7 +380,8 @@ class FlatcatModel(object):
                                                               i_word)
                     assert i_word is not None
                     word_backlinks[w] = i_word
-                segments = self.segmentations[i_word].analysis
+                #segments = self.segmentations[i_word].analysis
+                (segments, _) = self.viterbi_segment(w)
 
                 _logger.debug("#%s: %s -> %s" %
                               (token_num, w, segments))

@@ -42,6 +42,8 @@ SortedAnalysis = collections.namedtuple('SortedAnalysis',
                                         ['cost', 'analysis',
                                          'index', 'breakdown'])
 
+Annotation = collections.namedtuple('Annotation',
+                                    ['alternatives', 'current', 'i_unannot'])
 
 def train_batch(smodel, weight_learning=None):
     """Perform batch training on the given model.
@@ -192,8 +194,7 @@ class FlatcatModel(object):
         # Variables for semi-supervised training
         self._supervised = False
         self._annot_coding = None
-        # [word, (analysis1, analysis2...), current]
-        self.annotations = []
+        self.annotations = {}   # word -> Annotation
         self._annotations_tagged = False
 
         # Variables for online learning
@@ -260,12 +261,12 @@ class FlatcatModel(object):
         for (word, alternatives) in annotations.items():
             if alternatives[0][0].category is None:
                 self._annotations_tagged = False
-            # The fist entries in self.segmentations are the currently active
-            # annotations, in the same order as in self.annotations
+            # The word is also added to the unannotated corpus,
+            # to ensure that the needed morphs are available
+            i_unannot = len(self.segmentations)
             self.segmentations.insert(
-                len(self.annotations),
                 WordAnalysis(1, alternatives[0]))
-            self.annotations.append([word, alternatives, None])
+            self.annotations[word] = Annotation(alternatives, None, i_unannot)
         self._calculate_morph_backlinks()
         self._annot_coding = FlatcatAnnotatedCorpusEncoding(
                                 self._corpus_coding,
@@ -335,7 +336,7 @@ class FlatcatModel(object):
         self._skipcounter = collections.Counter()
         if count_modifier is not None:
             counts = {}
-        (word_backlinks, anno_backlinks) = self._online_backlinks()
+        word_backlinks = self._online_backlinks()
 
         _logger.info("Starting online training")
 
@@ -368,27 +369,18 @@ class FlatcatModel(object):
                     add_count = 1
 
                 i_word = word_backlinks.get(w, None)
-                i_anno = anno_backlinks.get(w, None)
                 if add_count > 0:
                     if is_anno:
-                        (i_word, i_anno,
-                            recalculate) = self._online_labeled_token(
-                                w, atoms, i_word, i_anno)
+                        (i_word, recalculate) = self._online_labeled_token(
+                                w, atoms, i_word)
                         if recalculate:
-                            (word_backlinks, anno_backlinks) = (
-                                self._online_backlinks())
+                            word_backlinks = self._online_backlinks()
                     else:
                         i_word = self._online_unlabeled_token(w, add_count,
                                                               i_word)
-                        i_anno = None
-                    if i_word is not None:
-                        word_backlinks[w] = i_word
-                    if i_anno is not None:
-                        anno_backlinks[w] = i_anno
-                if i_word is not None:
-                    segments = self.segmentations[i_word].analysis
-                else:
-                    segments = self.segmentations[i_anno].analysis
+                    assert i_word is not None
+                    word_backlinks[w] = i_word
+                segments = self.segmentations[i_word].analysis
 
                 _logger.debug("#%s: %s -> %s" %
                               (token_num, w, segments))
@@ -419,18 +411,14 @@ class FlatcatModel(object):
     def _online_backlinks(self):
         self.morph_backlinks.clear()
         word_backlinks = {}
-        anno_backlinks = {}
         for (i, seg) in enumerate(self.segmentations):
             for morph in self.detag_word(seg.analysis):
                 self.morph_backlinks[morph].add(i)
             joined = ''.join(self.detag_word(seg.analysis))
-            if self._is_annotation(i):
-                anno_backlinks[joined] = i
-            else:
-                word_backlinks[joined] = i
-        return (word_backlinks, anno_backlinks)
+            word_backlinks[joined] = i
+        return word_backlinks
 
-    def _online_labeled_token(self, word, segments, i_word=None, i_anno=None):
+    def _online_labeled_token(self, word, segments, i_word=None):
         if not self._supervised:
             self._annot_coding = FlatcatAnnotatedCorpusEncoding(
                                     self._corpus_coding,
@@ -443,12 +431,16 @@ class FlatcatModel(object):
         add_annotation_entry = False
         changes_annot = ChangeCounts()
 
-        if i_anno is not None:
-            (_, _, old_annotation) = self.annotations[i_anno]
+        if word in self.annotations:
+            annotation = self.annotations[word]
+            if i_word is None:
+                i_word = annotation.i_unannot
+            else:
+                assert i_word == annotation.i_unannot
+
             # Correcting an earlier annotation
-            changes_annot.update(old_annotation,
-                                 -1,
-                                 corpus_index=i_anno)
+            changes_annot.update(annotation.current, -1)
+                                 
         else:
             add_annotation_entry = True
 
@@ -459,39 +451,39 @@ class FlatcatModel(object):
             new_analysis = segments
 
         if add_annotation_entry:
-            i_anno = len(self.annotations)
-            self.segmentations.insert(i_anno, WordAnalysis(1, new_analysis))
-            self.annotations.append([word, [segments], list(new_analysis)])
+            if i_word is None:
+                i_word = len(self.segmentations)
+                self.segmentations.insert(
+                    WordAnalysis(1, list(new_analysis)))
+                for morph in self.detag_word(segments):
+                    self._modify_morph_count(morph, 1)
+                self._calculate_morph_backlinks()
+            self.annotations[word] = Annotation([segments],
+                                                list(new_analysis),
+                                                i_word)
             self._annot_coding.boundaries += 1
             self._annot_coding.update_weight()
-            for morph in self.detag_word(segments):
-                self._modify_morph_count(morph, 1)
-            self._calculate_morph_backlinks()   # wasteful: could increment
-            if i_word is not None:
-                i_word += 1
         else:
-            self.annotations[i_anno] = [word, [segments], new_analysis]
+            self.annotations[word] = Annotation([segments],
+                                                list(new_analysis),
+                                                i_word)
 
-        if i_anno is not None:
-            changes_annot.update(new_analysis, 1, corpus_index=i_anno)
+        assert i_word is not None
+        changes_annot.update(new_analysis, 1)
         self._annot_coding.update_counts(changes_annot)
         self._annot_coding.reset_contributions()
 
         self.training_focus = set()
-        if i_anno is not None:
-            self.training_focus.add(i_anno)
-        if i_word is not None:
-            self.training_focus.add(i_word)
+        self.training_focus.add(i_word)
         self._single_iteration_epoch()
 
-        if i_word is not None:
-            for _ in range(3):
-                if (self.detag_word(self.segmentations[i_word].analysis)
-                        == self.detag_word(segments)):
-                    break
-                self._single_iteration_epoch()
+        for _ in range(3):
+            if (self.detag_word(self.segmentations[i_word].analysis)
+                    == self.detag_word(segments)):
+                break
+            self._single_iteration_epoch()
 
-        return (i_word, i_anno, add_annotation_entry)
+        return (i_word, add_annotation_entry)
 
     def _online_unlabeled_token(self, word, add_count, i_word=None):
         skip_this = False
@@ -994,8 +986,7 @@ class FlatcatModel(object):
         but are currently segmented in a way that is not included in the
         annotation alternatives."""
         for (i, anno) in enumerate(self.annotations):
-            (_, alternatives, _) = anno
-            alts_de = [self.detag_word(alt) for alt in alternatives]
+            alts_de = [self.detag_word(alt) for alt in anno.alternatives]
             seg_de = self.detag_word(self.segmentations[i].analysis)
             if seg_de not in alts_de:
                 yield (seg_de, alts_de)
@@ -1310,8 +1301,9 @@ class FlatcatModel(object):
         # (starting from zero, as the analysis in self.segmentations
         # might no longer match the annotation due to performed operations
         changes_annot = ChangeCounts()
-        for (i, annotation) in enumerate(self.annotations):
-            (_, alternatives, old_active) = annotation
+        for annotation in self.annotations:
+            alternatives = annotation.alternatives
+            old_active = annotation.current
 
             if not self._annotations_tagged:
                 alternatives = [self.viterbi_tag(alt) for alt in alternatives]
@@ -1321,12 +1313,15 @@ class FlatcatModel(object):
             new_active = sorted_alts[0].analysis
 
             if old_active is not None:
-                changes_unannot.update(old_active, -1, corpus_index=i)
-            changes_unannot.update(new_active, 1, corpus_index=i)
-            changes_annot.update(new_active, 1, corpus_index=i)
+                changes_unannot.update(old_active, -1,
+                                       corpus_index=annotation.i_unannot)
+            changes_unannot.update(new_active, 1,
+                                   corpus_index=annotation.i_unannot)
+            changes_annot.update(new_active, 1)
 
             # Active segmentation is changed before removal/adding of morphs
-            self.segmentations[i] = WordAnalysis(1, new_active)
+            self.segmentations[annotation.i_unannot] = WordAnalysis(
+                1, new_active)
             # Only morphs in both new_active and old_active will get penalty,
             # which will be cancelled out when adding new_active.
             if old_active is not None:
@@ -1811,11 +1806,6 @@ class FlatcatModel(object):
         if param_name == 'must_reestimate':
             return (self.training_operations[self._operation_number] ==
                     'resegment')
-
-    def _is_annotation(self, target):
-        """Returns True if the targetted corpus index is part of the
-        annotated corpus."""
-        return (self._supervised and target < len(self.annotations))
 
     def _find_in_corpus(self, rule, targets=None):
         """Returns the indices of words in the corpus segmentation

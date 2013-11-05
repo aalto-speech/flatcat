@@ -40,7 +40,7 @@ AnalysisAlternative = collections.namedtuple('AnalysisAlternative',
 
 SortedAnalysis = collections.namedtuple('SortedAnalysis',
                                         ['cost', 'analysis',
-                                         'index', 'brakdown'])
+                                         'index', 'breakdown'])
 
 
 def train_batch(smodel, weight_learning=None):
@@ -483,16 +483,12 @@ class FlatcatModel(object):
         if i_word is not None:
             self.training_focus.add(i_word)
         self._single_iteration_epoch()
+
         if i_word is not None:
             for _ in range(3):
                 if (self.detag_word(self.segmentations[i_word].analysis)
                         == self.detag_word(segments)):
                     break
-                self._annot_coding.do_update_weight = False
-                self._annot_coding.weight *= 1.5
-                _logger.info("Corpus weight of annotated data increased to "
-                    "{} in order to enforce feedback.".format(
-                        self._annot_coding.weight))
                 self._single_iteration_epoch()
 
         return (i_word, i_anno, add_annotation_entry)
@@ -970,7 +966,7 @@ class FlatcatModel(object):
             return
         if all(isinstance(s, basestring) for s in segmentations):
             segmentations = [segmentations]
-        if retag is not None:
+        if retag:
             assert isinstance(retag, bool)
             tagged = []
             for seg in segmentations:
@@ -997,8 +993,8 @@ class FlatcatModel(object):
         """Yields all segmentations which have an associated annotation,
         but are currently segmented in a way that is not included in the
         annotation alternatives."""
-        for (i, anno, _) in enumerate(self.annotations):
-            (_, alternatives) = anno
+        for (i, anno) in enumerate(self.annotations):
+            (_, alternatives, _) = anno
             alts_de = [self.detag_word(alt) for alt in alternatives]
             seg_de = self.detag_word(self.segmentations[i].analysis)
             if seg_de not in alts_de:

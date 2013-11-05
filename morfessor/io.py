@@ -436,7 +436,7 @@ class FlatcatIO(MorfessorIO):
         or not tagged, returing a CategorizedMorph.
         """
         parts = morph_cat.rsplit(self.category_separator, 1)
-        morph = parts[0]
+        morph = parts[0].strip()
         if len(parts) == 1:
             category = None
         else:

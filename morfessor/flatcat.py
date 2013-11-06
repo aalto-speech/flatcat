@@ -265,7 +265,7 @@ class FlatcatModel(object):
             # The word is also added to the unannotated corpus,
             # to ensure that the needed morphs are available
             i_unannot = len(self.segmentations)
-            self.segmentations.insert(
+            self.segmentations.append(
                 WordAnalysis(1, alternatives[0]))
             self.annotations[word] = Annotation(alternatives, None, i_unannot)
         self._calculate_morph_backlinks()
@@ -454,7 +454,7 @@ class FlatcatModel(object):
         if add_annotation_entry:
             if i_word is None:
                 i_word = len(self.segmentations)
-                self.segmentations.insert(
+                self.segmentations.append(
                     WordAnalysis(1, list(new_analysis)))
                 for morph in self.detag_word(segments):
                     self._modify_morph_count(morph, 1)

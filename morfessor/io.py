@@ -376,12 +376,18 @@ class FlatcatIO(MorfessorIO):
         see docstring for write_segmentation_file for file format.
         """
         _logger.info("Reading segmentations from '%s'..." % file_name)
+        re_space = re.compile(r'\s+')
         for line in self._read_text_file(file_name):
-            count, analysis = line.split(' ', 1)
+            count, analysis = re_space.split(line, 1)
+            try:
+                count = int(count)
+            except ValueError:
+                # first column was compound instead of count
+                count = 1
             cmorphs = []
             for morph_cat in analysis.split(self.construction_separator):
                 cmorphs.append(self._morph_or_cmorph(morph_cat))
-            yield(int(count), tuple(cmorphs))
+            yield(count, tuple(cmorphs))
         _logger.info("Done.")
 
     def read_annotations_file(self, file_name, construction_sep=' ',

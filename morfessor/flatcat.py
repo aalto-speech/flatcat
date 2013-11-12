@@ -1317,7 +1317,8 @@ class FlatcatModel(object):
         # (starting from zero, as the analysis in self.segmentations
         # might no longer match the annotation due to performed operations
         changes_annot = ChangeCounts()
-        for annotation in self.annotations.values():
+        overwrite = {}
+        for (word, annotation) in self.annotations.items():
             alternatives = annotation.alternatives
             old_active = annotation.current
 
@@ -1338,6 +1339,10 @@ class FlatcatModel(object):
             # Active segmentation is changed before removal/adding of morphs
             self.segmentations[annotation.i_unannot] = WordAnalysis(
                 1, new_active)
+            overwrite[word] = Annotation(
+                alternatives,
+                list(new_active),
+                annotation.i_unannot)
             # Only morphs in both new_active and old_active will get penalty,
             # which will be cancelled out when adding new_active.
             if old_active is not None:
@@ -1346,6 +1351,8 @@ class FlatcatModel(object):
             new_detagged = self.detag_word(new_active)
             for morph in new_detagged:
                 count_diff[morph] += 1
+        for word in overwrite:
+            self.annotations[word] = overwrite[word]
 
         for (morph, count) in count_diff.items():
             if count == 0:

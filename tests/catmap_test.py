@@ -411,6 +411,8 @@ class TestModelConsistency(unittest.TestCase):
         self.model.add_annotations(TestModelConsistency.dummy_annotation)
         self._presplit()
         self.model._update_annotation_choices()
+        self.model._update_annotation_choices()
+        self.model._update_annotation_choices()
         self._apply_revert(self.model._update_annotation_choices,
                            self.model._update_annotation_choices,
                            None)
@@ -571,11 +573,13 @@ class TestModelConsistency(unittest.TestCase):
         current_exact, current_approx = self._store_state()
         for key in state_exact:
             self.assertEqual(state_exact[key], current_exact[key],
-                'Reverting did not return to same state: {}'.format(key))
+                msg='Reverting did not return to same state: {} '.format(key) +
+                    '({} vs {})'.format(state_exact[key], current_exact[key]))
         for key in state_approx:
             self.assertAlmostEqual(state_approx[key], current_approx[key],
                 places=3,
-                msg='Reverting did not return to same state: {}'.format(key))
+                msg='Reverting did not return to same state: {} '.format(key) +
+                    '({} vs {})'.format(state_approx[key], current_approx[key]))
 
     def _general_consistency_asserts(self):
         """ These values should be internally consistent at all times."""

@@ -1313,14 +1313,13 @@ class FlatcatModel(object):
         count_diff = collections.Counter()
         # changes to unannotated corpus counts
         changes_unannot = ChangeCounts()
-        # new annotated corpus counts
-        # (starting from zero, as the analysis in self.segmentations
-        # might no longer match the annotation due to performed operations
+        # changes to annotated corpus counts
         changes_annot = ChangeCounts()
         overwrite = {}
         for (word, annotation) in self.annotations.items():
             alternatives = annotation.alternatives
             old_active = annotation.current
+            current_unannot = self.segmentations[annotation.i_unannot].analysis
 
             if not self._annotations_tagged:
                 alternatives = [self.viterbi_tag(alt) for alt in alternatives]
@@ -1329,9 +1328,10 @@ class FlatcatModel(object):
                                               for alt in alternatives])
             new_active = sorted_alts[0].analysis
 
+            changes_unannot.update(current_unannot, -1,
+                                    corpus_index=annotation.i_unannot)
             if old_active is not None:
-                changes_unannot.update(old_active, -1,
-                                       corpus_index=annotation.i_unannot)
+                changes_annot.update(old_active, -1)
             changes_unannot.update(new_active, 1,
                                    corpus_index=annotation.i_unannot)
             changes_annot.update(new_active, 1)
@@ -1343,11 +1343,8 @@ class FlatcatModel(object):
                 alternatives,
                 list(new_active),
                 annotation.i_unannot)
-            # Only morphs in both new_active and old_active will get penalty,
-            # which will be cancelled out when adding new_active.
-            if old_active is not None:
-                for morph in self.detag_word(old_active):
-                    count_diff[morph] -= 1
+            for morph in self.detag_word(current_unannot):
+                count_diff[morph] -= 1
             new_detagged = self.detag_word(new_active)
             for morph in new_detagged:
                 count_diff[morph] += 1
@@ -1359,10 +1356,10 @@ class FlatcatModel(object):
                 continue
             self._modify_morph_count(morph, count)
         self._update_counts(changes_unannot, 1)
-        self._calculate_transition_counts()
-        self._calculate_emission_counts()
         self._annot_coding.set_counts(changes_annot)
-        self._annot_coding.reset_contributions()
+        self.reestimate_probabilities()
+        # done already by reestimate
+        #self._annot_coding.reset_contributions()
 
     ### Private: model state updaters
     #
@@ -1623,13 +1620,15 @@ class FlatcatModel(object):
 
         Arguments:
             transformation_generator -- a generator yielding
-                (transform_group, targets, temporaries)
+                (transform_group, targets, changed_morphs, temporaries)
                 tuples, where
                     transform_group -- a list of Transform objects.
                     targets -- a set with an initial guess of indices of
                                matching words in the corpus. Can contain false
                                positives, but should not omit positive
                                indices (they will be missed).
+                    changed_morphs -- the morphs participating
+                                      in the operation.
                     temporaries -- a set of new morphs with estimated
                                    contexts.
         """

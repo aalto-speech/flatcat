@@ -375,6 +375,7 @@ class MorphUsageProperties(object):
                             self._length_slope)
 
             p_nonmorpheme = (1. - prelike) * (1. - suflike) * (1. - stmlike)
+            # assert 0 <= p_nonmorpheme <= 1
 
             if p_nonmorpheme == 1:
                 p_pre = 0.0

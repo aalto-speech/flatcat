@@ -1330,8 +1330,8 @@ class FlatcatModel(object):
 
             changes_unannot.update(current_unannot, -1,
                                     corpus_index=annotation.i_unannot)
-            if old_active is not None:
-                changes_annot.update(old_active, -1)
+            #if old_active is not None:
+            #    changes_annot.update(old_active, -1)
             changes_unannot.update(new_active, 1,
                                    corpus_index=annotation.i_unannot)
             changes_annot.update(new_active, 1)
@@ -1356,7 +1356,9 @@ class FlatcatModel(object):
                 continue
             self._modify_morph_count(morph, count)
         self._update_counts(changes_unannot, 1)
+        # which one depends on if we count changes or start from zero
         self._annot_coding.set_counts(changes_annot)
+        #self._annot_coding.update_counts(changes_annot)
         self.reestimate_probabilities()
         # done already by reestimate
         #self._annot_coding.reset_contributions()

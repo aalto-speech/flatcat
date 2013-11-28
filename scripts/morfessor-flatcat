@@ -1,0 +1,22 @@
+#!/usr/bin/env python
+
+import sys
+
+from morfessor import cmd
+from morfessor.exception import ArgumentException
+from morfessor.flatcat import _logger
+
+def main(argv):
+    parser = cmd.get_flatcat_argparser()
+    try:
+        args = parser.parse_args(argv)
+        cmd.flatcat_main(args)
+    except ArgumentException as e:
+        parser.error(e)
+    except Exception as e:
+        _logger.error("Fatal Error %s %s" % (type(e), e))
+        raise
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

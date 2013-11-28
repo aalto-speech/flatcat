@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+from __future__ import unicode_literals
 """
 Tests for Morfessor 2.0 Categories-MAP variant.
 """
@@ -10,7 +11,10 @@ import re
 import unittest
 
 import morfessor
-import catmap
+from morfessor import flatcat
+from morfessor import categorizationscheme as scheme
+from morfessor.categorizationscheme import CategorizedMorph
+from morfessor.utils import LOGPROB_ZERO
 
 
 # Directory for reference input and output files
@@ -36,7 +40,7 @@ def _load_baseline():
         return baseline
 
 
-def _load_catmap(baseline_seg, no_emissions=False):
+def _load_flatcat(baseline_seg, no_emissions=False):
         """
         Arguments:
             baseline_seg -- Segmentation of corpus using the baseline method.
@@ -52,11 +56,11 @@ def _load_catmap(baseline_seg, no_emissions=False):
                             (Default: False)
         """
 
-        m_usage = catmap.MorphUsageProperties(ppl_threshold=10, ppl_slope=1,
+        m_usage = flatcat.MorphUsageProperties(ppl_threshold=10, ppl_slope=1,
                                               length_threshold=3,
                                               length_slope=2,
                                               use_word_tokens=False)
-        model = catmap.CatmapModel(m_usage)
+        model = flatcat.FlatcatModel(m_usage)
         model.add_corpus_data(baseline_seg)
         if no_emissions:
             model._calculate_usage_features()
@@ -71,8 +75,8 @@ class TestProbabilityEstimation(unittest.TestCase):
         """Overridden later to test re-estimation"""
         self.reference_file = REFERENCE_BASELINE_PROBS
         self.baseline = _load_baseline()
-        self.model = _load_catmap(self.baseline.get_segmentations(),
-                                  no_emissions=True)
+        self.model = _load_flatcat(self.baseline.get_segmentations(),
+                                   no_emissions=True)
 
     def setUp(self):
         self.perplexities = dict()
@@ -125,7 +129,7 @@ class TestProbabilityEstimation(unittest.TestCase):
 
             m = posteriors_re.match(line)
             if m:
-                self.posteriors[m.group(1)] = catmap.ByCategory(
+                self.posteriors[m.group(1)] = flatcat.ByCategory(
                     float(m.group(2)), float(m.group(3)),
                     float(m.group(4)), float(m.group(5)))
                 continue
@@ -134,13 +138,13 @@ class TestProbabilityEstimation(unittest.TestCase):
             if m:
                 def _tr_wb(x):
                     if x == '#':
-                        return catmap.CatmapModel.word_boundary
+                        return flatcat.FlatcatModel.word_boundary
                     return x
 
                 cats = tuple([_tr_wb(x) for x in (m.group(1), m.group(2))])
                 self.transitions[cats] = (float(m.group(3)), int(m.group(4)))
 
-        self.catpriors = catmap.ByCategory(*(catpriors_tmp[x] for x in
+        self.catpriors = flatcat.ByCategory(*(catpriors_tmp[x] for x in
                                            self.model.get_categories()))
 
     def test_perplexities(self):
@@ -217,7 +221,7 @@ class TestProbabilityReEstimation(TestProbabilityEstimation):
     def _config(self):
         self.reference_file = REFERENCE_REESTIMATE_PROBS
         self.baseline = _load_baseline()
-        self.model = _load_catmap(self.baseline.get_segmentations())
+        self.model = _load_flatcat(self.baseline.get_segmentations())
         self.retagged = []
 
         io = morfessor.MorfessorIO(encoding='latin-1')
@@ -228,7 +232,7 @@ class TestProbabilityReEstimation(TestProbabilityEstimation):
 class TestBaselineSegmentation(unittest.TestCase):
     def setUp(self):
         self.baseline = _load_baseline()
-        self.model = _load_catmap(self.baseline.get_segmentations(),
+        self.model = _load_flatcat(self.baseline.get_segmentations(),
                                   no_emissions=True)
 
         io = morfessor.MorfessorIO(encoding='latin-1')
@@ -248,7 +252,7 @@ class TestBaselineSegmentation(unittest.TestCase):
             for segment in segments:
                 m = tag_re.match(segment)
                 assert m, 'Could not parse "%s" in "%s"' % (segment, line)
-                ref_tmp.append(catmap.CategorizedMorph(m.group(1),
+                ref_tmp.append(flatcat.CategorizedMorph(m.group(1),
                                                        m.group(2)))
                 detagged_tmp.append(m.group(1))
             self.references.append(ref_tmp)
@@ -258,10 +262,32 @@ class TestBaselineSegmentation(unittest.TestCase):
         for (reference, tagless) in zip(self.references, self.detagged):
             observed = self.model.viterbi_tag(tagless)
             # causes UnicodeEncodeError, so sadly you don't get the details
-            # u'"%s" does not match "%s"' % (observed, reference)
+            # '"%s" does not match "%s"' % (observed, reference)
             msg = 'FIXME'
             for (r, o) in zip(reference, observed):
                 self.assertEqual(r, o, msg=msg)
+
+
+class TestOnline(unittest.TestCase):
+    def setUp(self):
+        self.baseline = _load_baseline()
+        self.model = _load_flatcat(self.baseline.get_segmentations(),
+                                  no_emissions=True)
+
+    def test_focus(self):
+        assert self.model.training_focus is None
+        self.assertEqual(len(self.model.segmentations),
+                         len(list(self.model._training_focus_filter())))
+
+        self.model.training_focus = [5, 10, 2]
+        self.assertEqual(len(list(self.model._training_focus_filter())), 3)
+        self.assertEqual(self.model._training_focus_filter().next(),
+                         self.model.segmentations[2])
+
+        self.model.training_focus = [0, len(self.model.segmentations) - 1]
+        self.assertEqual(len(list(self.model._training_focus_filter())), 2)
+        self.assertEqual(self.model._training_focus_filter().next(),
+                         self.model.segmentations[0])
 
 
 class TestModelConsistency(unittest.TestCase):
@@ -287,35 +313,49 @@ class TestModelConsistency(unittest.TestCase):
         (500, ('SSSSS',)),
         (2, ('AASSSSS',)))
 
+    dummy_annotation = {
+        'ABCDEFG': ((CategorizedMorph('ABC', None),
+                     CategorizedMorph('DEFG', None)),),
+        'HIJKLMN': ((CategorizedMorph('H', None),
+                     CategorizedMorph('IJKLMN', None)),
+                    (CategorizedMorph('H', None),
+                     CategorizedMorph('IJ', None),
+                     CategorizedMorph('KLMN', None)))}
+
+    one_split_annotation = {
+        'AASSSSS': ((CategorizedMorph('AAC', None),
+                     CategorizedMorph('SSSSS', None)),)}
+
     def setUp(self):
-        self.model = _load_catmap(TestModelConsistency.dummy_segmentation)
+        self.model = _load_flatcat(TestModelConsistency.dummy_segmentation)
 
     def test_initial_state(self):
         """Tests that the initial state produced by loading a baseline
         segmentation is consistent."""
-        self.initial_state_asserts()
+        self._initial_state_asserts()
 
     def test_presplit_state(self):
         """Tests that the initial parameter estimation from the baseline
         segmentation is consistent."""
-        self.presplit()
-        self.initial_state_asserts()
+        self._presplit()
+        self._initial_state_asserts()
+        self._destructive_backlink_check()
 
     def test_transforms(self):
         self.model.add_corpus_data(
             TestModelConsistency.one_split_segmentation)
-        self.presplit()
+        self._presplit()
 
         tmp = ((('AA', 'BBBBB'), ('AABBBBB',)),           # join
                (('AASSSSS',), ('AA', 'SSSSS')),           # split
                (('BBBBB',), ('B', 'B', 'B', 'B', 'B')))   # silly
 
         def simple_transformation(old_analysis, new_analysis):
-            return catmap.Transformation(
-                catmap.TransformationRule(
-                    [catmap.CategorizedMorph(morph, None)
+            return flatcat.Transformation(
+                flatcat.TransformationRule(
+                    [flatcat.CategorizedMorph(morph, None)
                         for morph in old_analysis]),
-                [catmap.CategorizedMorph(morph, None)
+                [flatcat.CategorizedMorph(morph, None)
                     for morph in new_analysis])
 
         def apply_transformation(transformation):
@@ -346,17 +386,18 @@ class TestModelConsistency(unittest.TestCase):
                 lambda: apply_transformation(forward),
                 lambda: apply_transformation(backward),
                 None)
+        self._destructive_backlink_check()
 
     def test_update_counts(self):
-        self.presplit()
+        self._presplit()
         # manual change to join the one occurence of AA BBBBB
-        cc = catmap.ChangeCounts(
-            emissions={catmap.CategorizedMorph('AA', 'ZZZ'): -1,
-                       catmap.CategorizedMorph('BBBBB', 'STM'): -1,
-                       catmap.CategorizedMorph('AABBBBB', 'STM'): 1},
-            transitions={(catmap.WORD_BOUNDARY, 'ZZZ'): -1,
+        cc = flatcat.ChangeCounts(
+            emissions={flatcat.CategorizedMorph('AA', 'ZZZ'): -1,
+                       flatcat.CategorizedMorph('BBBBB', 'STM'): -1,
+                       flatcat.CategorizedMorph('AABBBBB', 'STM'): 1},
+            transitions={(flatcat.WORD_BOUNDARY, 'ZZZ'): -1,
                          ('ZZZ', 'STM'): -1,
-                         (catmap.WORD_BOUNDARY, 'STM'): 1})
+                         (flatcat.WORD_BOUNDARY, 'STM'): 1})
 
         def apply_update_counts():
             self.model._update_counts(cc, 1)
@@ -366,42 +407,69 @@ class TestModelConsistency(unittest.TestCase):
 
         self._apply_revert(apply_update_counts, revert_update_counts, None)
 
-    def test_initial_backlinks(self):
+    def test_add_annotations(self):
+        self.model.add_annotations(TestModelConsistency.dummy_annotation)
+        self._presplit()
+        self.model._update_annotation_choices()
+        self.model._update_annotation_choices()
+        self.model._update_annotation_choices()
+        self._apply_revert(self.model._update_annotation_choices,
+                           self.model._update_annotation_choices,
+                           None)
+        self._destructive_backlink_check()
+
+    def test_transforms_with_annotations(self):
         self.model.add_corpus_data(
             TestModelConsistency.one_split_segmentation)
-        self.presplit()
-        self._backlinks()
+        self.model.add_annotations(TestModelConsistency.one_split_annotation)
+        self._presplit()
+        self.model._update_annotation_choices()
 
-    def test_trained_backlinks(self):
-        self.model.add_corpus_data(
-            TestModelConsistency.one_split_segmentation)
-        self.model.initialize_baseline()
-        self.model.train(min_difference_proportion=0.9, max_iterations=1,
-                         max_epochs_first=1, max_epochs=1,
-                         max_resegment_epochs=1)
-        self._backlinks()
+        tmp = ((('AA', 'BBBBB'), ('AABBBBB',)),           # join
+               (('AASSSSS',), ('AA', 'SSSSS')),           # split
+               (('BBBBB',), ('B', 'B', 'B', 'B', 'B')))   # silly
 
-    def _backlinks(self):
-        self.model._morph_usage.remove_zeros()
-        backlink_keys = sorted(self.model.morph_backlinks.keys())
-        seen_morphs = sorted(self.model._morph_usage.seen_morphs())
-        self.assertEqual(backlink_keys, seen_morphs,
-                         msg='Seen morphs didnt match backlink keys')
-        # Remove all backlinked morphs from the segmentation
-        for morph in backlink_keys:
-            for i in self.model.morph_backlinks[morph]:
-                count, segmentation = self.model.segmentations[i]
-                segmentation = [x for x in segmentation if x.morph != morph]
-                self.model.segmentations[i] = catmap.WordAnalysis(count,
-                                                                  segmentation)
-        # Segmentation should now be empty,
-        # otherwise some morph was missing a backlink
-        for seg in self.model.segmentations:
-            self.assertEqual(seg.analysis, [],
-                msg=u'Morphs with missing backlinks: {}'.format(seg))
+        def simple_transformation(old_analysis, new_analysis):
+            return flatcat.Transformation(
+                flatcat.TransformationRule(
+                    [flatcat.CategorizedMorph(morph, None)
+                        for morph in old_analysis]),
+                [flatcat.CategorizedMorph(morph, None)
+                    for morph in new_analysis])
 
+        def apply_transformation(transformation):
+            matched_targets, num_matches = self.model._find_in_corpus(
+                transformation.rule, None)
+
+            for morph in self.model.detag_word(transformation.rule):
+                # Remove the old representation, but only from
+                # morph counts (emissions and transitions updated later)
+                self.model._modify_morph_count(morph, -num_matches)
+            for morph in self.model.detag_word(transformation.result):
+                # Add the new representation to morph counts
+                self.model._modify_morph_count(morph, num_matches)
+
+            for i in matched_targets:
+                new_analysis = transformation.apply(
+                    self.model.segmentations[i],
+                    self.model, corpus_index=i)
+                self.model.segmentations[i] = new_analysis
+            self.model._update_counts(transformation.change_counts, 1)
+            self.model._morph_usage.remove_zeros()
+
+        for a, b in tmp:
+            forward = simple_transformation(a, b)
+            backward = simple_transformation(b, a)
+
+            self._apply_revert(
+                lambda: apply_transformation(forward),
+                lambda: apply_transformation(backward),
+                None)
+        self._destructive_backlink_check()
+
+    
     def _apply_revert(self, apply_func, revert_func, is_remove):
-        state_exact, state_approx = self.store_state()
+        state_exact, state_approx = self._store_state()
         old_cost = self.model.get_cost()
         apply_func()
 
@@ -410,14 +478,14 @@ class TestModelConsistency(unittest.TestCase):
         revert_func()
         new_cost = self.model.get_cost()
 
-        msg = (u'_apply_revert with {} and {} did not return to same cost. ' +
-               u'old: {}, new: {}')
+        msg = ('_apply_revert with {} and {} did not return to same cost. ' +
+               'old: {}, new: {}')
         msg = msg.format(apply_func.__name__, revert_func.__name__,
                          old_cost, new_cost)
         self.assertAlmostEqual(old_cost, new_cost, places=4, msg=msg)
 
         # The model should have returned to initial state
-        self.compare_to_stored_state(state_exact, state_approx)
+        self._compare_to_stored_state(state_exact, state_approx)
 
         # sanity check: costs should never be negative
         self.assertTrue(old_cost >= 0)
@@ -433,7 +501,7 @@ class TestModelConsistency(unittest.TestCase):
                 self.assertTrue(mid_cost > old_cost)
 
     def test_estimate_remove_temporaries(self):
-        self.presplit()
+        self._presplit()
 
         prefix = 'BB'
         suffix = 'BBB'
@@ -442,13 +510,13 @@ class TestModelConsistency(unittest.TestCase):
                                                          (prefix, suffix)))
         self.model._morph_usage.remove_temporaries(tmp)
 
-        self.initial_state_asserts()
+        self._initial_state_asserts()
 
-    def presplit(self):
+    def _presplit(self):
         self.model.viterbi_tag_corpus()
-        self.model._reestimate_probabilities()
+        self.model.reestimate_probabilities()
 
-    def initial_state_asserts(self):
+    def _initial_state_asserts(self):
         category_totals = self.model._morph_usage.category_token_count
 
         self.assertAlmostEqual(sum(category_totals), 2.0, places=9)
@@ -457,22 +525,22 @@ class TestModelConsistency(unittest.TestCase):
         self.assertEqual(self.model._morph_usage.seen_morphs(),
                          ['AA', 'BBBBB'])
         self.assertEqual(self.model._morph_usage._contexts,
-                         {'AA': catmap.MorphContext(1, 1.0, 1.0),
-                          'BBBBB': catmap.MorphContext(1, 1.0, 1.0)})
+                         {'AA': scheme.MorphContext(1, 1.0, 1.0),
+                          'BBBBB': scheme.MorphContext(1, 1.0, 1.0)})
 
         # lexicon coding
         self.assertEqual(self.model._lexicon_coding.tokens,
                          len('AA') + len('BBBBB'))
         self.assertEqual(self.model._lexicon_coding.boundaries, 2)
         self.assertAlmostEqual(self.model._lexicon_coding.logfeaturesum,
-            4.0 * catmap.universalprior(1.0), places=9)
+            4.0 * scheme.universalprior(1.0), places=9)
         self.assertAlmostEqual(self.model._lexicon_coding.logtokensum,
             (2.0 * math.log(2.0)) + (5.0 * math.log(5.0)), places=9)
 
-        # catmap coding
-        self.general_consistency_asserts()
+        # flatcat coding
+        self._general_consistency_asserts()
 
-    def store_state(self):
+    def _store_state(self):
         state_exact = {
             'seen_morphs': sorted(self.model._morph_usage.seen_morphs()),
             'contexts': dict(self.model._morph_usage._contexts),
@@ -484,25 +552,36 @@ class TestModelConsistency(unittest.TestCase):
                 self.model._corpus_coding._transition_counts),
             'cat_tagcount': dict(self.model._corpus_coding._cat_tagcount)}
         state_approx = {
+            'corpus_logtokensum': float(
+                self.model._corpus_coding.logtokensum),
+            'corpus_logcondprobsum': float(
+                self.model._corpus_coding.logcondprobsum),
             'lexicon_logtokensum': float(
                 self.model._lexicon_coding.logtokensum),
             'logfeaturesum': float(self.model._lexicon_coding.logfeaturesum)}
         for (i, tmp) in enumerate(
                 self.model._morph_usage.category_token_count):
-            state_approx[u'category_token_count_{}'.format(i)] = float(tmp)
+            state_approx['category_token_count_{}'.format(i)] = float(tmp)
+        if self.model._annot_coding is not None:
+            state_approx['annot_logemissionsum'] = float(
+                self.model._annot_coding.logemissionsum)
+            state_exact['annot_transition_cost'] = float(
+                self.model._annot_coding.transition_cost())
         return (state_exact, state_approx)
 
-    def compare_to_stored_state(self, state_exact, state_approx):
-        current_exact, current_approx = self.store_state()
+    def _compare_to_stored_state(self, state_exact, state_approx):
+        current_exact, current_approx = self._store_state()
         for key in state_exact:
             self.assertEqual(state_exact[key], current_exact[key],
-                u'Reverting did not return to same state: {}'.format(key))
+                msg='Reverting did not return to same state: {} '.format(key) +
+                    '({} vs {})'.format(state_exact[key], current_exact[key]))
         for key in state_approx:
             self.assertAlmostEqual(state_approx[key], current_approx[key],
                 places=3,
-                msg=u'Reverting did not return to same state: {}'.format(key))
+                msg='Reverting did not return to same state: {} '.format(key) +
+                    '({} vs {})'.format(state_approx[key], current_approx[key]))
 
-    def general_consistency_asserts(self):
+    def _general_consistency_asserts(self):
         """ These values should be internally consistent at all times."""
         self.assertAlmostEqual(
             sum(self.model._corpus_coding._transition_counts.values()),
@@ -512,7 +591,7 @@ class TestModelConsistency(unittest.TestCase):
         sum_transitions_from = collections.Counter()
         sum_transitions_to = collections.Counter()
         categories = self.model.get_categories(wb=True)
-        forbidden = catmap.MorphUsageProperties.zero_transitions
+        forbidden = scheme.MorphUsageProperties.zero_transitions
         for prev_cat in categories:
             for next_cat in categories:
                 count = self.model._corpus_coding._transition_counts[
@@ -522,7 +601,7 @@ class TestModelConsistency(unittest.TestCase):
                 if (prev_cat, next_cat) in forbidden:
                     # FIXME, make it an assert once the cause is fixed
                     print('Nonzero count for forbidden transition ' +
-                        u'{} -> {}'.format(prev_cat, next_cat))
+                        '{} -> {}'.format(prev_cat, next_cat))
                 sum_transitions_from[prev_cat] += count
                 sum_transitions_to[next_cat] += count
         for cat in categories:
@@ -530,7 +609,7 @@ class TestModelConsistency(unittest.TestCase):
             # exactly one outgoing transition (except for word boundary,
             # of which there are one of each in every word)
             msg = ('Transition counts were not symmetrical. ' +
-                   u'category {}: {}, {}, {}'.format(cat,
+                   'category {}: {}, {}, {}'.format(cat,
                     sum_transitions_from[cat], sum_transitions_to[cat],
                     self.model._corpus_coding._cat_tagcount[cat]))
 
@@ -541,9 +620,22 @@ class TestModelConsistency(unittest.TestCase):
                              self.model._corpus_coding._cat_tagcount[cat],
                              msg)
 
+    def _destructive_backlink_check(self):
+        """Destructively checks that morph backlinks cover the whole corpus.
+        """
+
+        for morph in self.model.morph_backlinks:
+            for i in self.model.morph_backlinks[morph]:
+                seg = self.model.segmentations[i]
+                self.model.segmentations[i] = flatcat.WordAnalysis(
+                    seg.count, [x for x in seg.analysis
+                                if x.morph != morph])
+        for seg in self.model.segmentations:
+            self.assertEqual(len(seg.analysis), 0,
+                             msg='missing backlinks: {}'.format(seg))
 
 def _zexp(x):
-    if x >= catmap.LOGPROB_ZERO:
+    if x >= LOGPROB_ZERO:
         return 0.0
     return math.exp(-x)
 
@@ -551,7 +643,7 @@ def _zexp(x):
 def _exp_catprobs(probs):
     """Convenience function to convert a ByCategory object containing log
     probabilities into one with actual probabilities"""
-    return catmap.ByCategory(*[_zexp(x) for x in probs])
+    return scheme.ByCategory(*[_zexp(x) for x in probs])
 
 
 def _remove_zeros(d):

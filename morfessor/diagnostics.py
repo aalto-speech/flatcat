@@ -16,7 +16,7 @@ if not PY3:     # my version of matplotlib doesn't support python 3
         _logger.info('Unable to import matplotlib.pyplot: plotting disabled')
 
 from . import baseline
-from .exception import UnsupportedConfigurationError
+from .exception import UnsupportedConfigurationError, ArgumentException
 
 
 class IterationStatistics(object):
@@ -118,7 +118,7 @@ class IterationStatistics(object):
         return out
 
 
-class epochStatisticsPlotter(object):
+class IterationStatisticsPlotter(object):
     def __init__(self, stats):
         if NO_PLOTTING:
             raise UnsupportedConfigurationError(

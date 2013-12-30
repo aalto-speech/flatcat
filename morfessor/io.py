@@ -154,6 +154,7 @@ class MorfessorIO:
 
             if analysis_sep is not None:
                 for analysis in analyses_line.split(analysis_sep):
+                    analysis = analysis.strip()     # FIXME temporary fix: psmit will push the real one
                     annotations[compound].append(
                         analysis.split(construction_separator))
             else:

@@ -529,13 +529,15 @@ class FlatcatModel(object):
         assert i_word is not None
         return i_word
 
-    def viterbi_segment(self, segments):
+    def viterbi_segment(self, segments, strict_annot=True):
         """Simultaneously segment and tag a word using the learned model.
         Can be used to segment unseen words.
 
         Arguments:
             segments -- A word (or a list of morphs which will be
                         concatenated into a word) to resegment and tag.
+            strict_annot -- If the word occurs in the annotated corpus,
+                            only consider the segmentations in the annotation.
         Returns:
             best_analysis, -- The resegmented, retagged word
             best_cost      -- The cost of the returned solution
@@ -550,8 +552,7 @@ class FlatcatModel(object):
             word = ''.join(segments)
 
         # Return the best alternative from annotations if the word occurs there
-        # FIXME: non-strict annotations flag to turn this off?
-        if word in self.annotations:
+        if word in self.annotations and strict_annot:
             annotation = self.annotations[word]
             alternatives = annotation.alternatives
 
@@ -999,11 +1000,15 @@ class FlatcatModel(object):
 
     def violated_annotations(self):
         """Yields all segmentations which have an associated annotation,
-        but are currently segmented in a way that is not included in the
-        annotation alternatives."""
-        for (i, anno) in enumerate(self.annotations):
+        but woud currently not be naturally segmented in a way that is included
+        in the annotation alternatives,"""
+        for (word, anno) in self.annotations.items():
             alts_de = [self.detag_word(alt) for alt in anno.alternatives]
-            seg_de = self.detag_word(self.segmentations[i].analysis)
+            seg_de = self.detag_word(
+                self.viterbi_segment(
+                    word,
+                    strict_annot=False)[0])
+
             if seg_de not in alts_de:
                 yield (seg_de, alts_de)
 

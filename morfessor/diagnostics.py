@@ -34,6 +34,7 @@ class IterationStatistics(object):
         self.morph_lengths = []
         self.changes = []
         self.changes_op = []
+        self.violated_annots = []
 
         self.gold_bpr = []
         self._reference = None
@@ -71,16 +72,18 @@ class IterationStatistics(object):
         ccc = model._corpus_coding.get_cost()
         lcc = model._lexicon_coding.get_cost()
         if model._supervised:
-            acc = model._annot_coding.get_cost() / model._annot_coding.weight
+            acc_unscaled = model._annot_coding.get_cost()
+            acc = acc_unscaled / model._annot_coding.weight
         else:
+            acc_unscaled = 0
             acc = 0
         self.cost_parts.append([(ccc / model._corpus_coding.weight),
                                 (lcc / model._lexicon_coding.weight),
                                 acc,
-                                model._lexicon_coding.permutations_cost(),
-                                model._lexicon_coding.logfeaturesum,
-                                model._corpus_coding.logcondprobsum,
-                                model._corpus_coding.logtransitionsum()])
+                                ccc,
+                                lcc,
+                                acc_unscaled
+                               ])
         tcounts = self._extract_tag_counts(model)
         self.tag_counts.append(tcounts)
         self.morph_types.append(len(model._morph_usage.seen_morphs()))
@@ -88,6 +91,12 @@ class IterationStatistics(object):
         self.word_tokens = float(model.word_tokens)
         self.changes.append(len(model._changed_segmentations))
         self.changes_op.append(len(model._changed_segmentations_op))
+        if model._supervised:
+            # sum expression gives length of the generator
+            self.violated_annots.append(
+                sum(1 for _ in model.violated_annotations()))
+        else:
+            self.violated_annots.append(0)
 
         if self._reference is not None:
             tmp = self._reference.items()
@@ -131,6 +140,8 @@ class IterationStatisticsPlotter(object):
         plt.figure()
         self.basecosts()
         plt.figure()
+        self.violated_annots()
+        plt.figure()
         self.tag_counts()
         plt.figure()
         self.avg_morphs()
@@ -138,8 +149,8 @@ class IterationStatisticsPlotter(object):
         self.durations()
         plt.figure()
         self.types_and_tokens()
-        plt.figure()
-        self.morph_lengths()
+        #plt.figure()
+        #self.morph_lengths()
         plt.figure()
         self.changes()
         if self.stats._reference is not None:
@@ -154,13 +165,23 @@ class IterationStatisticsPlotter(object):
         plt.ylabel('Model cost')
         self._title()
 
+    def violated_annots(self):
+        plt.plot(self.stats.violated_annots, marker='+')
+        self._epoch_grid()
+        plt.xlabel('iteration number')
+        plt.ylabel('Violated annotations')
+        self._title()
+
     def basecosts(self):
+        if len(self.stats.cost_parts) == 0 or len(self.stats.cost_parts[0]) != 6:
+            _logger.info('Not plotting cost components: wrong number of variables (old data?)')
+            return
         plt.plot(self.stats.cost_parts, marker='+')
         self._epoch_grid()
         plt.xlabel('iteration number')
         plt.ylabel('Cost component')
-        plt.legend(['Corpus', 'Lexicon', 'Annots',
-                    'L perm', 'L feats', 'C cond', 'C trans'])
+        plt.legend(['U Corp', 'U Lexi', 'U Anno',
+                    'W Corp', 'W Lexi', 'W Anno'], loc='best')
         self._title()
 
     def tag_counts(self):
@@ -174,7 +195,7 @@ class IterationStatisticsPlotter(object):
         plt.ylabel('Category occurence count')
         self._title()
         if self.stats.categories is not None:
-            plt.legend(self.stats.categories)
+            plt.legend(self.stats.categories, loc='best')
 
     def avg_morphs(self):
         normalized = [x / self.stats.word_tokens
@@ -188,7 +209,7 @@ class IterationStatisticsPlotter(object):
     def types_and_tokens(self):
         plt.plot(self.stats.morph_tokens, color="red", marker='+')
         plt.plot(self.stats.morph_types, color="blue", marker='+')
-        plt.legend(['Tokens', 'Types'])
+        plt.legend(['Tokens', 'Types'], loc='best')
         self._epoch_grid()
         plt.xlabel('iteration number')
         plt.ylabel('Count of morph tokens / types')
@@ -251,13 +272,13 @@ class IterationStatisticsPlotter(object):
         self._epoch_grid()
         plt.xlabel('iteration number')
         plt.ylabel('Boundary precision recall score')
-        plt.legend(['Precision', 'Recall', 'F-measure'])
+        plt.legend(['Precision', 'Recall', 'F-measure'], loc='best')
         self._title()
 
     def changes(self):
         plt.plot(self.stats.changes, color='blue', marker='+')
         plt.plot(self.stats.changes_op, color='red', marker='+')
-        plt.legend(['cumulative w/in epoch', 'in iteration'])
+        plt.legend(['cumulative w/in epoch', 'in iteration'], loc='best')
         self._epoch_grid()
         plt.xlabel('iteration number')
         plt.ylabel('Changed segmentations')

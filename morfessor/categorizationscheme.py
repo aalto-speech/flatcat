@@ -95,19 +95,18 @@ class HeuristicPostprocessor(object):
         if len(analysis) == 1:
             return [CategorizedMorph(analysis[0].morph, 'STM')]
 
-        # Word internal PRE/SUF taggings are uncertain
-        # in the presence of nonmorphemes
-        self._remove_uncertain_tags(analysis)
-
-        # Sequencs of ZZZs can be safely joined
+        # Sequencs of ZZZs should be joined
         analysis = self._join_sequences(analysis, model.forcesplit)
 
-        # Resulting long ZZZs are stems
+        # Resulting long ZZZs are retagged as stems
         self._long_to_stem(analysis, 4)
 
         # Might be done at this point
         if all([m.category != 'ZZZ' for m in analysis]):
             return analysis
+
+        # Retag parts of a multiple-suffix tail as SUF
+        self._tail_suffixes(analysis)
 
         # If not: stronger measures are needed
         # Force join remaining
@@ -116,18 +115,6 @@ class HeuristicPostprocessor(object):
         # Retag with non-morphemes forbidden
         analysis = model.viterbi_tag(analysis, forbid_zzz=True)
         return analysis
-
-    def _remove_uncertain_tags(self, analysis):
-        #In-place
-        for i in range(len(analysis)):
-            if (i > 0 and
-                    analysis[i - 1].category == 'ZZZ' and
-                    analysis[i].category == 'PRE'):
-                analysis[i].category = 'ZZZ'
-            if (i < len(analysis) - 1 and
-                    analysis[i + 1].category == 'ZZZ' and
-                    analysis[i].category == 'SUF'):
-                analysis[i].category = 'ZZZ'
 
     def _join_sequences(self, analysis, forcesplit):
         prev = None
@@ -152,6 +139,16 @@ class HeuristicPostprocessor(object):
         for m in analysis:
             if m.category == 'ZZZ' and len(m.morph) >= min_len:
                 m.category = 'STM'
+
+    def _tail_suffixes(self, analysis):
+        #In-place
+        for (i, m) in enumerate(analysis):
+            if i == 0:
+                continue
+            if m.category == 'ZZZ' and analysis[i - 1].category == 'SUF':
+                if all(tail.category in ('SUF', 'ZZZ')
+                       for tail in analysis[(i + 1):]):
+                    m.category = 'SUF'
 
     def _force_join(self, analysis, forcesplit):
         prev = None

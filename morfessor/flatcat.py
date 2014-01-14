@@ -447,7 +447,7 @@ class FlatcatModel(object):
 
         if segments[0].category is None:
             # FIXME: problem if new morphs are introduced
-            new_analysis = self.viterbi_tag(segments)
+            new_analysis = self.viterbi_tag(segments, forbid_zzz=True)
         else:
             new_analysis = segments
 
@@ -557,7 +557,8 @@ class FlatcatModel(object):
             alternatives = annotation.alternatives
 
             if not self._annotations_tagged:
-                alternatives = [self.viterbi_tag(alt) for alt in alternatives]
+                alternatives = [self.viterbi_tag(alt, forbid_zzz=True)
+                                for alt in alternatives]
 
             sorted_alts = self.best_analysis([AnalysisAlternative(alt, 0)
                                               for alt in alternatives])
@@ -1327,7 +1328,8 @@ class FlatcatModel(object):
             current_unannot = self.segmentations[annotation.i_unannot].analysis
 
             if not self._annotations_tagged:
-                alternatives = [self.viterbi_tag(alt) for alt in alternatives]
+                alternatives = [self.viterbi_tag(alt, forbid_zzz=True)
+                                for alt in alternatives]
 
             sorted_alts = self.best_analysis([AnalysisAlternative(alt, 0)
                                               for alt in alternatives])

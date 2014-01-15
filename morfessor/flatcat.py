@@ -1951,7 +1951,7 @@ class FlatcatLexiconEncoding(baseline.LexiconEncoding):
                   - self.logtokensum
                   + self.permutations_cost()
                   + self.logfeaturesum
-                 ) * self.weight
+                 ) #* self.weight       # always 1
                  + self.frequency_distribution_cost())
 
     def get_codelength(self, morph):

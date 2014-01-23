@@ -705,7 +705,7 @@ class FlatcatModel(object):
                             forbid_zzz=False):
         # To make sure that internally impossible states are penalized
         # even more than impossible states caused by zero parameters.
-        extrazero = LOGPROB_ZERO ** 2
+        extrazero = LOGPROB_ZERO * 100
 
         # This function uses internally indices of categories,
         # instead of names and the word boundary object,
@@ -2058,7 +2058,7 @@ class FlatcatEncoding(baseline.CorpusEncoding):
     def get_emission_counts(self, morph):
         return self._emission_counts[morph]
 
-    def log_emissionprob(self, category, morph):
+    def log_emissionprob(self, category, morph, extrazero=False):
         """-Log of posterior emission probability P(morph|category)"""
         pair = (category, morph)
         if pair not in self._log_emissionprob_cache:
@@ -2076,7 +2076,10 @@ class FlatcatEncoding(baseline.CorpusEncoding):
         # Assertion disabled due to performance hit
         #msg = 'emission {} -> {} has probability > 1'.format(category, morph)
         #assert self._log_emissionprob_cache[pair] >= 0, msg
-        return self._log_emissionprob_cache[pair]
+        tmp = self._log_emissionprob_cache[pair]
+        if extrazero and tmp >= LOGPROB_ZERO:
+            return tmp ** 2
+        return tmp
 
     def update_emission_count(self, category, morph, diff_count):
         """Updates the number of observed emissions of a single morph from a
@@ -2337,7 +2340,7 @@ class FlatcatAnnotatedCorpusEncoding(object):
         if count == 0:
             return
         self.logemissionsum += count * self.corpus_coding.log_emissionprob(
-            category, morph)
+            category, morph, extrazero=True)
 
 
 class WeightLearning(object):

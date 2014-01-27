@@ -1303,6 +1303,9 @@ class FlatcatModel(object):
                             '{} to {}'.format(old_cost, new_cost))
                 force_another = True
             self._annot_coding.update_weight()
+            _logger.info('Cost balance (W Corp / W Anno): {}'.format(
+                self._corpus_coding.get_cost() /
+                self._annot_coding.get_cost()))
 
         self._operation_number = 0
         if not no_increment:
@@ -1746,7 +1749,7 @@ class FlatcatModel(object):
 
             self._morph_usage.remove_temporaries(temporaries)
             msg = 'Operation incresed the model cost'
-            assert self.get_cost() > old_cost + 0.1, msg
+            assert self.get_cost() < old_cost + 0.1, msg
 
     ### Private: secondary
     #

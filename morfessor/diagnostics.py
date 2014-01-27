@@ -173,8 +173,10 @@ class IterationStatisticsPlotter(object):
         self._title()
 
     def basecosts(self):
-        if len(self.stats.cost_parts) == 0 or len(self.stats.cost_parts[0]) != 6:
-            _logger.info('Not plotting cost components: wrong number of variables (old data?)')
+        if (len(self.stats.cost_parts) == 0 or
+                len(self.stats.cost_parts[0]) != 6):
+            _logger.info('Not plotting cost components: ' +
+                         'wrong number of variables (old data?)')
             return
         plt.plot(self.stats.cost_parts, marker='+')
         self._epoch_grid()

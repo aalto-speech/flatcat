@@ -1657,7 +1657,8 @@ class FlatcatModel(object):
             if len(transform_group) == 0:
                 continue
             # Cost of doing nothing
-            best = TransformationNode(self.get_cost(), None, set())
+            old_cost = self.get_cost()
+            best = TransformationNode(old_cost, None, set())
 
             # All transforms in group must match the same words,
             # we can use just the first transform
@@ -1723,10 +1724,10 @@ class FlatcatModel(object):
             else:
                 # A real change was the best option
                 best.transform.reset_counts()
+                for morph in self.detag_word(best.transform.result):
+                    # Add the new representation to morph counts
+                    self._modify_morph_count(morph, num_matches)
                 for target in best.targets:
-                    for morph in self.detag_word(best.transform.result):
-                        # Add the new representation to morph counts
-                        self._modify_morph_count(morph, num_matches)
                     new_analysis = best.transform.apply(
                         self.segmentations[target],
                         self, corpus_index=target)
@@ -1744,6 +1745,8 @@ class FlatcatModel(object):
                         self._annot_coding.modify_contribution(morph, 1)
 
             self._morph_usage.remove_temporaries(temporaries)
+            msg = 'Operation incresed the model cost'
+            assert self.get_cost() > old_cost + 0.1, msg
 
     ### Private: secondary
     #
@@ -1951,7 +1954,7 @@ class FlatcatLexiconEncoding(baseline.LexiconEncoding):
                   - self.logtokensum
                   + self.permutations_cost()
                   + self.logfeaturesum
-                 ) #* self.weight       # always 1
+                 )  # * self.weight       # always 1
                  + self.frequency_distribution_cost())
 
     def get_codelength(self, morph):

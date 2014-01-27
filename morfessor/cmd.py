@@ -1104,6 +1104,10 @@ def flatcat_main(args):
                 else:
                     def _output_morph(cmorph):
                         return cmorph.morph
+                num_morphs = len(constructions)
+                num_nonmorphemes = sum(1 for cmorph in constructions
+                                       if cmorph.category == 'ZZZ')
+                num_letters = sum(len(cmorph.morph) for cmorph in constructions)
                 if filter_tags is not None:
                     constructions = [cmorph for cmorph in constructions
                                      if cmorph.category not in filter_tags]
@@ -1111,8 +1115,13 @@ def flatcat_main(args):
                                  for cmorph in constructions]
                 analysis = csep.join(constructions)
                 fobj.write(outformat.format(
-                           analysis=analysis, compound=compound,
-                           count=count, logprob=logp))
+                           analysis=analysis,
+                           compound=compound,
+                           count=count,
+                           logprob=logp,
+                           num_morphs=num_morphs,
+                           num_nonmorphemes=num_nonmorphemes,
+                           num_letters=num_letters))
         _logger.info("Done.")
 
     # Save statistics

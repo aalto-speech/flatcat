@@ -8,8 +8,12 @@ from morfessor.exception import ArgumentException
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         raise ArgumentException('Expects filename of picked stats object as argument')
+    if len(sys.argv) == 3:
+	style = sys.argv[2]
+    else:
+	style = 'stacked'
     with open(sys.argv[1], 'r') as fobj:
         stats = pickle.load(fobj)
         isp = diagnostics.IterationStatisticsPlotter(stats)
-        isp.all()
+        isp.show(style)
 

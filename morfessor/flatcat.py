@@ -246,8 +246,8 @@ class FlatcatModel(object):
             if isinstance(analysis[0], CategorizedMorph):
                 self._intern_word(analysis)
             else:
-                analysis = [self._interned_morph(morph, store=True)
-                            for morph in analysis]
+                analysis = tuple(self._interned_morph(morph, store=True)
+                                 for morph in analysis)
             segmentation = WordAnalysis(count, analysis)
             self.segmentations.append(segmentation)
             for morph in self.detag_word(segmentation.analysis):
@@ -455,18 +455,18 @@ class FlatcatModel(object):
             if i_word is None:
                 i_word = len(self.segmentations)
                 self.segmentations.append(
-                    WordAnalysis(1, list(new_analysis)))
+                    WordAnalysis(1, tuple(new_analysis)))
                 for morph in self.detag_word(segments):
                     self._modify_morph_count(morph, 1)
                 self._calculate_morph_backlinks()
-            self.annotations[word] = Annotation([segments],
-                                                list(new_analysis),
+            self.annotations[word] = Annotation((segments,),
+                                                tuple(new_analysis),
                                                 i_word)
             self._annot_coding.boundaries += 1
             self._annot_coding.update_weight()
         else:
-            self.annotations[word] = Annotation([segments],
-                                                list(new_analysis),
+            self.annotations[word] = Annotation((segments,),
+                                                tuple(new_analysis),
                                                 i_word)
 
         assert i_word is not None
@@ -557,8 +557,8 @@ class FlatcatModel(object):
             alternatives = annotation.alternatives
 
             if not self._annotations_tagged:
-                alternatives = [self.viterbi_tag(alt, forbid_zzz=True)
-                                for alt in alternatives]
+                alternatives = tuple(self.viterbi_tag(alt, forbid_zzz=True)
+                                     for alt in alternatives)
 
             sorted_alts = self.best_analysis([AnalysisAlternative(alt, 0)
                                               for alt in alternatives])
@@ -667,7 +667,7 @@ class FlatcatModel(object):
             bt_cat = backtrace.backpointer[0][1]
             result.insert(0, backtrace.backpointer[1])
             pos -= len(backtrace.backpointer[1])
-        return result, best.cost
+        return tuple(result), best.cost
 
     def viterbi_tag(self, segments, forbid_zzz=False):
         """Tag a pre-segmented word using the learned model.
@@ -783,7 +783,7 @@ class FlatcatModel(object):
             morph = mapping(segments[i - 1])
             result.insert(0, CategorizedMorph(
                 morph, categories[backtrace.backpointer]))
-        return result
+        return tuple(result)
 
     def viterbi_tag_corpus(self):
         """(Re)tags the corpus segmentations using viterbi_tag"""
@@ -1351,7 +1351,7 @@ class FlatcatModel(object):
                 1, new_active)
             overwrite[word] = Annotation(
                 alternatives,
-                list(new_active),
+                tuple(new_active),
                 annotation.i_unannot)
             for morph in self.detag_word(current_unannot):
                 count_diff[morph] -= 1
@@ -1906,13 +1906,14 @@ class FlatcatModel(object):
 
     @staticmethod
     def detag_word(segments):
-        return [FlatcatModel.detag_morph(x) for x in segments]
+        return tuple(FlatcatModel.detag_morph(x) for x in segments)
 
     @staticmethod
     def detag_list(segmentations):
         """Removes category tags from a segmented corpus."""
         for rcount, segments in segmentations:
-            yield ((rcount, [FlatcatModel.detag_morph(x) for x in segments]))
+            yield ((rcount, tuple(FlatcatModel.detag_morph(x)
+                                  for x in segments)))
 
     @property
     def word_tokens(self):
@@ -2765,7 +2766,7 @@ class Transformation(object):
                                       corpus_index)
             self.change_counts.update(out, word.count, corpus_index)
 
-        return WordAnalysis(word.count, out)
+        return WordAnalysis(word.count, tuple(out))
 
     def reset_counts(self):
         self.change_counts = ChangeCounts()
@@ -2841,6 +2842,6 @@ def _wb_wrap(segments, end_only=False):
     """
     wb = CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)
     if end_only:
-        return list(segments) + [wb]
+        return tuple(list(segments) + [wb])
     else:
-        return [wb] + segments + [wb]
+        return tuple([wb] + list(segments) + [wb])

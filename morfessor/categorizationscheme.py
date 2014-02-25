@@ -93,7 +93,7 @@ class HeuristicPostprocessor(object):
             return analysis
 
         if len(analysis) == 1:
-            return [CategorizedMorph(analysis[0].morph, 'STM')]
+            return (CategorizedMorph(analysis[0].morph, 'STM'),)
 
         # Sequencs of ZZZs should be joined
         analysis = self._join_sequences(analysis, model.forcesplit)
@@ -102,7 +102,7 @@ class HeuristicPostprocessor(object):
         self._long_to_stem(analysis, 4)
 
         # Might be done at this point
-        if all([m.category != 'ZZZ' for m in analysis]):
+        if all(m.category != 'ZZZ' for m in analysis):
             return analysis
 
         # Retag parts of a multiple-suffix tail as SUF

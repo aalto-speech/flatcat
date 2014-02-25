@@ -1331,8 +1331,8 @@ class FlatcatModel(object):
             current_unannot = self.segmentations[annotation.i_unannot].analysis
 
             if not self._annotations_tagged:
-                alternatives = [self.viterbi_tag(alt, forbid_zzz=True)
-                                for alt in alternatives]
+                alternatives = tuple(self.viterbi_tag(alt, forbid_zzz=True)
+                                     for alt in alternatives)
 
             sorted_alts = self.best_analysis([AnalysisAlternative(alt, 0)
                                               for alt in alternatives])

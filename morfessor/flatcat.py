@@ -2099,6 +2099,7 @@ class FlatcatEncoding(baseline.CorpusEncoding):
         """
         if diff_count == 0:
             return
+        assert category is not None
         cat_index = get_categories().index(category)
         old_count = self._emission_counts[morph][cat_index]
         new_count = old_count + diff_count

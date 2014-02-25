@@ -971,7 +971,9 @@ def flatcat_main(args):
             shared_model.model.reestimate_probabilities()
         shared_model.model.initialize_hmm(
             min_difference_proportion=args.min_diff_prop)
-    elif len(args.baselinefiles) > 0 or len(args.loadsegfiles) > 0:
+    elif (len(args.baselinefiles) > 0
+            or len(args.loadsegfiles) > 0 
+            or args.annofile is not None):
         # Extending initialized model with new data
         shared_model.model.viterbi_tag_corpus()
         shared_model.model.initialize_hmm(

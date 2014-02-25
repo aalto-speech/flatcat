@@ -1734,6 +1734,7 @@ class FlatcatModel(object):
                     new_analysis = best.transform.apply(
                         self.segmentations[target],
                         self, corpus_index=target)
+                    self._intern_word(new_analysis.analysis)
                     self.segmentations[target] = new_analysis
                     # any morph used in the best segmentation
                     # is no longer temporary

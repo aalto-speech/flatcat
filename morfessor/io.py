@@ -41,7 +41,7 @@ class MorfessorIO:
         self.encoding = encoding
         self.construction_separator = construction_separator
         self.comment_start = comment_start
-        self.compound_sep = re.compile(compound_separator, re.UNICODE)
+        self.compound_sep_re = re.compile(compound_separator, re.UNICODE)
         self.atom_separator = atom_separator
         if atom_separator is not None:
             self._atom_sep_re = re.compile(atom_separator, re.UNICODE)
@@ -113,7 +113,7 @@ class MorfessorIO:
         """
         _logger.info("Reading corpus from '%s'..." % file_name)
         for line in self._read_text_file(file_name):
-            for compound in self.compound_sep.split(line):
+            for compound in self.compound_sep_re.split(line):
                 if len(compound) > 0:
                     yield 1, compound, self._split_atoms(compound)
             yield 0, "\n", ()

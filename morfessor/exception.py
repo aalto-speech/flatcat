@@ -12,7 +12,7 @@ class ArgumentException(Exception):
 
 
 class InvalidCategoryError(MorfessorException):
-    """Attemt to load data using a different categorization scheme."""
+    """Attempt to load data using a different categorization scheme."""
     def __init__(self, category):
         super(InvalidCategoryError, self).__init__(
             self, 'This model does not recognize the category {}'.format(

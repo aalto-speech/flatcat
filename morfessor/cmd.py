@@ -541,10 +541,10 @@ Simple usage examples (training and testing):
             default=r'{analysis}\n', metavar='<format>',
             help="format string for --output file (default: '%(default)s'). "
             "Valid keywords are: "
-            "{analysis} = constructions of the compound, "
-            "{compound} = compound string, "
-            "{count} = count of the compound (currently always 1), and "
-            "{logprob} = log-probability of the compound. Valid escape "
+            "{analysis} = morphs of the word, "
+            "{compound} = word, "
+            "{count} = count of the word (currently always 1), and "
+            "{logprob} = log-probability of the analysis. Valid escape "
             "sequences are '\\n' (newline) and '\\t' (tabular)")
     add_arg('--output-format-separator', dest='outputformatseparator',
             type=str, default=' ', metavar='<str>',
@@ -621,7 +621,7 @@ Simple usage examples (training and testing):
             help="if the expression matches the two surrounding characters, "
                  "do not allow splitting (default %(default)s)")
     add_arg('--skips', dest="skips", default=False, action='store_true',
-            help="use random skips for frequently seen compounds to speed up "
+            help="use random skips for frequently seen words to speed up "
                  "online training. Has no effect on batch training.")
     add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
             action='store_true',
@@ -629,7 +629,7 @@ Simple usage examples (training and testing):
                  'from output segmentations.')
     add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
             metavar='<int>',
-            help="compound frequency threshold (default %(default)s).")
+            help="word frequency threshold (default %(default)s).")
     add_arg('--max-shift-distance', dest='max_shift_distance',
             type=int, default=2, metavar='<int>',
             help='Maximum number of letters that the break between morphs ' +

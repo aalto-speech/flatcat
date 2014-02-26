@@ -228,10 +228,10 @@ class FlatcatModel(object):
                              (count, (morph1, morph2, ...))
                              where the morphs can be either strings
                              or CategorizedMorphs.
-            freqthreshold -- discard compounds that occur less than
+            freqthreshold -- discard words that occur less than
                              given times in the corpus (default 1).
             count_modifier -- function for adjusting the counts of each
-                              compound.
+                              word.
         """
         assert isinstance(freqthreshold, (int, float))
         i = len(self.segmentations)
@@ -677,7 +677,7 @@ class FlatcatModel(object):
                         Raises KeyError if morph is not present in the
                         training data.
                         For segmenting and tagging new words,
-                        use viterbi_segment(compound).
+                        use viterbi_segment(word).
             forbid_zzz -- If True, no morph can be tagged as a
                           non-morpheme.
         """

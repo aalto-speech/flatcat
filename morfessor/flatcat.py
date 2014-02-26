@@ -314,7 +314,7 @@ class FlatcatModel(object):
                          max_resegment_iterations=1,
                          max_shift_distance=2,
                          min_shift_remainder=2):
-        """Set parameters for batch Cat-MAP training of the model."""
+        """Set parameters for batch FlatCat training of the model."""
         self._min_iteration_cost_gain = min_iteration_cost_gain
         self._min_epoch_cost_gain = min_epoch_cost_gain
         self._max_epochs = max_epochs

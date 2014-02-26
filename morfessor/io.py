@@ -362,7 +362,7 @@ class FlatcatIO(MorfessorIO):
         _logger.info("Saving segmentations to '%s'..." % file_name)
         with self._open_text_file_write(file_name) as file_obj:
             d = datetime.datetime.now().replace(microsecond=0)
-            file_obj.write('# Output from Morfessor Cat-MAP {}, {!s}\n'.format(
+            file_obj.write('# Output from Morfessor FlatCat {}, {!s}\n'.format(
                 get_version(), d))
             for count, morphs in segmentations:
                 s = self.construction_separator.join(

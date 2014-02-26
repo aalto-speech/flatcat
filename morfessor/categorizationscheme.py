@@ -84,8 +84,8 @@ class HeuristicPostprocessor(object):
         self.max_join_stem_len = max_join_stem_len
         self.operations = []
 
-    def remove_nonmorfemes(self, analysis, model):
-        """Remove nonmorfemes from the analysis by joining or retagging
+    def remove_nonmorphemes(self, analysis, model):
+        """Remove nonmorphemes from the analysis by joining or retagging
         morphs, using heuristics."""
 
         # Nothing to do if there are no nonmorphemes

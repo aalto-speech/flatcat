@@ -2515,8 +2515,8 @@ class WeightLearning(object):
         if self.heuristic is None:
             heuristic_func = lambda x: x
         else:
-            heuristic_func = lambda x: self.heuristic.remove_nonmorfemes(x,
-                                                                     model)
+            heuristic_func = lambda x: self.heuristic.remove_nonmorphemes(x,
+                                                                      model)
 
         segments = [heuristic_func(model.viterbi_segment(w)[0])
                     for w in wlist]

@@ -625,7 +625,7 @@ Simple usage examples (training and testing):
                  "online training. Has no effect on batch training.")
     add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
             action='store_true',
-            help='use heuristic postprocessing to remove nonmorfemes ' +
+            help='use heuristic postprocessing to remove nonmorphemes ' +
                  'from output segmentations.')
     add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
             metavar='<int>',
@@ -1062,7 +1062,7 @@ def flatcat_main(args):
     if args.savesegfile is not None:
         if heuristic is not None:
             segs = shared_model.model.map_segmentations(
-                lambda x: heuristic.remove_nonmorfemes(x, shared_model.model))
+                lambda x: heuristic.remove_nonmorphemes(x, shared_model.model))
         else:
             segs = shared_model.model.segmentations
         io.write_segmentation_file(args.savesegfile, segs)
@@ -1096,7 +1096,7 @@ def flatcat_main(args):
                     continue
                 constructions, logp = shared_model.model.viterbi_segment(atoms)
                 if heuristic is not None:
-                    constructions = heuristic.remove_nonmorfemes(
+                    constructions = heuristic.remove_nonmorphemes(
                                         constructions, shared_model.model)
                 if args.test_output_tags:
                     def _output_morph(cmorph):

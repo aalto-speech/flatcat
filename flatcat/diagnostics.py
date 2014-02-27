@@ -15,7 +15,7 @@ if not PY3:     # my version of matplotlib doesn't support python 3
     except ImportError:
         _logger.info('Unable to import matplotlib.pyplot: plotting disabled')
 
-from . import baseline
+from morfessor import baseline
 from .exception import UnsupportedConfigurationError, ArgumentException
 
 
@@ -172,7 +172,7 @@ class IterationStatisticsPlotter(object):
         plt.show()
 
     def stacked(self):
-        plt.figure(figsize=(5.5*2, 5.5*2))
+        plt.figure(figsize=(5.5 * 2, 5.5 * 2))
         plt.subplot(3, 2, 1)
         self.costs(xlabel=False, zoom=True)
         plt.subplot(3, 2, 2)

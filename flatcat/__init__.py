@@ -1,0 +1,33 @@
+#!/usr/bin/env python
+"""
+Morfessor 2.0 FlatCat - Python implementation of
+the FlatCat variant of the Morfessor method
+"""
+import logging
+
+
+__all__ = ['MorfessorException', 'ArgumentException', 'FlatcatIO',
+           'FlatcatModel', 'flatcat_main', 'get_flatcat_argparser']
+
+__version__ = '2.0.1'
+__author__ = 'Stig-Arne Gronroos'
+__author_email__ = "morfessor@cis.hut.fi"
+
+show_progress_bar = True
+
+_logger = logging.getLogger(__name__)
+
+
+def get_version():
+    return __version__
+
+# The public api imports need to be at the end of the file,
+# so that the package global names are available to the modules
+# when they are imported.
+
+from .flatcat import FlatcatModel
+from .categorizationscheme import MorphUsageProperties
+from .cmd import flatcat_main, get_flatcat_argparser
+from .exception import MorfessorException, ArgumentException
+from .io import FlatcatIO
+from .utils import _progress

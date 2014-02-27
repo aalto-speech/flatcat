@@ -7,8 +7,7 @@ import logging
 
 __all__ = ['MorfessorException', 'ArgumentException', 'MorfessorIO',
            'BaselineModel', 'main', 'get_default_argparser', 'main_evaluation',
-           'get_evaluation_argparser',
-           'FlatcatModel', 'FlatcatIO', 'MorphUsageProperties']
+           'get_evaluation_argparser']
 
 __version__ = '2.0.1'
 __author__ = 'Sami Virpioja, Peter Smit, Stig-Arne Gronroos'
@@ -27,11 +26,9 @@ def get_version():
 # when they are imported.
 
 from .baseline import BaselineModel
-from .categorizationscheme import MorphUsageProperties
 from .cmd import main, get_default_argparser, main_evaluation, \
     get_evaluation_argparser
 from .exception import MorfessorException, ArgumentException
-from .flatcat import FlatcatModel
-from .io import MorfessorIO, FlatcatIO
+from .io import MorfessorIO
 from .utils import _progress
 from .evaluation import MorfessorEvaluation, MorfessorEvaluationResult

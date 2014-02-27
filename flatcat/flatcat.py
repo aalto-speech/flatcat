@@ -17,7 +17,7 @@ import random
 import re
 import sys
 
-from . import baseline
+from morfessor import baseline
 from . import utils
 from . import optimization
 from .categorizationscheme import MorphUsageProperties, WORD_BOUNDARY

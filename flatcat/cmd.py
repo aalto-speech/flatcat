@@ -1,0 +1,718 @@
+from __future__ import unicode_literals
+
+import logging
+import math
+import random
+import os.path
+import sys
+import time
+import string
+
+from . import get_version, _logger, flatcat
+from .categorizationscheme import MorphUsageProperties, HeuristicPostprocessor
+from .diagnostics import IterationStatistics
+from .exception import ArgumentException
+from .io import FlatcatIO
+from .utils import _generator_progress, LOGPROB_ZERO, memlog
+
+PY3 = sys.version_info.major == 3
+
+_logger = logging.getLogger(__name__)
+
+LICENSE = """
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+1.  Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+2.  Redistributions in binary form must reproduce the above
+    copyright notice, this list of conditions and the following
+    disclaimer in the documentation and/or other materials provided
+    with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+"""
+
+
+def get_flatcat_argparser():
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog='flatcat.py',
+        description="""
+Morfessor FlatCat {version}
+
+Copyright (c) 2013, Stig-Arne Gronroos
+All rights reserved.
+{license}
+
+Command-line arguments:
+""" .format(version=get_version(), license=LICENSE),
+        epilog="""
+Simple usage examples (training and testing):
+
+  %(prog)s -B baseline_segmentation.txt -p 10 -s model.pickled
+  %(prog)s -m none -l model.pickled -T test_corpus.txt -o test_corpus.segmented
+
+""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False)
+
+    # Options for input data files
+    add_arg = parser.add_argument_group('input data files').add_argument
+    add_arg('-l', '--load', dest="loadfile", default=None, metavar='<file>',
+            help="load existing model from file (pickled model object).")
+    add_arg('-B', '--load-baseline', dest="baselinefiles", default=[],
+            action='append', metavar='<file>',
+            help='load baseline segmentation from file ' +
+                 '(Morfessor 1.0 format). ' +
+                 'Can be used together with --load, ' +
+                 'in which case the pickled model is extended with the ' +
+                 'loaded segmentation.')
+    add_arg('-L', '--load-segmentation', dest="loadsegfiles", default=[],
+            action='append', metavar='<file>',
+            help='load existing model from tagged segmentation ' +
+                 'file (Morfessor 2.0 FlatCat format). ' +
+                 'The probabilities are not stored in the file, ' +
+                 'and must be re-estimated. ' +
+                 'Can be used together with --load, ' +
+                 'in which case the pickled model is extended with the ' +
+                 'loaded segmentation.')
+    add_arg('-T', '--testdata', dest='testfiles', action='append',
+            default=[], metavar='<file>',
+            help="input corpus file(s) to analyze (text or gzipped text;  "
+                 "use '-' for standard input; add several times in order to "
+                 "append multiple files).")
+    add_arg('--loadparamsfile', dest='loadparamsfile', default=None,
+            metavar='<file>',
+            help='Load learned and estimated parameters from file.')
+
+    # Options for output data files
+    add_arg = parser.add_argument_group('output data files').add_argument
+    add_arg('-o', '--output', dest="outfile", default='-', metavar='<file>',
+            help="output file for test data results (for standard output, "
+                 "use '-'; default '%(default)s').")
+    add_arg('-s', '--save', dest="savefile", default=None, metavar='<file>',
+            help="save final model to file (pickled model object).")
+    add_arg('-S', '--save-segmentation', dest="savesegfile", default=None,
+            metavar='<file>',
+            help="save model segmentations to file (Morfessor 1.0 format).")
+    add_arg('--saveparamsfile', dest='saveparamsfile', default=None,
+            metavar='<file>',
+            help='Save learned and estimated parameters to file.')
+
+    # Options for data formats
+    add_arg = parser.add_argument_group(
+        'data format options').add_argument
+    add_arg('-e', '--encoding', dest='encoding', metavar='<encoding>',
+            help="encoding of input and output files (if none is given, "
+            "both the local encoding and UTF-8 are tried).")
+#    add_arg('--atom-separator', dest="separator", type=str, default=None,
+#            metavar='<regexp>',
+#            help="atom separator regexp (default %(default)s).")
+    add_arg('--compound-separator', dest="cseparator", type=str, default='\s+',
+            metavar='<regexp>',
+            help="compound separator regexp (default '%(default)s').")
+    add_arg('--analysis-separator', dest='analysisseparator', type=str,
+            default=',', metavar='<regexp>',
+            help="separator for different analyses in an annotation file. Use"
+                 "  NONE for only allowing one analysis per line.")
+    add_arg('--category-separator', dest='catseparator', type=str, default='/',
+            metavar='<regexp>',
+            help='separator for the category tag following a morph. ' +
+                 '(default %(default)s).')
+    add_arg('--output-format', dest='outputformat', type=str,
+            default=r'{analysis}\n', metavar='<format>',
+            help="format string for --output file (default: '%(default)s'). "
+            "Valid keywords are: "
+            "{analysis} = morphs of the word, "
+            "{compound} = word, "
+            "{count} = count of the word (currently always 1), and "
+            "{logprob} = log-probability of the analysis. Valid escape "
+            "sequences are '\\n' (newline) and '\\t' (tabular)")
+    add_arg('--output-format-separator', dest='outputformatseparator',
+            type=str, default=' ', metavar='<str>',
+            help="construction separator for analysis in --output file "
+            "(default: '%(default)s')")
+    add_arg('--output-tags', dest='test_output_tags', default=False,
+            action='store_true',
+            help='output category tags in test data. ' +
+                 'Default is to output only the morphs')
+    add_arg('--output-newlines', dest='outputnewlines', default=False,
+            action='store_true',
+            help="for each newline in input, print newline in --output file "
+            "(default: '%(default)s')")
+    add_arg('--filter-categories', dest='filter_categories', type=str,
+            default='', metavar='<list>',
+            help='A list of morph categories to omit from the output ' +
+                 'of the test data. Can be used e.g. for approximating ' +
+                 'stemming by specifying "PRE,SUF" or "SUF". ' +
+                 'The format of the list is a string of (unquoted) ' +
+                 'category tags separated by single commas (no space). ' +
+                 'Default: do not filter any categories.')
+
+    # Options for training and segmentation
+    add_arg = parser.add_argument_group(
+        'training and segmentation options').add_argument
+    add_arg('-m', '--mode', dest="trainmode", default='batch',
+            metavar='<mode>',
+            choices=['none', 'batch', 'online', 'online+batch'],
+            help="training mode ('none', 'batch', "
+                 "'online', or 'online+batch'; default '%(default)s')")
+    add_arg('-p', '--perplexity-threshold', dest='ppl_threshold', type=float,
+            default=100., metavar='<float>',
+            help='threshold value for sigmoid used to calculate ' +
+                 'probabilities from left and right perplexities. ' +
+                 '(default %(default)s).')
+    add_arg('--perplexity-slope', dest='ppl_slope', type=float, default=None,
+            metavar='<float>',
+            help='slope value for sigmoid used to calculate ' +
+                 'probabilities from left and right perplexities. ' +
+                 '(default 10 / perplexity-threshold).')
+    add_arg('--length-threshold', dest='length_threshold', type=float,
+            default=3., metavar='<float>',
+            help='threshold value for sigmoid used to calculate ' +
+                 'probabilities from length of morph. ' +
+                 '(default %(default)s).')
+    add_arg('--length-slope', dest='length_slope', type=float, default=2.,
+            metavar='<float>',
+            help='slope value for sigmoid used to calculate ' +
+                 'probabilities from length of morph. ' +
+                 '(default %(default)s).')
+    add_arg('--type-perplexity', dest='type_ppl', default=False,
+            action='store_true',
+            help='use word type -based perplexity instead of the default ' +
+                 'word token -based perplexity.')
+    add_arg('--min-perplexity-length', dest='min_ppl_length', type=int,
+            default=4, metavar='<int>',
+            help='morphs shorter than this length are ' +
+                 'ignored when calculating perplexity. ' +
+                 '(default %(default)s).')
+    add_arg('-d', '--dampening', dest="dampening", type=str, default='none',
+            metavar='<type>', choices=['none', 'log', 'ones'],
+            help="Frequency dampening for training data. " +
+                 "Do not apply dampening if the baseline was already " +
+                 "dampened: the effect is cumulative. " +
+                 "('none', 'log', or 'ones'; default '%(default)s').")
+    add_arg('-f', '--forcesplit', dest="forcesplit", type=list, default=['-'],
+            metavar='<list>',
+            help="force split on given atoms. " +
+            "Each character in the string will be included as a " +
+            "forcesplit atom. " +
+            "(default '-').")
+    add_arg('--nosplit-re', dest="nosplit", type=str, default=None,
+            metavar='<regexp>',
+            help="if the expression matches the two surrounding characters, "
+                 "do not allow splitting (default %(default)s)")
+    add_arg('--skips', dest="skips", default=False, action='store_true',
+            help="use random skips for frequently seen words to speed up "
+                 "online training. Has no effect on batch training.")
+    add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
+            action='store_true',
+            help='use heuristic postprocessing to remove nonmorphemes ' +
+                 'from output segmentations.')
+    add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
+            metavar='<int>',
+            help="word frequency threshold (default %(default)s).")
+    add_arg('--max-shift-distance', dest='max_shift_distance',
+            type=int, default=2, metavar='<int>',
+            help='Maximum number of letters that the break between morphs ' +
+                 'can move in the shift operation. ' +
+                 '(default %(default)s).')
+    add_arg('--min-shift-remainder', dest='min_shift_remainder',
+            type=int, default=2, metavar='<int>',
+            help='Minimum number of letters remaining in the shorter morph ' +
+                 'after a shift operation. ' +
+                 '(default %(default)s).')
+#     add_arg('--viterbi-smoothing', dest="viterbismooth", default=0,
+#             type=float, metavar='<float>',
+#             help="additive smoothing parameter for Viterbi "
+#             "segmentation (default %(default)s).")
+#     add_arg('--viterbi-maxlen', dest="viterbimaxlen", default=30,
+#             type=int, metavar='<int>',
+#             help="maximum construction length in Viterbi "
+#             "segmentation (default %(default)s).")
+
+    # Options for controlling training iteration sequence
+    add_arg = parser.add_argument_group(
+        'training iteration sequence options').add_argument
+    add_arg('--max-epochs', dest='max_epochs', type=int, default=7,
+            metavar='<int>',
+            help='Maximum number of epochs. (default %(default)s).')
+    add_arg('--max-iterations-first', dest='max_iterations_first',
+            type=int, default=1, metavar='<int>',
+            help='Maximum number of iterations of each operation in ' +
+                 'the first epoch. ' +
+                 '(default %(default)s).')
+    add_arg('--max-iterations', dest='max_iterations', type=int, default=1,
+            metavar='<int>',
+            help='Maximum number of iterations of each operation in ' +
+                 'the subsequent epochs. ' +
+                 '(default %(default)s).')
+    add_arg('--max-resegment-iterations', dest='max_resegment_iterations',
+            type=int, default=2, metavar='<int>',
+            help='Maximum number of iterations of resegmentation in ' +
+                 'all epochs. Resegmentation is the heaviest operation. ' +
+                 '(default %(default)s).')
+    add_arg('--min-epoch-cost-gain', dest='min_epoch_cost_gain', type=float,
+            default=0.005, metavar='<float>',
+            help='Stop training if cost reduction between epochs ' +
+                 'is below this limit * #boundaries. ' +
+                 '(default %(default)s).')
+    add_arg('--min-iteration-cost-gain', dest='min_iteration_cost_gain',
+            type=float, default=0.0025, metavar='<float>',
+            help='Stop training if cost reduction between iterations ' +
+                 'is below this limit * #boundaries. ' +
+                 '(default %(default)s).')
+    add_arg('--min-difference-proportion', dest='min_diff_prop', type=float,
+            default=0.005, metavar='<float>',
+            help='Stop training if proportion of words with changed ' +
+                 'segmentation or category tags is below this limit. ' +
+                 '(default %(default)s).')
+    add_arg('--training-operations', dest='training_operations', type=str,
+            default=','.join(flatcat.FlatcatModel.DEFAULT_TRAIN_OPS),
+            metavar='<list>',
+            help='The sequence of training operations. ' +
+                 'Valid training operations are strings for which ' +
+                 'FlatcatModel has a function named _op_X_generator. ' +
+                 'The format of the list is a string of (unquoted) ' +
+                 'operation names separated by single commas (no space). ' +
+                 "(default '%(default)s').")
+    add_arg('--online-epochint', dest="epochinterval", type=int,
+            default=10000, metavar='<int>',
+            help="epoch interval for online training (default %(default)s)")
+
+    # Options for semi-supervised model training
+    add_arg = parser.add_argument_group(
+        'semi-supervised training options').add_argument
+    add_arg('-A', '--annotations', dest="annofile", default=None,
+            metavar='<file>',
+            help="Load annotated data for semi-supervised learning.")
+    add_arg('-D', '--develset', dest="develfile", default=None,
+            metavar='<file>',
+            help="Load annotated data for tuning the corpus weight parameter.")
+    add_arg('--checkpoint', dest="checkpointfile",
+            default='model.checkpoint.pickled', metavar='<file>',
+            help="Save initialized model to file before weight learning. "
+            "Has no effect unless --develset is given.")
+    add_arg('-w', '--corpusweight', dest="corpusweight", type=float,
+            default=1.0, metavar='<float>',
+            help="Corpus weight parameter (default %(default)s); "
+            "sets the initial value if --develset is used.")
+    add_arg('--weightlearn-parameters', dest='weightlearn_params', type=str,
+            default='annotationweight,corpusweight',
+            metavar='<list>',
+            help='The sequence of parameters to optimize ' +
+                 'in weight learning. ' +
+                 'The format of the list is a string of (unquoted) ' +
+                 'parameter names separated by single commas (no space). ' +
+                 "(default '%(default)s').")
+    add_arg('--weightlearn-iters-first', dest='weightlearn_iters_first',
+            type=int, default=2, metavar='<int>',
+            help='Number of iterations of weight learning ' +
+                 'in weight learning performed before the first training ' +
+                 'epoch ' +
+                 '(default %(default)s).')
+    add_arg('--weightlearn-iters', dest='weightlearn_iters',
+            type=int, default=1, metavar='<int>',
+            help='Number of iterations of weight learning ' +
+                 'in between-iteration weight updates ' +
+                 '(default %(default)s).')
+    add_arg('--weightlearn-evals-first', dest='weightlearn_evals_first',
+            type=int, default=5, metavar='<int>',
+            help='Number of objective function evaluations per line search ' +
+                 'in weight learning performed before the first training ' +
+                 'iteration. ' +    # FIXME total number of evals
+                 'Each function evaluation consists of partially training ' +
+                 'the model weightlearn-sample-sets times ' +
+                 '(default %(default)s).')
+    add_arg('--weightlearn-evals', dest='weightlearn_evals',
+            type=int, default=3, metavar='<int>',
+            help='Number of objective function evaluations per line search ' +
+                 'in between-iteration weight updates ' +
+                 '(default %(default)s).')
+    add_arg('--weightlearn-depth-first', dest='weightlearn_depth_first',
+            type=int, default=2, metavar='<int>',
+            help='Number of times each training operation is performed' +
+                 'in weight learning performed before the first training ' +
+                 'iteration ' +
+                 '(default %(default)s).')
+    add_arg('--weightlearn-depth', dest='weightlearn_depth',
+            type=int, default=1, metavar='<int>',
+            help='Number of times each training operation is performed' +
+                 'in between-iteration weight updates ' +
+                 '(default %(default)s).')
+    add_arg('--weightlearn-sample-size', dest='weightlearn_sample_size',
+            type=int, default=2000, metavar='<int>',
+            help='A subset of this size is sampled (with repetition, ' +
+            'weighting according to occurrence count) from the corpus. ' +
+            'When evaluating a value for the corpus weight during weight '
+            'learning, the local search of the model training is restricted ' +
+            'to this set, to reduce computation time. ' +
+            'Setting this to zero uses the whole corpus.' +
+            '(default %(default)s); ')
+    add_arg('--weightlearn-sample-sets', dest='weightlearn_sample_sets',
+            type=int, default=5, metavar='<int>',
+            help='Make a majority decision based on this number of ' +
+            'weightlearning sample sets. ' +
+            'If the whole corpus is used for weight learning, ' +
+            'this parameter has no effect. '
+            '(default %(default)s); ')
+    add_arg('--weightlearn-cue-rejection-thresh', dest='weightlearn_cuethresh',
+            type=int, default=4, metavar='<int>',
+            help='Stop using the direction cue after this many rejected steps '
+            '(default %(default)s); ')
+    add_arg('-W', '--annotationweight', dest="annotationweight",
+            type=float, default=None, metavar='<float>',
+            help="Corpus weight parameter for annotated data (if unset, the "
+                 "weight is set to balance the number of tokens in annotated "
+                 "and unannotated data sets).")
+
+    # Options for logging
+    add_arg = parser.add_argument_group('logging options').add_argument
+    add_arg('-v', '--verbose', dest="verbose", type=int, default=1,
+            metavar='<int>',
+            help="verbose level; controls what is written to the standard "
+                 "error stream or log file (default %(default)s).")
+    add_arg('--logfile', dest='log_file', metavar='<file>',
+            help="write log messages to file in addition to standard "
+            "error stream.")
+    add_arg('--progressbar', dest='progress', default=False,
+            action='store_true',
+            help='Force the progressbar to be displayed.')
+    add_arg('--statsfile', dest='stats_file', metavar='<file>',
+            help='Collect iteration statistics and pickle them ' +
+                 'into this file.')
+    add_arg('--stats-annotations', dest="statsannotfile", default=None,
+            metavar='<file>',
+            help='Load annotated data for f-measure diagnostics. '
+                 'Useful for analyzing convergence properties.')
+
+    add_arg = parser.add_argument_group('other options').add_argument
+    add_arg('-h', '--help', action='help',
+            help="show this help message and exit.")
+    add_arg('--version', action='version',
+            version='%(prog)s ' + get_version(),
+            help="show version number and exit.")
+
+    return parser
+
+
+def flatcat_main(args):
+    # FIXME contains lots of copy-pasta from morfessor.main (refactor)
+    if args.verbose >= 2:
+        loglevel = logging.DEBUG
+    elif args.verbose >= 1:
+        loglevel = logging.INFO
+    else:
+        loglevel = logging.WARNING
+
+    logging_format = '%(asctime)s - %(message)s'
+    date_format = '%Y-%m-%d %H:%M:%S'
+    default_formatter = logging.Formatter(logging_format, date_format)
+    plain_formatter = logging.Formatter('%(message)s')
+    logging.basicConfig(level=loglevel)
+    _logger.propagate = False  # do not forward messages to the root logger
+
+    # Basic settings for logging to the error stream
+    ch = logging.StreamHandler()
+    ch.setLevel(loglevel)
+    ch.setFormatter(plain_formatter)
+    _logger.addHandler(ch)
+
+    # Settings for when log_file is present
+    if args.log_file is not None:
+        fh = logging.FileHandler(args.log_file, 'w')
+        fh.setLevel(loglevel)
+        fh.setFormatter(default_formatter)
+        _logger.addHandler(fh)
+        # If logging to a file, make INFO the highest level for the
+        # error stream
+        ch.setLevel(max(loglevel, logging.INFO))
+
+    # If debug messages are printed to screen or if stderr is not a tty (but
+    # a pipe or a file), don't show the progressbar
+    global show_progress_bar
+    if (ch.level > logging.INFO or
+            (hasattr(sys.stderr, 'isatty') and not sys.stderr.isatty())):
+        show_progress_bar = False
+
+    if args.progress:
+        show_progress_bar = True
+        ch.setLevel(min(ch.level, logging.INFO))
+
+    # Set frequency dampening function
+    if args.dampening == 'none':
+        dampfunc = None
+    elif args.dampening == 'log':
+        dampfunc = lambda x: int(round(math.log(x + 1, 2)))
+    elif args.dampening == 'ones':
+        dampfunc = lambda x: 1
+    else:
+        raise ArgumentException("unknown dampening type '%s'" % args.dampening)
+    # FIXME everything directly pasted up to this point
+
+    if (args.loadfile is None and
+            len(args.baselinefiles) == 0 and
+            len(args.loadsegfiles) == 0):
+        raise ArgumentException('either model file, '
+            'tagged segmentation or baseline segmentation must be defined.')
+
+    io = FlatcatIO(encoding=args.encoding,
+                  compound_separator=args.cseparator,
+                  category_separator=args.catseparator)
+
+    # Load exisiting model or create a new one
+    model_initialized = False
+    training_ops = args.training_operations.split(',')
+    if args.loadfile is not None:
+        shared_model = flatcat.SharedModel(
+            io.read_binary_model_file(args.loadfile))
+        shared_model.model.post_load()
+        model_initialized = True
+    else:
+        m_usage = MorphUsageProperties(
+            ppl_threshold=args.ppl_threshold,
+            ppl_slope=args.ppl_slope,
+            length_threshold=args.length_threshold,
+            length_slope=args.length_slope,
+            use_word_tokens=not args.type_ppl,
+            min_perplexity_length=args.min_ppl_length)
+        # Make sure that the current model can be garbage collected
+        # if it needs to be reloaded from disk
+        shared_model = flatcat.SharedModel(flatcat.FlatcatModel(
+                            m_usage,
+                            forcesplit=args.forcesplit,
+                            nosplit=args.nosplit,
+                            corpusweight=args.corpusweight,
+                            use_skips=args.skips))
+
+    # Set up statistics logging
+    stats = None
+    if args.stats_file is not None:
+        stats = IterationStatistics()
+        shared_model.model.iteration_callbacks.append(stats.callback)
+        stats.set_names(shared_model.model, training_ops)
+
+        if args.statsannotfile is not None:
+            stats.set_gold_standard(
+                io.read_annotations_file(args.statsannotfile,
+                    analysis_sep=args.analysisseparator))
+
+    # Load data
+    for f in args.loadsegfiles:
+        _logger.info('Calling model.add_corpus_data')
+        shared_model.model.add_corpus_data(io.read_segmentation_file(f),
+                              count_modifier=dampfunc,
+                              freqthreshold=args.freqthreshold)
+        _logger.info('Done with model.add_corpus_data')
+    if (not model_initialized and
+            len(args.loadsegfiles) > 0 and
+            len(args.baselinefiles) > 0):
+        # Starting from both tagged and untagged segmentation files,
+        # but no trained model: have to initialize from the tagging.
+        shared_model.model.reestimate_probabilities()
+        shared_model.model.initialize_hmm(
+            min_difference_proportion=args.min_diff_prop)
+        model_initialized = True
+    for f in args.baselinefiles:
+        _logger.info('Calling model.add_corpus_data')
+        shared_model.model.add_corpus_data(io.read_segmentation_file(f),
+                              count_modifier=dampfunc,
+                              freqthreshold=args.freqthreshold)
+        _logger.info('Done with model.add_corpus_data')
+
+    if args.annofile is not None:
+        annotations = io.read_annotations_file(args.annofile,
+            analysis_sep=args.analysisseparator)
+        shared_model.model.add_annotations(annotations,
+                              args.annotationweight)
+
+    if args.develfile is not None:
+        develannots = io.read_annotations_file(args.develfile,
+            analysis_sep=args.analysisseparator)
+    else:
+        develannots = None
+
+    if args.loadparamsfile is not None:
+        _logger.info('Loading learned params from {}'.format(
+            args.loadparamsfile))
+        shared_model.model.set_learned_params(
+            io.read_parameter_file(args.loadparamsfile))
+
+    # Initialize the model
+    must_train = False
+    if not model_initialized:
+        # Starting from segmentations instead of pickle,
+        shared_model.model.training_operations = training_ops
+        # Need to (re)estimate the probabilities
+        if len(args.loadsegfiles) == 0:
+            # Starting from a baseline model
+            _logger.info('Initializing from baseline segmentation...')
+            shared_model.model.initialize_baseline()
+            must_train = True
+        else:
+            shared_model.model.reestimate_probabilities()
+        shared_model.model.initialize_hmm(
+            min_difference_proportion=args.min_diff_prop)
+    elif (len(args.baselinefiles) > 0
+            or len(args.loadsegfiles) > 0
+            or args.annofile is not None):
+        # Extending initialized model with new data
+        shared_model.model.viterbi_tag_corpus()
+        shared_model.model.initialize_hmm(
+            min_difference_proportion=args.min_diff_prop)
+        must_train = True
+
+    # Heuristic nonmorpheme removal
+    heuristic = None
+    if args.rm_nonmorph:
+        heuristic = HeuristicPostprocessor()
+
+    # Perform weight learning using development annotations
+    if develannots is not None:
+        weight_learning = flatcat.WeightLearning(
+            args.weightlearn_iters_first,
+            args.weightlearn_evals_first,
+            args.weightlearn_depth_first,
+            args.weightlearn_iters,
+            args.weightlearn_evals,
+            args.weightlearn_depth,
+            args.weightlearn_cuethresh,
+            develannots,
+            shared_model,
+            io,
+            args.checkpointfile,
+            heuristic)
+        for param in args.weightlearn_params.split(','):
+            if param == 'corpusweight':
+                weight_learning.add_corpus_weight()
+            elif param == 'annotationweight':
+                if shared_model.model._supervised:
+                    weight_learning.add_annotation_weight()
+        shared_model.model.generate_focus_samples(
+            args.weightlearn_sample_sets,
+            args.weightlearn_sample_size)
+
+        _logger.info('Performing initial weight learning')
+        must_train = weight_learning.optimize(first=True)
+
+        shared_model.model.training_focus = None
+    else:
+        weight_learning = None
+
+    # Train model, if there is new data to train on
+    if args.trainmode == 'none':
+        if must_train and len(args.testfiles) > 0:
+            raise ArgumentException('Must train before using a model '
+                'for segmenting, if new data is added.')
+        _logger.info('Using loaded model without training')
+    if args.trainmode in ('online', 'online+batch'):
+        # Always reads from stdin
+        data = io.read_combined_file('-',
+                                     annotation_prefix='<',
+                                     construction_sep=' ',
+                                     analysis_sep=',')
+        shared_model.model.train_online(data, count_modifier=dampfunc,
+                           epoch_interval=args.epochinterval,
+                           max_epochs=(args.max_iterations * args.max_epochs))
+    if args.trainmode in ('batch', 'online+batch'):
+        shared_model.model.batch_parameters(
+                        min_iteration_cost_gain=args.min_iteration_cost_gain,
+                        min_epoch_cost_gain=args.min_epoch_cost_gain,
+                        max_epochs=args.max_epochs,
+                        max_iterations_first=args.max_iterations_first,
+                        max_iterations=args.max_iterations,
+                        max_resegment_iterations=args.max_resegment_iterations,
+                        max_shift_distance=args.max_shift_distance,
+                        min_shift_remainder=args.min_shift_remainder)
+        ts = time.time()
+        flatcat.train_batch(shared_model, weight_learning)
+        _logger.info('Final cost: {}'.format(shared_model.model.get_cost()))
+        te = time.time()
+        _logger.info('Training time: {:.3f}s'.format(te - ts))
+
+    # Save model
+    if args.savefile is not None:
+        shared_model.model.toggle_callbacks(None)
+        memlog('Before pickle')
+        shared_model.model.pre_save()
+        io.write_binary_model_file(args.savefile, shared_model.model)
+        memlog('After pickle')
+        if len(args.testfiles) > 0:
+            shared_model.model.post_load()
+            memlog('After postload')
+
+    if args.savesegfile is not None:
+        if heuristic is not None:
+            segs = shared_model.model.map_segmentations(
+                lambda x: heuristic.remove_nonmorphemes(x, shared_model.model))
+        else:
+            segs = shared_model.model.segmentations
+        io.write_segmentation_file(args.savesegfile, segs)
+
+    if args.saveparamsfile is not None:
+        io.write_parameter_file(args.saveparamsfile,
+                                shared_model.model.get_learned_params())
+
+    # Segment test data
+    if len(args.testfiles) > 0:
+        _logger.info("Segmenting test data...")
+        outformat = args.outputformat
+        csep = args.outputformatseparator
+        if not PY3:
+            outformat = unicode(outformat)
+            csep = unicode(csep)
+        outformat = outformat.replace(r"\n", "\n")
+        outformat = outformat.replace(r"\t", "\t")
+        if len(args.filter_categories) > 0:
+            filter_tags = [x.upper()
+                           for x in args.filter_categories.split(',')]
+        else:
+            filter_tags = None
+        with io._open_text_file_write(args.outfile) as fobj:
+            testdata = io.read_corpus_files(args.testfiles)
+            for count, compound, atoms in _generator_progress(testdata):
+                if len(atoms) == 0:
+                    # Newline in corpus
+                    if args.outputnewlines:
+                        fobj.write("\n")
+                    continue
+                constructions, logp = shared_model.model.viterbi_segment(atoms)
+                if heuristic is not None:
+                    constructions = heuristic.remove_nonmorphemes(
+                                        constructions, shared_model.model)
+                if args.test_output_tags:
+                    def _output_morph(cmorph):
+                        return '{}{}{}'.format(cmorph.morph,
+                                                args.catseparator,
+                                                cmorph.category)
+                else:
+                    def _output_morph(cmorph):
+                        return cmorph.morph
+                if filter_tags is not None:
+                    constructions = [cmorph for cmorph in constructions
+                                     if cmorph.category not in filter_tags]
+                constructions = [_output_morph(cmorph)
+                                 for cmorph in constructions]
+                analysis = csep.join(constructions)
+                fobj.write(outformat.format(
+                           analysis=analysis, compound=compound,
+                           count=count, logprob=logp))
+        _logger.info("Done.")
+
+    # Save statistics
+    if args.stats_file is not None:
+        io.write_binary_file(args.stats_file, stats)

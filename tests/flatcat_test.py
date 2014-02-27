@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 from __future__ import unicode_literals
 """
-Tests for Morfessor 2.0 Categories-MAP variant.
+Tests for Morfessor 2.0 FlatCat variant.
 """
 
 import collections
@@ -11,10 +11,10 @@ import re
 import unittest
 
 import morfessor
-from morfessor import flatcat
-from morfessor import categorizationscheme as scheme
-from morfessor.categorizationscheme import CategorizedMorph
-from morfessor.utils import LOGPROB_ZERO
+from flatcat import flatcat
+from flatcat import categorizationscheme as scheme
+from flatcat.categorizationscheme import CategorizedMorph
+from flatcat.utils import LOGPROB_ZERO
 
 
 # Directory for reference input and output files

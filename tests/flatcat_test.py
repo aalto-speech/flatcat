@@ -310,8 +310,8 @@ class TestModelConsistency(unittest.TestCase):
         (2000, ('DDDD',)),
         (2000, ('FFFF',)),
         (2000, ('GGGG',)),
-        (500, ('SSSSS',)),
-        (2, ('AASSSSS',)))
+        (2000, ('AAXXXXX',)),
+        (500, ('SSSSS',)))
 
     dummy_annotation = {
         'ABCDEFG': ((CategorizedMorph('ABC', None),
@@ -323,7 +323,7 @@ class TestModelConsistency(unittest.TestCase):
                      CategorizedMorph('KLMN', None)))}
 
     one_split_annotation = {
-        'AASSSSS': ((CategorizedMorph('AAC', None),
+        'AASSSSS': ((CategorizedMorph('AA', None),
                      CategorizedMorph('SSSSS', None)),)}
 
     def setUp(self):
@@ -341,14 +341,16 @@ class TestModelConsistency(unittest.TestCase):
         self._initial_state_asserts()
         self._destructive_backlink_check()
 
+    # Warning: this test is broken in the same way as
+    # test_transforms_with_annotations, but it works for now
     def test_transforms(self):
         self.model.add_corpus_data(
             TestModelConsistency.one_split_segmentation)
         self._presplit()
 
         tmp = ((('AA', 'BBBBB'), ('AABBBBB',)),           # join
-               (('AASSSSS',), ('AA', 'SSSSS')),           # split
-               (('BBBBB',), ('B', 'B', 'B', 'B', 'B')))   # silly
+               (('AAXXXXX',), ('AA', 'XXXXX')),           # split
+               (('BBBBB',), ('BB', 'B', 'BB')))           # silly
 
         def simple_transformation(old_analysis, new_analysis):
             return flatcat.Transformation(
@@ -418,64 +420,80 @@ class TestModelConsistency(unittest.TestCase):
                            None)
         self._destructive_backlink_check()
 
-    def test_transforms_with_annotations(self):
-        self.model.add_corpus_data(
-            TestModelConsistency.one_split_segmentation)
-        self.model.add_annotations(TestModelConsistency.one_split_annotation)
-        self._presplit()
-        self.model._update_annotation_choices()
-
-        tmp = ((('AA', 'BBBBB'), ('AABBBBB',)),           # join
-               (('AASSSSS',), ('AA', 'SSSSS')),           # split
-               (('BBBBB',), ('B', 'B', 'B', 'B', 'B')))   # silly
-
-        def simple_transformation(old_analysis, new_analysis):
-            return flatcat.Transformation(
-                flatcat.TransformationRule(
-                    [flatcat.CategorizedMorph(morph, None)
-                        for morph in old_analysis]),
-                [flatcat.CategorizedMorph(morph, None)
-                    for morph in new_analysis])
-
-        def apply_transformation(transformation):
-            matched_targets, num_matches = self.model._find_in_corpus(
-                transformation.rule, None)
-
-            for morph in self.model.detag_word(transformation.rule):
-                # Remove the old representation, but only from
-                # morph counts (emissions and transitions updated later)
-                self.model._modify_morph_count(morph, -num_matches)
-            for morph in self.model.detag_word(transformation.result):
-                # Add the new representation to morph counts
-                self.model._modify_morph_count(morph, num_matches)
-
-            for i in matched_targets:
-                new_analysis = transformation.apply(
-                    self.model.segmentations[i],
-                    self.model, corpus_index=i)
-                self.model.segmentations[i] = new_analysis
-            self.model._update_counts(transformation.change_counts, 1)
-            self.model._morph_usage.remove_zeros()
-
-        for a, b in tmp:
-            forward = simple_transformation(a, b)
-            backward = simple_transformation(b, a)
-
-            self._apply_revert(
-                lambda: apply_transformation(forward),
-                lambda: apply_transformation(backward),
-                None)
-        self._destructive_backlink_check()
+# This test is inherently broken: it assumes that the tagging for a particular
+# segmentation is unique, which is not true.
+#     def test_transforms_with_annotations(self):
+#         self.model.add_corpus_data(
+#             TestModelConsistency.one_split_segmentation)
+#         self.model.add_annotations(TestModelConsistency.one_split_annotation)
+#         self._presplit()
+#         self.model._update_annotation_choices()
+# 
+#         tmp = ((('AA', 'BBBBB'), ('AABBBBB',)),           # join
+#                (('AAXXXXX',), ('AA', 'XXXXX')),           # split
+#                (('BBBBB',), ('BB', 'B', 'BB')))           # silly
+# 
+#         def simple_transformation(old_analysis, new_analysis):
+#             return flatcat.Transformation(
+#                 flatcat.TransformationRule(
+#                     [flatcat.CategorizedMorph(morph, None)
+#                         for morph in old_analysis]),
+#                 [flatcat.CategorizedMorph(morph, None)
+#                     for morph in new_analysis])
+# 
+#         def apply_transformation(transformation):
+#             self.model.viterbi_tag_corpus()
+#             self.model.reestimate_probabilities()
+#             self.model.viterbi_tag_corpus()
+#             self.model.reestimate_probabilities()
+# 
+#             matched_targets, num_matches = self.model._find_in_corpus(
+#                 transformation.rule, None)
+# 
+#             for morph in self.model.detag_word(transformation.rule):
+#                 # Remove the old representation, but only from
+#                 # morph counts (emissions and transitions updated later)
+#                 self.model._modify_morph_count(morph, -num_matches)
+#             for morph in self.model.detag_word(transformation.result):
+#                 # Add the new representation to morph counts
+#                 self.model._modify_morph_count(morph, num_matches)
+# 
+#             for i in matched_targets:
+#                 new_analysis = transformation.apply(
+#                     self.model.segmentations[i],
+#                     self.model, corpus_index=i)
+#                 self.model.segmentations[i] = new_analysis
+#             self.model._update_counts(transformation.change_counts, 1)
+#             if self.model._supervised:
+#                 self.model._annot_coding.reset_contributions()
+#             self.model._morph_usage.remove_zeros()
+# 
+#             self.model.viterbi_tag_corpus()
+#             self.model.reestimate_probabilities()
+#             self.model.viterbi_tag_corpus()
+#             self.model.reestimate_probabilities()
+# 
+#         for a, b in tmp:
+#             forward = simple_transformation(a, b)
+#             backward = simple_transformation(b, a)
+# 
+#             self._apply_revert(
+#                 lambda: apply_transformation(forward),
+#                 lambda: apply_transformation(backward),
+#                 None)
+#         self._destructive_backlink_check()
 
     
     def _apply_revert(self, apply_func, revert_func, is_remove):
         state_exact, state_approx = self._store_state()
         old_cost = self.model.get_cost()
+
         apply_func()
 
         mid_cost = self.model.get_cost()
 
         revert_func()
+
         new_cost = self.model.get_cost()
 
         msg = ('_apply_revert with {} and {} did not return to same cost. ' +
@@ -513,6 +531,12 @@ class TestModelConsistency(unittest.TestCase):
         self._initial_state_asserts()
 
     def _presplit(self):
+        self.model.viterbi_tag_corpus()
+        self.model.reestimate_probabilities()
+        self.model.viterbi_tag_corpus()
+        self.model.reestimate_probabilities()
+        self.model.viterbi_tag_corpus()
+        self.model.reestimate_probabilities()
         self.model.viterbi_tag_corpus()
         self.model.reestimate_probabilities()
 

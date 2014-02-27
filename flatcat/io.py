@@ -41,7 +41,7 @@ class FlatcatIO(morfessor.MorfessorIO):
     def __init__(self, encoding=None, construction_separator=' + ',
                  comment_start='#', compound_separator='\s+',
                  category_separator='/'):
-        morfessor.MorfessorIO.__init__(
+        super(FlatcatIO, self).__init__(
             self, encoding=encoding,
             construction_separator=construction_separator,
             comment_start=comment_start, compound_separator=compound_separator,

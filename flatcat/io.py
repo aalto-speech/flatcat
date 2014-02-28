@@ -42,9 +42,10 @@ class FlatcatIO(morfessor.MorfessorIO):
                  comment_start='#', compound_separator='\s+',
                  category_separator='/'):
         super(FlatcatIO, self).__init__(
-            self, encoding=encoding,
+            encoding=encoding,
             construction_separator=construction_separator,
-            comment_start=comment_start, compound_separator=compound_separator,
+            comment_start=comment_start,
+            compound_separator=compound_separator,
             atom_separator=None)
         self.category_separator = category_separator
 

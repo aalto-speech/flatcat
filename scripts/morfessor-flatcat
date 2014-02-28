@@ -2,9 +2,9 @@
 
 import sys
 
-from morfessor import cmd
-from morfessor.exception import ArgumentException
-from morfessor.flatcat import _logger
+from flatcat import cmd
+from flatcat.exception import ArgumentException
+from flatcat.flatcat import _logger
 
 def main(argv):
     parser = cmd.get_flatcat_argparser()

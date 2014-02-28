@@ -47,6 +47,18 @@ POSSIBILITY OF SUCH DAMAGE.
 """
 
 
+class ArgumentGroups(object):
+    def __init__(self, parser):
+        self.parser = parser
+        self._groups = {}
+
+    def get(self, name):
+        if name not in self._groups:
+            self._groups[name] = (
+                self.parser.add_argument_group(name).add_argument)
+        return self._groups[name]
+
+
 def get_flatcat_argparser():
     import argparse
     parser = argparse.ArgumentParser(
@@ -69,9 +81,14 @@ Simple usage examples (training and testing):
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False)
+    groups = ArgumentGroups(parser)
+    add_basic_io_arguments(groups)
+    return parser
 
+
+def add_basic_io_arguments(argument_groups):
     # Options for input data files
-    add_arg = parser.add_argument_group('input data files').add_argument
+    add_arg = argument_groups.get('input data files')
     add_arg('-l', '--load', dest="loadfile", default=None, metavar='<file>',
             help="load existing model from file (pickled model object).")
     add_arg('-B', '--load-baseline', dest="baselinefiles", default=[],
@@ -100,7 +117,7 @@ Simple usage examples (training and testing):
             help='Load learned and estimated parameters from file.')
 
     # Options for output data files
-    add_arg = parser.add_argument_group('output data files').add_argument
+    add_arg = argument_groups.get('output data files')
     add_arg('-o', '--output', dest="outfile", default='-', metavar='<file>',
             help="output file for test data results (for standard output, "
                  "use '-'; default '%(default)s').")
@@ -114,8 +131,7 @@ Simple usage examples (training and testing):
             help='Save learned and estimated parameters to file.')
 
     # Options for data formats
-    add_arg = parser.add_argument_group(
-        'data format options').add_argument
+    add_arg = argument_groups.get('data format options')
     add_arg('-e', '--encoding', dest='encoding', metavar='<encoding>',
             help="encoding of input and output files (if none is given, "
             "both the local encoding and UTF-8 are tried).")
@@ -161,8 +177,7 @@ Simple usage examples (training and testing):
                  'Default: do not filter any categories.')
 
     # Options for training and segmentation
-    add_arg = parser.add_argument_group(
-        'training and segmentation options').add_argument
+    add_arg = argument_groups.get('training and segmentation options')
     add_arg('-m', '--mode', dest="trainmode", default='batch',
             metavar='<mode>',
             choices=['none', 'batch', 'online', 'online+batch'],
@@ -243,8 +258,7 @@ Simple usage examples (training and testing):
 #             "segmentation (default %(default)s).")
 
     # Options for controlling training iteration sequence
-    add_arg = parser.add_argument_group(
-        'training iteration sequence options').add_argument
+    add_arg = argument_groups.get('training iteration sequence options')
     add_arg('--max-epochs', dest='max_epochs', type=int, default=7,
             metavar='<int>',
             help='Maximum number of epochs. (default %(default)s).')
@@ -292,8 +306,7 @@ Simple usage examples (training and testing):
             help="epoch interval for online training (default %(default)s)")
 
     # Options for semi-supervised model training
-    add_arg = parser.add_argument_group(
-        'semi-supervised training options').add_argument
+    add_arg = argument_groups.get('semi-supervised training options')
     add_arg('-A', '--annotations', dest="annofile", default=None,
             metavar='<file>',
             help="Load annotated data for semi-supervised learning.")
@@ -378,7 +391,7 @@ Simple usage examples (training and testing):
                  "and unannotated data sets).")
 
     # Options for logging
-    add_arg = parser.add_argument_group('logging options').add_argument
+    add_arg = argument_groups.get('logging options')
     add_arg('-v', '--verbose', dest="verbose", type=int, default=1,
             metavar='<int>',
             help="verbose level; controls what is written to the standard "
@@ -397,14 +410,12 @@ Simple usage examples (training and testing):
             help='Load annotated data for f-measure diagnostics. '
                  'Useful for analyzing convergence properties.')
 
-    add_arg = parser.add_argument_group('other options').add_argument
+    add_arg = argument_groups.get('other options')
     add_arg('-h', '--help', action='help',
             help="show this help message and exit.")
     add_arg('--version', action='version',
             version='%(prog)s ' + get_version(),
             help="show version number and exit.")
-
-    return parser
 
 
 def flatcat_main(args):

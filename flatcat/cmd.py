@@ -83,6 +83,10 @@ Simple usage examples (training and testing):
         add_help=False)
     groups = ArgumentGroups(parser)
     add_basic_io_arguments(groups)
+    add_training_arguments(groups)
+    add_semisupervised_arguments(groups)
+    add_weightlearning_arguments(groups)
+    add_other_arguments(groups)
     return parser
 
 
@@ -112,9 +116,6 @@ def add_basic_io_arguments(argument_groups):
             help="input corpus file(s) to analyze (text or gzipped text;  "
                  "use '-' for standard input; add several times in order to "
                  "append multiple files).")
-    add_arg('--loadparamsfile', dest='loadparamsfile', default=None,
-            metavar='<file>',
-            help='Load learned and estimated parameters from file.')
 
     # Options for output data files
     add_arg = argument_groups.get('output data files')
@@ -126,9 +127,6 @@ def add_basic_io_arguments(argument_groups):
     add_arg('-S', '--save-segmentation', dest="savesegfile", default=None,
             metavar='<file>',
             help="save model segmentations to file (Morfessor 1.0 format).")
-    add_arg('--saveparamsfile', dest='saveparamsfile', default=None,
-            metavar='<file>',
-            help='Save learned and estimated parameters to file.')
 
     # Options for data formats
     add_arg = argument_groups.get('data format options')
@@ -175,7 +173,32 @@ def add_basic_io_arguments(argument_groups):
                  'The format of the list is a string of (unquoted) ' +
                  'category tags separated by single commas (no space). ' +
                  'Default: do not filter any categories.')
+    add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
+            action='store_true',
+            help='use heuristic postprocessing to remove nonmorphemes ' +
+                 'from output segmentations.')
 
+    # Options for semi-supervised model training
+    add_arg = argument_groups.get('semi-supervised training options')
+    add_arg('-A', '--annotations', dest="annofile", default=None,
+            metavar='<file>',
+            help="Load annotated data for semi-supervised learning.")
+    add_arg('-D', '--develset', dest="develfile", default=None,
+            metavar='<file>',
+            help="Load annotated data for tuning the corpus weight parameter.")
+
+
+def add_training_arguments(argument_groups):
+    # Options for input data files
+    add_arg = argument_groups.get('input data files')
+    add_arg('--load-parameters', dest='loadparamsfile', default=None,
+            metavar='<file>',
+            help='Load learned and estimated parameters from file.')
+    # Options for output data files
+    add_arg = argument_groups.get('output data files')
+    add_arg('--save-parameters', dest='saveparamsfile', default=None,
+            metavar='<file>',
+            help='Save learned and estimated parameters to file.')
     # Options for training and segmentation
     add_arg = argument_groups.get('training and segmentation options')
     add_arg('-m', '--mode', dest="trainmode", default='batch',
@@ -231,10 +254,6 @@ def add_basic_io_arguments(argument_groups):
     add_arg('--skips', dest="skips", default=False, action='store_true',
             help="use random skips for frequently seen words to speed up "
                  "online training. Has no effect on batch training.")
-    add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
-            action='store_true',
-            help='use heuristic postprocessing to remove nonmorphemes ' +
-                 'from output segmentations.')
     add_arg('--batch-minfreq', dest="freqthreshold", type=int, default=1,
             metavar='<int>',
             help="word frequency threshold (default %(default)s).")
@@ -305,14 +324,10 @@ def add_basic_io_arguments(argument_groups):
             default=10000, metavar='<int>',
             help="epoch interval for online training (default %(default)s)")
 
+
+def add_semisupervised_arguments(argument_groups):
     # Options for semi-supervised model training
     add_arg = argument_groups.get('semi-supervised training options')
-    add_arg('-A', '--annotations', dest="annofile", default=None,
-            metavar='<file>',
-            help="Load annotated data for semi-supervised learning.")
-    add_arg('-D', '--develset', dest="develfile", default=None,
-            metavar='<file>',
-            help="Load annotated data for tuning the corpus weight parameter.")
     add_arg('--checkpoint', dest="checkpointfile",
             default='model.checkpoint.pickled', metavar='<file>',
             help="Save initialized model to file before weight learning. "
@@ -321,6 +336,16 @@ def add_basic_io_arguments(argument_groups):
             default=1.0, metavar='<float>',
             help="Corpus weight parameter (default %(default)s); "
             "sets the initial value if --develset is used.")
+    add_arg('-W', '--annotationweight', dest="annotationweight",
+            type=float, default=None, metavar='<float>',
+            help="Corpus weight parameter for annotated data (if unset, the "
+                 "weight is set to balance the number of tokens in annotated "
+                 "and unannotated data sets).")
+
+
+def add_weightlearning_arguments(argument_groups):
+    # Options for automatically setting the weight parameters
+    add_arg = argument_groups.get('weight learning options')
     add_arg('--weightlearn-parameters', dest='weightlearn_params', type=str,
             default='annotationweight,corpusweight',
             metavar='<list>',
@@ -384,12 +409,9 @@ def add_basic_io_arguments(argument_groups):
             type=int, default=4, metavar='<int>',
             help='Stop using the direction cue after this many rejected steps '
             '(default %(default)s); ')
-    add_arg('-W', '--annotationweight', dest="annotationweight",
-            type=float, default=None, metavar='<float>',
-            help="Corpus weight parameter for annotated data (if unset, the "
-                 "weight is set to balance the number of tokens in annotated "
-                 "and unannotated data sets).")
 
+
+def add_other_arguments(argument_groups):
     # Options for logging
     add_arg = argument_groups.get('logging options')
     add_arg('-v', '--verbose', dest="verbose", type=int, default=1,

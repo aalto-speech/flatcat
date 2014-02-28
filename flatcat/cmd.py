@@ -119,9 +119,6 @@ Simple usage examples (training and testing):
     add_arg('-e', '--encoding', dest='encoding', metavar='<encoding>',
             help="encoding of input and output files (if none is given, "
             "both the local encoding and UTF-8 are tried).")
-#    add_arg('--atom-separator', dest="separator", type=str, default=None,
-#            metavar='<regexp>',
-#            help="atom separator regexp (default %(default)s).")
     add_arg('--compound-separator', dest="cseparator", type=str, default='\s+',
             metavar='<regexp>',
             help="compound separator regexp (default '%(default)s').")

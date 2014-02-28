@@ -114,14 +114,16 @@ class FlatcatModel(object):
 
     def __init__(self, morph_usage, forcesplit=None, nosplit=None,
                  corpusweight=1.0, use_skips=False):
-        """Initialize a new model instance.
-
+        """
+        FIXME
         Arguments:
             morph_usage -- A MorphUsageProperties object describing how
                            the usage of a morph affects the category.
         """
 
         self._morph_usage = morph_usage
+
+        self._corpus_untagged = False
 
         # The analyzed (segmented and tagged) corpus
         self.segmentations = []
@@ -130,6 +132,9 @@ class FlatcatModel(object):
         # A dict of sets. Keys are morphs, set contents are indices to
         # self.segmentations for words in which the morph occurs
         self.morph_backlinks = collections.defaultdict(set)
+
+        # Cache for custom interning system
+        self._interned_morphs = {}
 
         # Cost variables
         self._lexicon_coding = FlatcatLexiconEncoding(morph_usage)
@@ -205,10 +210,9 @@ class FlatcatModel(object):
         self._use_skips = use_skips  # Random skips for frequent constructions
         self._skipcounter = collections.Counter()
 
+        # Logging variables
         self._cost_field_width = 9
         self._cost_field_precision = 4
-
-        self._interned_morphs = {}
 
     ### Primary public methods
     #
@@ -245,7 +249,12 @@ class FlatcatModel(object):
                 continue
             if isinstance(analysis[0], CategorizedMorph):
                 self._intern_word(analysis)
+                if (not self._corpus_untagged and
+                        any(cmorph.category is None
+                            for cmorph in analysis)):
+                    self._corpus_untagged = True
             else:
+                self._corpus_untagged = True
                 analysis = tuple(self._interned_morph(morph, store=True)
                                  for morph in analysis)
             segmentation = WordAnalysis(count, analysis)
@@ -274,6 +283,7 @@ class FlatcatModel(object):
                                 weight=annotatedcorpusweight)
         self._annot_coding.boundaries = len(self.annotations)
 
+
     def initialize_baseline(self):
         """Initialize the model using a previously added
         (see add_corpus_data) segmentation produced by a morfessor
@@ -295,6 +305,11 @@ class FlatcatModel(object):
             self._calculate_transition_counts()
             self._calculate_emission_counts()
 
+        must_train = self._corpus_untagged
+        if self._corpus_untagged:
+            self.initialize_baseline()
+        self.reestimate_probabilities()
+
         self._convergence_of_analysis(
             reestimate_with_unchanged_segmentation,
             self.viterbi_tag_corpus,
@@ -305,6 +320,7 @@ class FlatcatModel(object):
             callback(self)
 
         self._epoch_number = 1
+        return must_train
 
     def batch_parameters(self, min_iteration_cost_gain=0.0025,
                          min_epoch_cost_gain=0.005,
@@ -793,6 +809,7 @@ class FlatcatModel(object):
                 self.viterbi_tag(word.analysis))
             if word != self.segmentations[i]:
                 num_changed_words += 1
+        self._corpus_untagged = False
         return num_changed_words
 
     ### Secondary public methods
@@ -830,15 +847,16 @@ class FlatcatModel(object):
         self.reestimate_probabilities()
         self._epoch_update(no_increment=True)
 
-    def get_learned_params(self):
-        """Returns a dict of learned and estimated parameters."""
+    def get_params(self):
+        """Returns a dict of hyperparameters."""
         params = {'corpusweight': self.get_corpus_coding_weight()}
+        params.update(self._morph_usage.get_params())
         if self._supervised:
             params['annotationweight'] = self._annot_coding.weight
         return params
 
-    def set_learned_params(self, params):
-        """Sets learned parameters to loaded values."""
+    def set_params(self, params):
+        """Sets hyperparameters to loaded values."""
         if 'corpusweight' in params:
             _logger.info('Setting corpus coding weight to {}'.format(
                 params['corpusweight']))
@@ -847,6 +865,7 @@ class FlatcatModel(object):
             _logger.info('Setting annotation weight to {}'.format(
                 params['annotationweight']))
             self._annot_coding.weight = float(params['annotationweight'])
+        self._morph_usage.set_params(params)
 
     def get_corpus_coding_weight(self):
         return self._corpus_coding.weight

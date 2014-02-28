@@ -93,40 +93,45 @@ Simple usage examples (training and testing):
 def add_basic_io_arguments(argument_groups):
     # Options for input data files
     add_arg = argument_groups.get('input data files')
-    add_arg('-l', '--load', dest="loadfile", default=None, metavar='<file>',
-            help="load existing model from file (pickled model object).")
-    add_arg('-B', '--load-baseline', dest="baselinefiles", default=[],
+    add_arg('-i', '--initialize', dest="initfile",
+            default=None, metavar='<file>',
+            help='Initialize by loading model from file. '
+                 'Supported formats: '
+                 'Untagged segmentation '
+                 '(Morfessor Baseline; plaintext, ".gz" or ."bz2"), '
+                 'Tagged analysis '
+                 '(Morfessor FlatCat; plaintext, ".gz" or ".bz2"), '
+                 'Binary FlatCat model (pickled in a ".pickled" file)')
+    add_arg('--extend', dest="extendfiles", default=[],
             action='append', metavar='<file>',
-            help='load baseline segmentation from file ' +
-                 '(Morfessor 1.0 format). ' +
-                 'Can be used together with --load, ' +
-                 'in which case the pickled model is extended with the ' +
-                 'loaded segmentation.')
-    add_arg('-L', '--load-segmentation', dest="loadsegfiles", default=[],
-            action='append', metavar='<file>',
-            help='load existing model from tagged segmentation ' +
-                 'file (Morfessor 2.0 FlatCat format). ' +
-                 'The probabilities are not stored in the file, ' +
-                 'and must be re-estimated. ' +
-                 'Can be used together with --load, ' +
-                 'in which case the pickled model is extended with the ' +
-                 'loaded segmentation.')
+            help='Extend the model using the segmentation from a file. '
+                 'The supported formats are the same as for --initialize, '
+                 'except thet pickled binary models are not supported. '
+                 'Untagged segmentations will be tagged with the current '
+                 'model.')
     add_arg('-T', '--testdata', dest='testfiles', action='append',
             default=[], metavar='<file>',
-            help="input corpus file(s) to analyze (text or gzipped text;  "
+            help="Input corpus file(s) to analyze (text or gzipped text;  "
                  "use '-' for standard input; add several times in order to "
                  "append multiple files).")
 
     # Options for output data files
     add_arg = argument_groups.get('output data files')
+    add_arg('-s', '--save-analysis', dest="saveanalysisfile",
+            default=None, metavar='<file>',
+            help='Save analysis of the unannotated data. ')
+    add_arg('--save-annotations', dest="saveannotsfile",
+            default=None, metavar='<file>',
+            help="Save the annotated data set.")
+    add_arg('--save-binary-model', dest="savepicklefile",
+            default=None, metavar='<file>',
+            help='Save a binary FlatCat model with pickle. '
+                 'Use of a filename ending in ".pickled" is recommended '
+                 'This format is suceptible to bit-rot, '
+                 'and is not recommended for long-time storage.')
     add_arg('-o', '--output', dest="outfile", default='-', metavar='<file>',
             help="output file for test data results (for standard output, "
                  "use '-'; default '%(default)s').")
-    add_arg('-s', '--save', dest="savefile", default=None, metavar='<file>',
-            help="save final model to file (pickled model object).")
-    add_arg('-S', '--save-segmentation', dest="savesegfile", default=None,
-            metavar='<file>',
-            help="save model segmentations to file (Morfessor 1.0 format).")
 
     # Options for data formats
     add_arg = argument_groups.get('data format options')
@@ -165,6 +170,9 @@ def add_basic_io_arguments(argument_groups):
             action='store_true',
             help="for each newline in input, print newline in --output file "
             "(default: '%(default)s')")
+
+    # Output post-processing
+    add_arg = argument_groups.get('output post-processing options')
     add_arg('--filter-categories', dest='filter_categories', type=str,
             default='', metavar='<list>',
             help='A list of morph categories to omit from the output ' +
@@ -191,14 +199,14 @@ def add_basic_io_arguments(argument_groups):
 def add_training_arguments(argument_groups):
     # Options for input data files
     add_arg = argument_groups.get('input data files')
-    add_arg('--load-parameters', dest='loadparamsfile', default=None,
+    add_arg('-L', '--load-parameters', dest='loadparamsfile', default=None,
             metavar='<file>',
-            help='Load learned and estimated parameters from file.')
+            help='Load hyperparameters from file.')
     # Options for output data files
     add_arg = argument_groups.get('output data files')
-    add_arg('--save-parameters', dest='saveparamsfile', default=None,
+    add_arg('-S', '--save-parameters', dest='saveparamsfile', default=None,
             metavar='<file>',
-            help='Save learned and estimated parameters to file.')
+            help='Save hyperparameters to file.')
     # Options for training and segmentation
     add_arg = argument_groups.get('training and segmentation options')
     add_arg('-m', '--mode', dest="trainmode", default='batch',
@@ -328,10 +336,6 @@ def add_training_arguments(argument_groups):
 def add_semisupervised_arguments(argument_groups):
     # Options for semi-supervised model training
     add_arg = argument_groups.get('semi-supervised training options')
-    add_arg('--checkpoint', dest="checkpointfile",
-            default='model.checkpoint.pickled', metavar='<file>',
-            help="Save initialized model to file before weight learning. "
-            "Has no effect unless --develset is given.")
     add_arg('-w', '--corpusweight', dest="corpusweight", type=float,
             default=1.0, metavar='<float>',
             help="Corpus weight parameter (default %(default)s); "
@@ -346,6 +350,10 @@ def add_semisupervised_arguments(argument_groups):
 def add_weightlearning_arguments(argument_groups):
     # Options for automatically setting the weight parameters
     add_arg = argument_groups.get('weight learning options')
+    add_arg('--checkpoint', dest="checkpointfile",
+            default='model.checkpoint.pickled', metavar='<file>',
+            help="Save initialized model to file before weight learning. "
+            "Has no effect unless --develset is given.")
     add_arg('--weightlearn-parameters', dest='weightlearn_params', type=str,
             default='annotationweight,corpusweight',
             metavar='<list>',
@@ -441,7 +449,7 @@ def add_other_arguments(argument_groups):
 
 
 def flatcat_main(args):
-    # FIXME contains lots of copy-pasta from morfessor.main (refactor)
+    # FIXME contains lots of copy-pasta from morfessor.cmd.main (refactor)
     if args.verbose >= 2:
         loglevel = logging.DEBUG
     elif args.verbose >= 1:
@@ -494,25 +502,28 @@ def flatcat_main(args):
         raise ArgumentException("unknown dampening type '%s'" % args.dampening)
     # FIXME everything directly pasted up to this point
 
-    if (args.loadfile is None and
-            len(args.baselinefiles) == 0 and
-            len(args.loadsegfiles) == 0):
-        raise ArgumentException('either model file, '
-            'tagged segmentation or baseline segmentation must be defined.')
+    # Arguments needing processing
+    training_ops = args.training_operations.split(',')
+
+    if (args.initfile is None):
+        raise ArgumentException(
+            'An initial Baseline or FlatCat model must be given.')
+    init_is_pickle = (args.initfile.endswith('.pickled') or
+                      args.initfile.endswith('.pickle'))
 
     io = FlatcatIO(encoding=args.encoding,
                   compound_separator=args.cseparator,
                   category_separator=args.catseparator)
 
     # Load exisiting model or create a new one
-    model_initialized = False
-    training_ops = args.training_operations.split(',')
-    if args.loadfile is not None:
+    must_train = False
+    if init_is_pickle:
+        _logger.info('Initializing from binary model...')
         shared_model = flatcat.SharedModel(
-            io.read_binary_model_file(args.loadfile))
+            io.read_binary_model_file(args.initfile))
         shared_model.model.post_load()
-        model_initialized = True
     else:
+        _logger.info('Initializing from segmentation...')
         m_usage = MorphUsageProperties(
             ppl_threshold=args.ppl_threshold,
             ppl_slope=args.ppl_slope,
@@ -528,42 +539,25 @@ def flatcat_main(args):
                             nosplit=args.nosplit,
                             corpusweight=args.corpusweight,
                             use_skips=args.skips))
+        # Add the initial corpus data
+        shared_model.model.add_corpus_data(
+            io.read_segmentation_file(args.initfile),
+            count_modifier=dampfunc,
+            freqthreshold=args.freqthreshold)
 
-    # Set up statistics logging
-    stats = None
-    if args.stats_file is not None:
-        stats = IterationStatistics()
-        shared_model.model.iteration_callbacks.append(stats.callback)
-        stats.set_names(shared_model.model, training_ops)
+        # Load the hyperparamters
+        shared_model.model.training_operations = training_ops
+        if args.loadparamsfile is not None:
+            _logger.info('Loading hyperparameters from {}'.format(
+                args.loadparamsfile))
+            shared_model.model.set_learned_params(
+                io.read_parameter_file(args.loadparamsfile))
 
-        if args.statsannotfile is not None:
-            stats.set_gold_standard(
-                io.read_annotations_file(args.statsannotfile,
-                    analysis_sep=args.analysisseparator))
-
-    # Load data
-    for f in args.loadsegfiles:
-        _logger.info('Calling model.add_corpus_data')
-        shared_model.model.add_corpus_data(io.read_segmentation_file(f),
-                              count_modifier=dampfunc,
-                              freqthreshold=args.freqthreshold)
-        _logger.info('Done with model.add_corpus_data')
-    if (not model_initialized and
-            len(args.loadsegfiles) > 0 and
-            len(args.baselinefiles) > 0):
-        # Starting from both tagged and untagged segmentation files,
-        # but no trained model: have to initialize from the tagging.
-        shared_model.model.reestimate_probabilities()
-        shared_model.model.initialize_hmm(
+        # Initialize the model
+        must_train = shared_model.model.initialize_hmm(
             min_difference_proportion=args.min_diff_prop)
-        model_initialized = True
-    for f in args.baselinefiles:
-        _logger.info('Calling model.add_corpus_data')
-        shared_model.model.add_corpus_data(io.read_segmentation_file(f),
-                              count_modifier=dampfunc,
-                              freqthreshold=args.freqthreshold)
-        _logger.info('Done with model.add_corpus_data')
 
+    # Add annotated data
     if args.annofile is not None:
         annotations = io.read_annotations_file(args.annofile,
             analysis_sep=args.analysisseparator)
@@ -576,35 +570,26 @@ def flatcat_main(args):
     else:
         develannots = None
 
-    if args.loadparamsfile is not None:
-        _logger.info('Loading learned params from {}'.format(
-            args.loadparamsfile))
-        shared_model.model.set_learned_params(
-            io.read_parameter_file(args.loadparamsfile))
-
-    # Initialize the model
-    must_train = False
-    if not model_initialized:
-        # Starting from segmentations instead of pickle,
-        shared_model.model.training_operations = training_ops
-        # Need to (re)estimate the probabilities
-        if len(args.loadsegfiles) == 0:
-            # Starting from a baseline model
-            _logger.info('Initializing from baseline segmentation...')
-            shared_model.model.initialize_baseline()
-            must_train = True
-        else:
-            shared_model.model.reestimate_probabilities()
-        shared_model.model.initialize_hmm(
-            min_difference_proportion=args.min_diff_prop)
-    elif (len(args.baselinefiles) > 0
-            or len(args.loadsegfiles) > 0
-            or args.annofile is not None):
-        # Extending initialized model with new data
-        shared_model.model.viterbi_tag_corpus()
-        shared_model.model.initialize_hmm(
-            min_difference_proportion=args.min_diff_prop)
+    # Extend the model with new unannotated data
+    for f in args.extendfiles:
+        shared_model.model.add_corpus_data(io.read_segmentation_file(f),
+                              count_modifier=dampfunc,
+                              freqthreshold=args.freqthreshold)
+    if len(args.extendfiles) > 0:
+        shared_model.model.corpus_extended()
         must_train = True
+
+    # Set up statistics logging
+    stats = None
+    if args.stats_file is not None:
+        stats = IterationStatistics()
+        shared_model.model.iteration_callbacks.append(stats.callback)
+        stats.set_names(shared_model.model, training_ops)
+
+        if args.statsannotfile is not None:
+            stats.set_gold_standard(
+                io.read_annotations_file(args.statsannotfile,
+                    analysis_sep=args.analysisseparator))
 
     # Heuristic nonmorpheme removal
     heuristic = None
@@ -674,28 +659,30 @@ def flatcat_main(args):
         te = time.time()
         _logger.info('Training time: {:.3f}s'.format(te - ts))
 
-    # Save model
-    if args.savefile is not None:
+
+    # Save hyperparameters
+    if args.saveparamsfile is not None:
+        io.write_parameter_file(args.saveparamsfile,
+                                shared_model.model.get_params())
+
+    # Save analysis
+    if args.saveanalysisfile is not None:
+        io.write_segmentation_file(args.saveanalysisfile,
+                                   shared_model.model.segmentations)
+
+    # Save annotations
+    #FIXME
+
+    # Save binary model
+    if args.savepicklefile is not None:
         shared_model.model.toggle_callbacks(None)
         memlog('Before pickle')
         shared_model.model.pre_save()
-        io.write_binary_model_file(args.savefile, shared_model.model)
+        io.write_binary_model_file(args.savepicklefile, shared_model.model)
         memlog('After pickle')
         if len(args.testfiles) > 0:
             shared_model.model.post_load()
             memlog('After postload')
-
-    if args.savesegfile is not None:
-        if heuristic is not None:
-            segs = shared_model.model.map_segmentations(
-                lambda x: heuristic.remove_nonmorphemes(x, shared_model.model))
-        else:
-            segs = shared_model.model.segmentations
-        io.write_segmentation_file(args.savesegfile, segs)
-
-    if args.saveparamsfile is not None:
-        io.write_parameter_file(args.saveparamsfile,
-                                shared_model.model.get_learned_params())
 
     # Segment test data
     if len(args.testfiles) > 0:

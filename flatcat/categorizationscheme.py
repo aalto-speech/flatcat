@@ -275,6 +275,26 @@ class MorphUsageProperties(object):
         self._condprob_cache = collections.defaultdict(float)
         self._marginalizer = None
 
+
+    def get_params(self):
+        """Returns a dict of hyperparameters."""
+        params = {
+            'perplexity-threshold': self._ppl_threshold,
+            'perplexity-slope': self._ppl_slope,
+            'length-threshold': self._length_threshold,
+            'length-slope': self._length_slope,
+            'type-perplexity': not self.use_word_tokens,
+            'min-perplexity-length': self._min_perplexity_length}
+        return params
+
+    def set_params(self, params):
+        """Sets hyperparameters to loaded values."""
+        if 'perplexity-threshold' in params:
+            _logger.info('Setting perplexity-threshold weight to {}'.format(
+                params['perplexity-threshold']))
+            self._ppl_threshold = (float(params['perplexity-threshold']))
+        # FIXME: other params
+
     def calculate_usage_features(self, seg_func):
         """Calculate the usage features of morphs in the corpus."""
         self._clear()

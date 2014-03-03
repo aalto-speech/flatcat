@@ -288,7 +288,7 @@ class FlatcatModel(object):
             self._corpus_untagged = True
 
 
-    def initialize_baseline(self):
+    def initialize_baseline(self, min_difference_proportion=0.005):
         """Initialize the model using a previously added
         (see add_corpus_data) segmentation produced by a morfessor
         baseline model.
@@ -300,25 +300,25 @@ class FlatcatModel(object):
         self._calculate_transition_counts()
         self._calculate_emission_counts()
 
-    def initialize_hmm(self, min_difference_proportion=0.005):
-        """Initialize emission and transition probabilities without
-        changing the segmentation, using Viterbi EM.
-        """
-
         def reestimate_with_unchanged_segmentation():
             self._calculate_transition_counts()
             self._calculate_emission_counts()
-
-        must_train = self._corpus_untagged
-        if self._corpus_untagged:
-            self.initialize_baseline()
-        self.reestimate_probabilities()
 
         self._convergence_of_analysis(
             reestimate_with_unchanged_segmentation,
             self.viterbi_tag_corpus,
             min_difference_proportion=min_difference_proportion,
             min_cost_gain=-10.0)     # Cost gain will be ~zero.
+
+    def initialize_hmm(self, min_difference_proportion=0.005):
+        """Initialize emission and transition probabilities without
+        changing the segmentation, using Viterbi EM.
+        """
+
+        must_train = self._corpus_untagged
+        if self._corpus_untagged:
+            self.initialize_baseline(min_difference_proportion)
+        self.reestimate_probabilities()
 
         for callback in self.iteration_callbacks:
             callback(self)

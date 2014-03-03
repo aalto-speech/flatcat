@@ -553,18 +553,22 @@ def flatcat_main(args):
             shared_model.model.set_params(
                 io.read_parameter_file(args.loadparamsfile))
 
-        # Initialize the model
-        must_train = shared_model.model.initialize_hmm(
-            min_difference_proportion=args.min_diff_prop)
-
     # Add annotated data
     for f in args.annofiles:
         annotations = io.read_annotations_file(f,
             analysis_sep=args.analysisseparator)
         shared_model.model.add_annotations(annotations,
                               args.annotationweight)
+
+    if not init_is_pickle:
+        # Initialize the model
+        must_train = shared_model.model.initialize_hmm(
+            min_difference_proportion=args.min_diff_prop)
+
     if len(args.annofiles) > 0:
         shared_model.model.viterbi_tag_corpus()
+        shared_model.model.reestimate_probabilities()
+        shared_model.model._update_annotation_choices()
 
 
     if args.develfile is not None:

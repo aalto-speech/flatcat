@@ -62,6 +62,8 @@ def train_batch(smodel, weight_learning=None):
                 'and doing weight learning. ' +
                 'This WILL waste memory.')
         smodel = SharedModel(smodel)
+    msg = 'Must initialize model and tag corpus before training'
+    assert not smodel.model._corpus_untagged, msg
     smodel.model._epoch_update(no_increment=True)
     previous_cost = smodel.model.get_cost()
     wl_force_another = False
@@ -282,6 +284,8 @@ class FlatcatModel(object):
                                 self._corpus_coding,
                                 weight=annotatedcorpusweight)
         self._annot_coding.boundaries = len(self.annotations)
+        if not self._annotations_tagged:
+            self._corpus_untagged = True
 
 
     def initialize_baseline(self):

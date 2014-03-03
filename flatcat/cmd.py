@@ -188,8 +188,8 @@ def add_basic_io_arguments(argument_groups):
 
     # Options for semi-supervised model training
     add_arg = argument_groups.get('semi-supervised training options')
-    add_arg('-A', '--annotations', dest="annofile", default=None,
-            metavar='<file>',
+    add_arg('-A', '--annotations', dest="annofiles", default=[],
+            action='append', metavar='<file>',
             help="Load annotated data for semi-supervised learning.")
     add_arg('-D', '--develset', dest="develfile", default=None,
             metavar='<file>',
@@ -550,7 +550,7 @@ def flatcat_main(args):
         if args.loadparamsfile is not None:
             _logger.info('Loading hyperparameters from {}'.format(
                 args.loadparamsfile))
-            shared_model.model.set_learned_params(
+            shared_model.model.set_params(
                 io.read_parameter_file(args.loadparamsfile))
 
         # Initialize the model
@@ -558,11 +558,14 @@ def flatcat_main(args):
             min_difference_proportion=args.min_diff_prop)
 
     # Add annotated data
-    if args.annofile is not None:
-        annotations = io.read_annotations_file(args.annofile,
+    for f in args.annofiles:
+        annotations = io.read_annotations_file(f,
             analysis_sep=args.analysisseparator)
         shared_model.model.add_annotations(annotations,
                               args.annotationweight)
+    if len(args.annofiles) > 0:
+        shared_model.model.viterbi_tag_corpus()
+
 
     if args.develfile is not None:
         develannots = io.read_annotations_file(args.develfile,

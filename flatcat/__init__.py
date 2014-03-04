@@ -7,7 +7,8 @@ import logging
 
 
 __all__ = ['MorfessorException', 'ArgumentException', 'FlatcatIO',
-           'FlatcatModel', 'flatcat_main', 'get_flatcat_argparser']
+           'FlatcatModel', 'flatcat_main', 'get_flatcat_argparser',
+           'MorphUsageProperties', 'HeuristicPostprocessor']
 
 __version__ = '2.0.1'
 __author__ = 'Stig-Arne Gronroos'
@@ -26,7 +27,7 @@ def get_version():
 # when they are imported.
 
 from .flatcat import FlatcatModel
-from .categorizationscheme import MorphUsageProperties
+from .categorizationscheme import MorphUsageProperties, HeuristicPostprocessor
 from .cmd import flatcat_main, get_flatcat_argparser
 from .exception import MorfessorException, ArgumentException
 from .io import FlatcatIO

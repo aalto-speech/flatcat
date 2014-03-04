@@ -942,8 +942,7 @@ class FlatcatModel(object):
     def post_load(self):
         """Recalculates derived datastructures cleared by pre_save."""
         self._calculate_morph_backlinks()
-        self._intern_corpus()
-        self._calculate_usage_features()
+        self.reestimate_probabilities()
 
     ### Public diagnostic methods
     #

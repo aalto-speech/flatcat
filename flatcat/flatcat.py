@@ -287,7 +287,6 @@ class FlatcatModel(object):
         if not self._annotations_tagged:
             self._corpus_untagged = True
 
-
     def initialize_baseline(self, min_difference_proportion=0.005):
         """Initialize the model using a previously added
         (see add_corpus_data) segmentation produced by a morfessor

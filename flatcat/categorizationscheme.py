@@ -275,7 +275,6 @@ class MorphUsageProperties(object):
         self._condprob_cache = collections.defaultdict(float)
         self._marginalizer = None
 
-
     def get_params(self):
         """Returns a dict of hyperparameters."""
         params = {

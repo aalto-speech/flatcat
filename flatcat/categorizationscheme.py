@@ -290,10 +290,30 @@ class MorphUsageProperties(object):
     def set_params(self, params):
         """Sets hyperparameters to loaded values."""
         if 'perplexity-threshold' in params:
-            _logger.info('Setting perplexity-threshold weight to {}'.format(
+            _logger.info('Setting perplexity-threshold to {}'.format(
                 params['perplexity-threshold']))
             self._ppl_threshold = (float(params['perplexity-threshold']))
-        # FIXME: other params
+        if 'perplexity-slope' in params:
+            _logger.info('Setting perplexity-slope to {}'.format(
+                params['perplexity-slope']))
+            self._ppl_slope = (float(params['perplexity-slope']))
+        if 'length-threshold' in params:
+            _logger.info('Setting length-threshold to {}'.format(
+                params['length-threshold']))
+            self._length_threshold = (float(params['length-threshold']))
+        if 'length-slope' in params:
+            _logger.info('Setting length-slope to {}'.format(
+                params['length-slope']))
+            self._length_slope = (float(params['length-slope']))
+        if 'type-perplexity' in params:
+            _logger.info('Setting type-perplexity to {}'.format(
+                params['type-perplexity']))
+            self.use_word_tokens = (params['type-perplexity'] == 'False')
+        if 'min-perplexity-length' in params:
+            _logger.info('Setting min-perplexity-length to {}'.format(
+                params['min-perplexity-length']))
+            self._min_perplexity_length = (float(
+                params['min-perplexity-length']))
 
     def calculate_usage_features(self, seg_func):
         """Calculate the usage features of morphs in the corpus."""

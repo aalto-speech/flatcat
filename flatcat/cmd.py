@@ -667,19 +667,38 @@ def flatcat_main(args):
     #
     # Save hyperparameters
     if args.saveparamsfile is not None:
+        _logger.info("Saving hyperparameters...")
         io.write_parameter_file(args.saveparamsfile,
                                 shared_model.model.get_params())
+        _logger.info("Done.")
 
     # Save analysis
     if args.saveanalysisfile is not None:
+        _logger.info("Saving model as analysis...")
         io.write_segmentation_file(args.saveanalysisfile,
                                    shared_model.model.segmentations)
+        _logger.info("Done.")
 
     # Save annotations
-    #FIXME
+    if shared_model.model._supervised and args.saveannotsfile is not None:
+        _logger.info("Saving annotations...")
+
+        def annotation_func(item):
+            (compound, annotation) = item
+            return (1, compound, annotation.alternatives, 0)
+
+        io.write_formatted_file(
+            args.saveannotsfile,
+            '{compound}\t{analysis}\n',
+            shared_model.model.annotations.items(),
+            annotation_func,
+            output_tags=shared_model.model._annotations_tagged,
+            construction_sep=' ')
+        _logger.info("Done.")
 
     # Save binary model
     if args.savepicklefile is not None:
+        _logger.info("Saving binary model...")
         shared_model.model.toggle_callbacks(None)
         memlog('Before pickle')
         shared_model.model.pre_save()
@@ -688,6 +707,7 @@ def flatcat_main(args):
         if len(args.testfiles) > 0:
             shared_model.model.post_load()
             memlog('After postload')
+        _logger.info("Done.")
 
     # Segment test data
     if len(args.testfiles) > 0:
@@ -718,7 +738,7 @@ def flatcat_main(args):
             if heuristic is not None:
                 constructions = heuristic.remove_nonmorphemes(
                                     constructions, shared_model.model)
-            return (count, compound, constructions, logp)
+            return (count, compound, [constructions], logp)
 
         io.write_formatted_file(
             args.outfile,

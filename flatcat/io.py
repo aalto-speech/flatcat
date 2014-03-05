@@ -114,7 +114,7 @@ class FlatcatIO(morfessor.MorfessorIO):
             analysis = self._read_annotation(analyses_line,
                                              construction_sep,
                                              analysis_sep)
-            annotations[compound].append(analysis)
+            annotations[compound].extend(analysis)
         _logger.info("Done.")
         return annotations
 
@@ -132,7 +132,7 @@ class FlatcatIO(morfessor.MorfessorIO):
                 analysis = self._read_annotation(
                     line[len(annotation_prefix):],
                     construction_sep=construction_sep,
-                    analysis_sep=analysis_sep)
+                    analysis_sep=analysis_sep)[0]
                 compound = ''.join([x.morph for x in analysis])
                 yield (True, 1, compound, analysis)
             else:
@@ -164,28 +164,32 @@ class FlatcatIO(morfessor.MorfessorIO):
         category_sep = (category_sep if category_sep
                         else self.category_separator)
 
+        if output_tags:
+            def _output_morph(cmorph):
+                return '{}{}{}'.format(cmorph.morph,
+                                        category_sep,
+                                        cmorph.category)
+        else:
+            def _output_morph(cmorph):
+                return cmorph.morph
+
         with self._open_text_file_write(file_name) as fobj:
             for item in _generator_progress(data):
                 if newline_func is not None and newline_func(item):
                     fobj.write("\n")
                     continue
-                (count, compound, constructions, logp) = data_func(item)
+                (count, compound, alternatives, logp) = data_func(item)
 
-                if output_tags:
-                    def _output_morph(cmorph):
-                        return '{}{}{}'.format(cmorph.morph,
-                                               category_sep,
-                                               cmorph.category)
-                else:
-                    def _output_morph(cmorph):
-                        return cmorph.morph
-                if filter_tags is not None:
-                    constructions = [cmorph for cmorph in constructions
-                                     if cmorph.category not in filter_tags
-                                        or len(cmorph) > filter_len]
-                constructions = [_output_morph(cmorph)
-                                 for cmorph in constructions]
-                analysis = construction_sep.join(constructions)
+                analysis = []
+                for constructions in alternatives:
+                    if filter_tags is not None:
+                        constructions = [cmorph for cmorph in constructions
+                                        if cmorph.category not in filter_tags
+                                            or len(cmorph) > filter_len]
+                    constructions = [_output_morph(cmorph)
+                                     for cmorph in constructions]
+                    analysis.append(construction_sep.join(constructions))
+                analysis = analysis_sep.join(analysis)
                 fobj.write(line_format.format(
                                 analysis=analysis,
                                 compound=compound,
@@ -198,9 +202,12 @@ class FlatcatIO(morfessor.MorfessorIO):
         else:
             analyses = [line]
 
+        out = []
         for analysis in analyses:
+            analysis = analysis.strip()
             segments = analysis.split(construction_sep)
-            return [self._morph_or_cmorph(x) for x in segments]
+            out.append(tuple(self._morph_or_cmorph(x) for x in segments))
+        return out
 
     def _morph_or_cmorph(self, morph_cat):
         """Parses a string describing a morph, either tagged

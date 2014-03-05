@@ -187,19 +187,14 @@ def add_common_io_arguments(argument_groups):
                  'The format of the list is a string of (unquoted) '
                  'category tags separated by single commas (no space). '
                  'Default: do not filter any categories.')
+    add_arg('--filter-max-len', dest='filter_len', type=int,
+            default=3, metavar='<int>',
+            help='Do not filter morphs longer than this limit when stemming. '
+                 'Default: 3 (morphs of length 4 will be kept).')
     add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
             action='store_true',
             help='Use heuristic postprocessing to remove nonmorphemes '
                  'from output segmentations.')
-
-    # Options for semi-supervised model training
-    add_arg = argument_groups.get('semi-supervised training options')
-    add_arg('-A', '--annotations', dest='annofiles', default=[],
-            action='append', metavar='<file>',
-            help='Load annotated data for semi-supervised learning.')
-    add_arg('-D', '--develset', dest='develfile', default=None,
-            metavar='<file>',
-            help='Load annotated data for tuning the corpus weight parameter.')
 
 
 def add_training_arguments(argument_groups):
@@ -334,6 +329,12 @@ def add_training_arguments(argument_groups):
 def add_semisupervised_arguments(argument_groups):
     # Options for semi-supervised model training
     add_arg = argument_groups.get('semi-supervised training options')
+    add_arg('-A', '--annotations', dest='annofiles', default=[],
+            action='append', metavar='<file>',
+            help='Load annotated data for semi-supervised learning.')
+    add_arg('-D', '--develset', dest='develfile', default=None,
+            metavar='<file>',
+            help='Load annotated data for tuning the corpus weight parameter.')
     add_arg('-w', '--corpusweight', dest='corpusweight', type=float,
             default=1.0, metavar='<float>',
             help='Corpus weight parameter (default %(default)s); '
@@ -513,6 +514,7 @@ def flatcat_main(args):
     io = FlatcatIO(encoding=args.encoding,
                    construction_separator=args.consseparator,
                    compound_separator=args.cseparator,
+                   analysis_separator=args.analysisseparator,
                    category_separator=args.catseparator)
 
     # Load exisiting model or create a new one
@@ -555,8 +557,7 @@ def flatcat_main(args):
 
     # Add annotated data
     for f in args.annofiles:
-        annotations = io.read_annotations_file(f,
-            analysis_sep=args.analysisseparator)
+        annotations = io.read_annotations_file(f)
         shared_model.model.add_annotations(annotations,
                               args.annotationweight)
 
@@ -571,8 +572,7 @@ def flatcat_main(args):
         shared_model.model._update_annotation_choices()
 
     if args.develfile is not None:
-        develannots = io.read_annotations_file(args.develfile,
-            analysis_sep=args.analysisseparator)
+        develannots = io.read_annotations_file(args.develfile)
     else:
         develannots = None
 
@@ -594,8 +594,7 @@ def flatcat_main(args):
 
         if args.statsannotfile is not None:
             stats.set_gold_standard(
-                io.read_annotations_file(args.statsannotfile,
-                    analysis_sep=args.analysisseparator))
+                io.read_annotations_file(args.statsannotfile))
 
     # Heuristic nonmorpheme removal
     heuristic = None
@@ -700,42 +699,42 @@ def flatcat_main(args):
             csep = unicode(csep)
         outformat = outformat.replace(r"\n", "\n")
         outformat = outformat.replace(r"\t", "\t")
+
         if len(args.filter_categories) > 0:
             filter_tags = [x.upper()
                            for x in args.filter_categories.split(',')]
         else:
             filter_tags = None
-        with io._open_text_file_write(args.outfile) as fobj:
-            testdata = io.read_corpus_files(args.testfiles)
-            for count, compound, atoms in _generator_progress(testdata):
-                if len(atoms) == 0:
-                    # Newline in corpus
-                    if args.outputnewlines:
-                        fobj.write("\n")
-                    continue
-                constructions, logp = shared_model.model.viterbi_segment(atoms)
-                if heuristic is not None:
-                    constructions = heuristic.remove_nonmorphemes(
-                                        constructions, shared_model.model)
-                if args.test_output_tags:
-                    def _output_morph(cmorph):
-                        return '{}{}{}'.format(cmorph.morph,
-                                                args.catseparator,
-                                                cmorph.category)
-                else:
-                    def _output_morph(cmorph):
-                        return cmorph.morph
-                if filter_tags is not None:
-                    constructions = [cmorph for cmorph in constructions
-                                     if cmorph.category not in filter_tags]
-                constructions = [_output_morph(cmorph)
-                                 for cmorph in constructions]
-                analysis = csep.join(constructions)
-                fobj.write(outformat.format(
-                           analysis=analysis, compound=compound,
-                           count=count, logprob=logp))
+        if args.outputnewlines:
+            def newline_func(item):
+                (_, _, atoms) = item
+                return len(atoms) == 0
+        else:
+            newline_func = None
+
+        def segment_func(item):
+            (count, compound, atoms) = item
+            (constructions, logp) = shared_model.model.viterbi_segment(atoms)
+            if heuristic is not None:
+                constructions = heuristic.remove_nonmorphemes(
+                                    constructions, shared_model.model)
+            return (count, compound, constructions, logp)
+
+        io.write_formatted_file(
+            args.outfile,
+            outformat,
+            io.read_corpus_files(args.testfiles),
+            segment_func,
+            newline_func=newline_func,
+            output_tags=args.test_output_tags,
+            construction_sep=csep,
+            filter_tags=filter_tags,
+            filter_len=args.filter_len)
+
         _logger.info("Done.")
 
     # Save statistics
     if args.stats_file is not None:
         io.write_binary_file(args.stats_file, stats)
+
+#FIXME tag mapping in reformat?

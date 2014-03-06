@@ -596,7 +596,7 @@ def flatcat_main(args):
 #         develannots = io.read_annotations_file(args.develfile)
 #     else:
 #         develannots = None
-# 
+#
 #     if develannots is not None:
 #         weight_learning = flatcat.WeightLearning(
 #             args.weightlearn_iters_first,
@@ -645,15 +645,14 @@ def flatcat_main(args):
                            max_epochs=(args.max_iterations * args.max_epochs))
     if args.trainmode in ('batch', 'online+batch'):
         ts = time.time()
-        model.train_batch(
-                        min_iteration_cost_gain=args.min_iteration_cost_gain,
-                        min_epoch_cost_gain=args.min_epoch_cost_gain,
-                        max_epochs=args.max_epochs,
-                        max_iterations_first=args.max_iterations_first,
-                        max_iterations=args.max_iterations,
-                        max_resegment_iterations=args.max_resegment_iterations,
-                        max_shift_distance=args.max_shift_distance,
-                        min_shift_remainder=args.min_shift_remainder)
+        model.train_batch(min_iteration_cost_gain=args.min_iteration_cost_gain,
+                          min_epoch_cost_gain=args.min_epoch_cost_gain,
+                          max_epochs=args.max_epochs,
+                          max_iterations_first=args.max_iterations_first,
+                          max_iterations=args.max_iterations,
+                          max_resegment_iterations=args.max_resegment_iterations,
+                          max_shift_distance=args.max_shift_distance,
+                          min_shift_remainder=args.min_shift_remainder)
         _logger.info('Final cost: {}'.format(model.get_cost()))
         te = time.time()
         _logger.info('Training time: {:.3f}s'.format(te - ts))
@@ -675,20 +674,11 @@ def flatcat_main(args):
 
     # Save annotations
     if model._supervised and args.saveannotsfile is not None:
-        _logger.info("Saving annotations...")
-
-        def annotation_func(item):
-            (compound, annotation) = item
-            return (1, compound, annotation.alternatives, 0)
-
-        io.write_formatted_file(
+        io.write_annotations_file(
             args.saveannotsfile,
-            '{compound}\t{analysis}\n',
-            model.annotations.items(),
-            annotation_func,
-            output_tags=model._annotations_tagged,
-            construction_sep=' ')
-        _logger.info("Done.")
+            model.annotations,
+            construction_sep=' ',
+            output_tags=model._annotations_tagged)
 
     # Save binary model
     if args.savepicklefile is not None:

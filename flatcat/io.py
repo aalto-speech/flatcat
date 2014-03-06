@@ -63,7 +63,7 @@ class FlatcatIO(morfessor.MorfessorIO):
                 <constructionN><cat_sep><categoryN>
         """
 
-        _logger.info("Saving segmentations to '%s'..." % file_name)
+        _logger.info("Saving analysis to '%s'..." % file_name)
         with self._open_text_file_write(file_name) as file_obj:
             d = datetime.datetime.now().replace(microsecond=0)
             file_obj.write('# Output from Morfessor FlatCat {}, {!s}\n'.format(
@@ -117,6 +117,27 @@ class FlatcatIO(morfessor.MorfessorIO):
             annotations[compound].extend(analysis)
         _logger.info("Done.")
         return annotations
+
+    def write_annotations_file(self,
+                               file_name,
+                               annotations,
+                               construction_sep=' ',
+                               analysis_sep=None,
+                               output_tags=False):
+        _logger.info("Writing annotations to '%s'..." % file_name)
+
+        def _annotation_func(item):
+            (compound, annotation) = item
+            return (1, compound, annotation.alternatives, 0)
+
+        self.write_formatted_file(
+            file_name,
+            '{compound}\t{analysis}\n',
+            sorted(annotations.items()),
+            _annotation_func,
+            output_tags=output_tags,
+            construction_sep=construction_sep)
+        _logger.info("Done.")
 
     def read_combined_file(self, file_name, annotation_prefix='<',
                            construction_sep=' ',

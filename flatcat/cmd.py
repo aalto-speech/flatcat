@@ -20,6 +20,9 @@ PY3 = sys.version_info.major == 3
 _logger = logging.getLogger(__name__)
 
 LICENSE = """
+Copyright (c) 2014, Stig-Arne Gronroos
+All rights reserved.
+
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions
 are met:
@@ -66,8 +69,6 @@ def get_flatcat_argparser():
         description="""
 Morfessor FlatCat {version}
 
-Copyright (c) 2013, Stig-Arne Gronroos
-All rights reserved.
 {license}
 
 Command-line arguments:
@@ -75,8 +76,8 @@ Command-line arguments:
         epilog="""
 Simple usage examples (training and testing):
 
-  %(prog)s -B baseline_segmentation.txt -p 10 -s model.pickled
-  %(prog)s -m none -l model.pickled -T test_corpus.txt -o test_corpus.segmented
+  %(prog)s -i baseline_segmentation.txt -p 10 -s analysis.gz -S parameters.txt
+  %(prog)s -m none -i analysis.gz -L parameters.txt -T test_corpus.txt -o test_corpus.segmented
 
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,

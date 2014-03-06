@@ -77,7 +77,8 @@ Command-line arguments:
 Simple usage examples (training and testing):
 
   %(prog)s -i baseline_segmentation.txt -p 10 -s analysis.gz -S parameters.txt
-  %(prog)s -m none -i analysis.gz -L parameters.txt -T test_corpus.txt -o test_corpus.segmented
+  %(prog)s -m none -i analysis.gz -L parameters.txt -T test_corpus.txt \\
+        -o test_corpus.segmented
 
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -134,6 +135,16 @@ def add_model_io_arguments(argument_groups):
     add_arg('-o', '--output', dest='outfile', default='-', metavar='<file>',
             help='Output file for test data results (for standard output, '
                  'use "-"; default "%(default)s").')
+
+    # for the ordering:
+    add_arg = argument_groups.get('data format options')
+
+    # Output post-processing
+    add_arg = argument_groups.get('output post-processing options')
+    add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
+            action='store_true',
+            help='Use heuristic postprocessing to remove nonmorphemes '
+                 'from output segmentations.')
 
 
 def add_common_io_arguments(argument_groups):
@@ -192,10 +203,6 @@ def add_common_io_arguments(argument_groups):
             default=3, metavar='<int>',
             help='Do not filter morphs longer than this limit when stemming. '
                  'Default: 3 (morphs of length 4 will be kept).')
-    add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
-            action='store_true',
-            help='Use heuristic postprocessing to remove nonmorphemes '
-                 'from output segmentations.')
 
 
 def add_training_arguments(argument_groups):
@@ -646,14 +653,15 @@ def flatcat_main(args):
                            max_epochs=(args.max_iterations * args.max_epochs))
     if args.trainmode in ('batch', 'online+batch'):
         ts = time.time()
-        model.train_batch(min_iteration_cost_gain=args.min_iteration_cost_gain,
-                          min_epoch_cost_gain=args.min_epoch_cost_gain,
-                          max_epochs=args.max_epochs,
-                          max_iterations_first=args.max_iterations_first,
-                          max_iterations=args.max_iterations,
-                          max_resegment_iterations=args.max_resegment_iterations,
-                          max_shift_distance=args.max_shift_distance,
-                          min_shift_remainder=args.min_shift_remainder)
+        model.train_batch(
+            min_iteration_cost_gain=args.min_iteration_cost_gain,
+            min_epoch_cost_gain=args.min_epoch_cost_gain,
+            max_epochs=args.max_epochs,
+            max_iterations_first=args.max_iterations_first,
+            max_iterations=args.max_iterations,
+            max_resegment_iterations=args.max_resegment_iterations,
+            max_shift_distance=args.max_shift_distance,
+            min_shift_remainder=args.min_shift_remainder)
         _logger.info('Final cost: {}'.format(model.get_cost()))
         te = time.time()
         _logger.info('Training time: {:.3f}s'.format(te - ts))
@@ -742,4 +750,80 @@ def flatcat_main(args):
     if args.stats_file is not None:
         io.write_binary_file(args.stats_file, stats)
 
-#FIXME tag mapping in reformat?
+
+def add_reformatting_arguments(argument_groups):
+    # File format options
+    add_arg = argument_groups.get('file format options')
+    add_arg('-i', '--input-filetype', dest='infiletype',
+            default=None, metavar='<format>',
+            help='Format of input data. '
+                 '("analysis", "segmentation", "annotation") '
+                 'Default: analysis/segmentation '
+                 '(autodetected using presence of categories) ')
+    add_arg('-o', '--output-filetype', dest='outfiletype',
+            default=None, metavar='<format>',
+            help='Format of output data. '
+                 'Overridden by --output-format. '
+                 '("analysis", "segmentation", "annotation") '
+                 'Default: analysis/segmentation '
+                 '(autodetected using presence of categories) ')
+
+    # Output post-processing
+    add_arg = argument_groups.get('output post-processing options')
+    add_arg('--map-categories', dest='filter_categories', type=list,
+            default=[], action='append', metavar='<from>,<to>',
+            help='Map the <from> morph category to the <to> category. '
+                 'Separate the categories with a single ",". '
+                 'To perform multiple mappings simultaneously, '
+                 'specify the option several times. '
+                 'Default: do not map any categories.')
+    add_arg('--strip-tags', dest='strip_tags', default=False,
+            action='store_true',
+            help='If the input contains category tags, '
+                 'omit them from the output. '
+                 'Has no effect on untagged input. '
+                 '(default: output category tags if they are known)')
+
+    # Annotation processing
+    add_arg = argument_groups.get('annotation processing options')
+    add_arg('--first', dest='first_only', default=False,
+            action='store_true',
+            help='For each annotation in input, '
+                 'only use the first alternative '
+                 '(default: use all alternatives in sequence)')
+
+
+def get_reformat_argparser():
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog='reformat.py',
+        description="""
+Morfessor FlatCat {version} reformatting tool
+
+{license}
+
+Command-line arguments:
+""" .format(version=get_version(), license=LICENSE),
+        epilog="""
+Usage examples:
+
+  Removal of short affixes from tagged segmentation:
+    %(prog)s segmentation.tagged segmentation.txt \\
+        --filter-categories PRE,SUF --strip-tags
+
+  Convert the first alternative annotation to analysis format:
+    %(prog)s annotations.txt analysis.txt -i annotations --first
+
+  Convert analysis into annotation format:
+    %(prog)s analysis.gz annotations.gz -o annotations
+
+  Replace all afffix taggings with stems:
+    %(prog)s analysis.gz modified.gz --map-categories PRE,STM \\
+        --map-categories SUF,STM
+""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False)
+    groups = ArgumentGroups(parser)
+    add_common_io_arguments(groups)
+    add_reformatting_arguments(groups)
+    return parser

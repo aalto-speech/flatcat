@@ -86,7 +86,7 @@ Simple usage examples (training and testing):
     add_common_io_arguments(groups)
     add_training_arguments(groups)
     add_semisupervised_arguments(groups)
-    add_weightlearning_arguments(groups)
+    #add_weightlearning_arguments(groups)
     add_other_arguments(groups)
     return parser
 
@@ -332,9 +332,6 @@ def add_semisupervised_arguments(argument_groups):
     add_arg('-A', '--annotations', dest='annofiles', default=[],
             action='append', metavar='<file>',
             help='Load annotated data for semi-supervised learning.')
-    add_arg('-D', '--develset', dest='develfile', default=None,
-            metavar='<file>',
-            help='Load annotated data for tuning the corpus weight parameter.')
     add_arg('-w', '--corpusweight', dest='corpusweight', type=float,
             default=1.0, metavar='<float>',
             help='Corpus weight parameter (default %(default)s); '
@@ -349,6 +346,9 @@ def add_semisupervised_arguments(argument_groups):
 def add_weightlearning_arguments(argument_groups):
     # Options for automatically setting the weight parameters
     add_arg = argument_groups.get('weight learning options')
+    add_arg('-D', '--develset', dest='develfile', default=None,
+            metavar='<file>',
+            help='Load annotated data for tuning the corpus weight parameter.')
     add_arg('--checkpoint', dest='checkpointfile',
             default='model.checkpoint.pickled', metavar='<file>',
             help='Save initialized model to file before weight learning. '
@@ -521,9 +521,8 @@ def flatcat_main(args):
     must_train = False
     if init_is_pickle:
         _logger.info('Initializing from binary model...')
-        shared_model = flatcat.SharedModel(
-            io.read_binary_model_file(args.initfile))
-        shared_model.model.post_load()
+        model = io.read_binary_model_file(args.initfile)
+        model.post_load()
     else:
         _logger.info('Initializing from segmentation...')
         m_usage = MorphUsageProperties(
@@ -533,64 +532,55 @@ def flatcat_main(args):
             length_slope=args.length_slope,
             use_word_tokens=not args.type_ppl,
             min_perplexity_length=args.min_ppl_length)
-        # Make sure that the current model can be garbage collected
-        # if it needs to be reloaded from disk
-        shared_model = flatcat.SharedModel(flatcat.FlatcatModel(
-                            m_usage,
-                            forcesplit=args.forcesplit,
-                            nosplit=args.nosplit,
-                            corpusweight=args.corpusweight,
-                            use_skips=args.skips))
+        model = flatcat.FlatcatModel(m_usage,
+                                     forcesplit=args.forcesplit,
+                                     nosplit=args.nosplit,
+                                     corpusweight=args.corpusweight,
+                                     use_skips=args.skips)
         # Add the initial corpus data
-        shared_model.model.add_corpus_data(
+        model.add_corpus_data(
             io.read_segmentation_file(args.initfile),
             count_modifier=dampfunc,
             freqthreshold=args.freqthreshold)
 
         # Load the hyperparamters
-        shared_model.model.training_operations = training_ops
+        model.training_operations = training_ops
         if args.loadparamsfile is not None:
             _logger.info('Loading hyperparameters from {}'.format(
                 args.loadparamsfile))
-            shared_model.model.set_params(
+            model.set_params(
                 io.read_parameter_file(args.loadparamsfile))
 
     # Add annotated data
     for f in args.annofiles:
         annotations = io.read_annotations_file(f)
-        shared_model.model.add_annotations(annotations,
+        model.add_annotations(annotations,
                               args.annotationweight)
 
     if not init_is_pickle:
         # Initialize the model
-        must_train = shared_model.model.initialize_hmm(
+        must_train = model.initialize_hmm(
             min_difference_proportion=args.min_diff_prop)
 
     if len(args.annofiles) > 0:
-        shared_model.model.viterbi_tag_corpus()
-        shared_model.model.reestimate_probabilities()
-        shared_model.model._update_annotation_choices()
-
-    if args.develfile is not None:
-        develannots = io.read_annotations_file(args.develfile)
-    else:
-        develannots = None
+        model.viterbi_tag_corpus()
+        model.reestimate_probabilities()
+        model._update_annotation_choices()
 
     # Extend the model with new unannotated data
     for f in args.extendfiles:
-        shared_model.model.add_corpus_data(io.read_segmentation_file(f),
+        model.add_corpus_data(io.read_segmentation_file(f),
                               count_modifier=dampfunc,
-                              freqthreshold=args.freqthreshold)
-    if len(args.extendfiles) > 0:
-        shared_model.model.corpus_extended()
+                              freqthreshold=args.freqthreshold,
+                              extend=True)
         must_train = True
 
     # Set up statistics logging
     stats = None
     if args.stats_file is not None:
         stats = IterationStatistics()
-        shared_model.model.iteration_callbacks.append(stats.callback)
-        stats.set_names(shared_model.model, training_ops)
+        model.iteration_callbacks.append(stats.callback)
+        stats.set_names(model, training_ops)
 
         if args.statsannotfile is not None:
             stats.set_gold_standard(
@@ -602,36 +592,41 @@ def flatcat_main(args):
         heuristic = HeuristicPostprocessor()
 
     # Perform weight learning using development annotations
-    if develannots is not None:
-        weight_learning = flatcat.WeightLearning(
-            args.weightlearn_iters_first,
-            args.weightlearn_evals_first,
-            args.weightlearn_depth_first,
-            args.weightlearn_iters,
-            args.weightlearn_evals,
-            args.weightlearn_depth,
-            args.weightlearn_cuethresh,
-            develannots,
-            shared_model,
-            io,
-            args.checkpointfile,
-            heuristic)
-        for param in args.weightlearn_params.split(','):
-            if param == 'corpusweight':
-                weight_learning.add_corpus_weight()
-            elif param == 'annotationweight':
-                if shared_model.model._supervised:
-                    weight_learning.add_annotation_weight()
-        shared_model.model.generate_focus_samples(
-            args.weightlearn_sample_sets,
-            args.weightlearn_sample_size)
-
-        _logger.info('Performing initial weight learning')
-        must_train = weight_learning.optimize(first=True)
-
-        shared_model.model.training_focus = None
-    else:
-        weight_learning = None
+#     if args.develfile is not None:
+#         develannots = io.read_annotations_file(args.develfile)
+#     else:
+#         develannots = None
+# 
+#     if develannots is not None:
+#         weight_learning = flatcat.WeightLearning(
+#             args.weightlearn_iters_first,
+#             args.weightlearn_evals_first,
+#             args.weightlearn_depth_first,
+#             args.weightlearn_iters,
+#             args.weightlearn_evals,
+#             args.weightlearn_depth,
+#             args.weightlearn_cuethresh,
+#             develannots,
+#             shared_model,
+#             io,
+#             args.checkpointfile,
+#             heuristic)
+#         for param in args.weightlearn_params.split(','):
+#             if param == 'corpusweight':
+#                 weight_learning.add_corpus_weight()
+#             elif param == 'annotationweight':
+#                 if shared_model.model._supervised:
+#                     weight_learning.add_annotation_weight()
+#         shared_model.model.generate_focus_samples(
+#             args.weightlearn_sample_sets,
+#             args.weightlearn_sample_size)
+#
+#         _logger.info('Performing initial weight learning')
+#         must_train = weight_learning.optimize(first=True)
+#
+#         shared_model.model.training_focus = None
+#     else:
+#         weight_learning = None
 
     # Train model, if there is new data to train on
     if args.trainmode == 'none':
@@ -645,11 +640,12 @@ def flatcat_main(args):
                                      annotation_prefix='<',
                                      construction_sep=' ',
                                      analysis_sep=',')
-        shared_model.model.train_online(data, count_modifier=dampfunc,
+        model.train_online(data, count_modifier=dampfunc,
                            epoch_interval=args.epochinterval,
                            max_epochs=(args.max_iterations * args.max_epochs))
     if args.trainmode in ('batch', 'online+batch'):
-        shared_model.model.batch_parameters(
+        ts = time.time()
+        model.train_batch(
                         min_iteration_cost_gain=args.min_iteration_cost_gain,
                         min_epoch_cost_gain=args.min_epoch_cost_gain,
                         max_epochs=args.max_epochs,
@@ -658,9 +654,7 @@ def flatcat_main(args):
                         max_resegment_iterations=args.max_resegment_iterations,
                         max_shift_distance=args.max_shift_distance,
                         min_shift_remainder=args.min_shift_remainder)
-        ts = time.time()
-        flatcat.train_batch(shared_model, weight_learning)
-        _logger.info('Final cost: {}'.format(shared_model.model.get_cost()))
+        _logger.info('Final cost: {}'.format(model.get_cost()))
         te = time.time()
         _logger.info('Training time: {:.3f}s'.format(te - ts))
 
@@ -669,18 +663,18 @@ def flatcat_main(args):
     if args.saveparamsfile is not None:
         _logger.info("Saving hyperparameters...")
         io.write_parameter_file(args.saveparamsfile,
-                                shared_model.model.get_params())
+                                model.get_params())
         _logger.info("Done.")
 
     # Save analysis
     if args.saveanalysisfile is not None:
         _logger.info("Saving model as analysis...")
         io.write_segmentation_file(args.saveanalysisfile,
-                                   shared_model.model.segmentations)
+                                   model.segmentations)
         _logger.info("Done.")
 
     # Save annotations
-    if shared_model.model._supervised and args.saveannotsfile is not None:
+    if model._supervised and args.saveannotsfile is not None:
         _logger.info("Saving annotations...")
 
         def annotation_func(item):
@@ -690,22 +684,22 @@ def flatcat_main(args):
         io.write_formatted_file(
             args.saveannotsfile,
             '{compound}\t{analysis}\n',
-            shared_model.model.annotations.items(),
+            model.annotations.items(),
             annotation_func,
-            output_tags=shared_model.model._annotations_tagged,
+            output_tags=model._annotations_tagged,
             construction_sep=' ')
         _logger.info("Done.")
 
     # Save binary model
     if args.savepicklefile is not None:
         _logger.info("Saving binary model...")
-        shared_model.model.toggle_callbacks(None)
+        model.toggle_callbacks(None)
         memlog('Before pickle')
-        shared_model.model.pre_save()
-        io.write_binary_model_file(args.savepicklefile, shared_model.model)
+        model.pre_save()
+        io.write_binary_model_file(args.savepicklefile, model)
         memlog('After pickle')
         if len(args.testfiles) > 0:
-            shared_model.model.post_load()
+            model.post_load()
             memlog('After postload')
         _logger.info("Done.")
 
@@ -734,10 +728,10 @@ def flatcat_main(args):
 
         def segment_func(item):
             (count, compound, atoms) = item
-            (constructions, logp) = shared_model.model.viterbi_segment(atoms)
+            (constructions, logp) = model.viterbi_segment(atoms)
             if heuristic is not None:
                 constructions = heuristic.remove_nonmorphemes(
-                                    constructions, shared_model.model)
+                                    constructions, model)
             return (count, compound, [constructions], logp)
 
         io.write_formatted_file(

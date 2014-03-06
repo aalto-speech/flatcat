@@ -46,67 +46,6 @@ Annotation = collections.namedtuple('Annotation',
                                     ['alternatives', 'current', 'i_unannot'])
 
 
-def train_batch(smodel, weight_learning=None):
-    """Perform batch training on the given model.
-
-    This is a function instead of a method of FlatcatModel,
-    because of the probe weight learning,
-    which reloads models from pickles.
-    This procedure makes it necessary to move the control flow
-    outside the object, to allow it to be garbage collected.
-    """
-    if not isinstance(smodel, SharedModel):
-        if weight_learning is not None:
-            _logger.warning('train_batch called directly with model ' +
-                'instead of wrapped in SharedModel, ' +
-                'and doing weight learning. ' +
-                'This WILL waste memory.')
-        smodel = SharedModel(smodel)
-    msg = 'Must initialize model and tag corpus before training'
-    assert not smodel.model._corpus_untagged, msg
-    smodel.model._epoch_update(no_increment=True)
-    previous_cost = smodel.model.get_cost()
-    wl_force_another = False
-    u_force_another = False
-    for epoch in range(smodel.model._max_epochs):
-        smodel.model._train_epoch()
-
-        cost = smodel.model.get_cost()
-        cost_diff = cost - previous_cost
-        limit = smodel.model._cost_convergence_limit(
-            smodel.model._min_epoch_cost_gain)
-
-        if (weight_learning is not None and
-                epoch < smodel.model._max_epochs - 1):
-            wl_force_another = weight_learning.optimize()
-        u_force_another = smodel.model._epoch_update()
-        post_update_cost = smodel.model.get_cost()
-        if post_update_cost != cost:
-            _logger.info('Cost from {} to {} in epoch update'.format(
-                cost, post_update_cost))
-            cost = post_update_cost
-
-        converged = ((not wl_force_another) and
-                     (not u_force_another) and
-                     (-cost_diff <= limit))
-        smodel.model._display_cost(cost_diff, limit, 'epoch',
-                        epoch, smodel.model._max_epochs, converged)
-        if converged:
-            _logger.info('{:24s} Cost: {}'.format(
-                'final epoch.', cost))
-            break
-        previous_cost = cost
-
-
-class SharedModel(object):
-    """A mutable holder for model objects that may be replaced
-    by loading from disk. If no references to the actual model
-    object are kept, it can be garbage collected.
-    """
-    def __init__(self, model):
-        self.model = model
-
-
 class FlatcatModel(object):
     """Morfessor FlatCat model class."""
 
@@ -212,6 +151,9 @@ class FlatcatModel(object):
         self._use_skips = use_skips  # Random skips for frequent constructions
         self._skipcounter = collections.Counter()
 
+        # Variables for weight learning
+        self._weight_learning = None
+
         # Logging variables
         self._cost_field_width = 9
         self._cost_field_precision = 4
@@ -219,7 +161,7 @@ class FlatcatModel(object):
     ### Primary public methods
     #
     def add_corpus_data(self, segmentations, freqthreshold=1,
-                        count_modifier=None):
+                        count_modifier=None, extend=False):
         """Adds the given segmentations (with counts) to the corpus data.
         The new data can be either untagged or tagged.
 
@@ -238,9 +180,11 @@ class FlatcatModel(object):
                              given times in the corpus (default 1).
             count_modifier -- function for adjusting the counts of each
                               word.
+            extend -- FIXME
         """
         assert isinstance(freqthreshold, (int, float))
         i = len(self.segmentations)
+        corpus_was_untagged = self._corpus_untagged
         for row in segmentations:
             count, analysis = row
             if count < freqthreshold:
@@ -265,6 +209,9 @@ class FlatcatModel(object):
                 self.morph_backlinks[morph].add(i)
             i += 1
             self._corpus_coding.boundaries += count
+        if extend and not corpus_was_untagged:
+            self.viterbi_tag_corpus()
+            self.reestimate_probabilities()
 
     def add_annotations(self, annotations, annotatedcorpusweight=None):
         """Adds data to the annotated corpus."""
@@ -325,15 +272,16 @@ class FlatcatModel(object):
         self._epoch_number = 1
         return must_train
 
-    def batch_parameters(self, min_iteration_cost_gain=0.0025,
-                         min_epoch_cost_gain=0.005,
-                         max_epochs=5,
-                         max_iterations_first=1,
-                         max_iterations=1,
-                         max_resegment_iterations=1,
-                         max_shift_distance=2,
-                         min_shift_remainder=2):
-        """Set parameters for batch FlatCat training of the model."""
+    def train_batch(self,
+                    min_iteration_cost_gain=0.0025,
+                    min_epoch_cost_gain=0.005,
+                    max_epochs=5,
+                    max_iterations_first=1,
+                    max_iterations=1,
+                    max_resegment_iterations=1,
+                    max_shift_distance=2,
+                    min_shift_remainder=2):
+        """Perform batch training."""
         self._min_iteration_cost_gain = min_iteration_cost_gain
         self._min_epoch_cost_gain = min_epoch_cost_gain
         self._max_epochs = max_epochs
@@ -344,9 +292,40 @@ class FlatcatModel(object):
         self._min_shift_remainder = min_shift_remainder
         self._online = False
 
-    def train_batch(self):
-        """Convenience method for batch training without weight learning."""
-        train_batch(self)
+        msg = 'Must initialize model and tag corpus before training'
+        assert not self._corpus_untagged, msg
+        self._epoch_update(no_increment=True)
+        previous_cost = self.get_cost()
+        wl_force_another = False
+        u_force_another = False
+        for epoch in range(self._max_epochs):
+            self._train_epoch()
+
+            cost = self.get_cost()
+            cost_diff = cost - previous_cost
+            limit = self._cost_convergence_limit(
+                self._min_epoch_cost_gain)
+
+            if (self._weight_learning is not None and
+                    epoch < self._max_epochs - 1):
+                wl_force_another = self._weight_learning.optimize()
+            u_force_another = self._epoch_update()
+            post_update_cost = self.get_cost()
+            if post_update_cost != cost:
+                _logger.info('Cost from {} to {} in epoch update'.format(
+                    cost, post_update_cost))
+                cost = post_update_cost
+
+            converged = ((not wl_force_another) and
+                        (not u_force_another) and
+                        (-cost_diff <= limit))
+            self._display_cost(cost_diff, limit, 'epoch',
+                            epoch, self._max_epochs, converged)
+            if converged:
+                _logger.info('{:24s} Cost: {}'.format(
+                    'final epoch.', cost))
+                break
+            previous_cost = cost
 
     def train_online(self, data, count_modifier=None, epoch_interval=10000,
                      max_epochs=None, result_callback=None):
@@ -2371,240 +2350,6 @@ class FlatcatAnnotatedCorpusEncoding(object):
             return
         self.logemissionsum += count * self.corpus_coding.log_emissionprob(
             category, morph, extrazero=True)
-
-
-class WeightLearning(object):
-    """Corpus and annotation weight learning.
-    Decisions are based on comparisons against a development set
-    with a gold standard segmentation.
-
-    The effects of a change in corpus weight are estimated by performing
-    a small amount of training, limiting the local search to randomly
-    chosen subsets of the corpus, and then using the partially trained
-    model to segment the development set.
-
-    The direction of change for the corpus weight is chosen in an attempt
-    to balance precision and recall.
-    The decision to accept or reject the proposed corpus weight is done
-    by comparing the development set f-measures of the models
-    partially trained with different corpus weights.
-
-    Arguments:  FIXME
-        smodel -- Wrapped initial model to perform weight learning on.
-                  Do not keep references to the model object within
-                  the wrapper, as it will not be updated and keeping
-                  references prevents it from being garbage collected.
-                  Instead carry on using the returned model.
-    """
-    def __init__(self,
-                 iters_first, evals_per_vector_first, depth_first,
-                 iters, evals_per_vector, depth,
-                 cue_rejection_thresh,
-                 dev_annotations,
-                 smodel, io, checkpointfile,
-                 heuristic=None):
-        self.iters_first = iters_first
-        self.evals_first = evals_per_vector_first
-        self.depth_first = depth_first
-        self.iters = iters
-        self.evals = evals_per_vector
-        self.depth = depth
-        self.cue_rejection_thresh = cue_rejection_thresh
-        self.dev_annotations = dev_annotations
-        self.smodel = smodel
-        self.io = io
-        self.checkpointfile = checkpointfile
-        self.heuristic = heuristic
-        self.threshold = None
-
-        self.getters = []
-        self.setters = []
-        self.cues = []
-        self.dimensions = []
-
-        self.depth_current = depth_first
-
-        self.initial = None
-        self.num_sets = None
-
-    def add_corpus_weight(self, threshold=0.01):
-        self.threshold = threshold
-        self.getters.append(lambda model: model.get_corpus_coding_weight())
-        self.setters.append(
-            lambda model, value: model.set_corpus_coding_weight(value))
-        self.cues.append(lambda f, d, pre, rec: d)
-        self.dimensions.append('Corpus weight (alpha)')
-
-    def add_annotation_weight(self):
-        msg = 'Cannot learn annotation weight in unsupervised mode'
-        assert self.smodel.model._supervised, msg
-        self.getters.append(lambda model: model._annot_coding.weight)
-
-        def annotation_weight_setter(model, value):
-            model._annot_coding.weight = value
-
-        self.setters.append(annotation_weight_setter)
-        self.cues.append(lambda f, d, pre, rec: None)
-        self.dimensions.append('Annotation weight (beta)')
-
-    #def add_ppl_thresh(self):
-    #    self.getters.append(
-    #    self.setters.append(
-    #    self.cues.append(
-    #    self.dimensions.append('Perplexity threshold')
-
-    def optimize(self, first=True):
-        """Perform weight learning on the given model.
-        Returns:
-            force_another -- If the optimal weight changed, at least one
-                             more epoch of learning should be performed,
-                             even though the convergence criteria
-                             were reached.
-        Note:
-            smodel.model -- A new model with the learned corpus weight.
-                            Any segmentation changes made during the learning
-                            have been reverted.
-        """
-        if first:
-            max_iters = self.iters_first
-            evals_per_vector = self.evals_first
-            self.depth_current = self.depth_first
-        else:
-            max_iters = self.iters
-            evals_per_vector = self.evals
-            self.depth_current = self.depth
-
-        if self.smodel.model.training_focus_sets is not None:
-            self.num_sets = len(self.smodel.model.training_focus_sets)
-        else:
-            self.num_sets = 1
-
-        callbacks = self._make_checkpoint()
-        self.initial = [getter(self.smodel.model) for getter in self.getters]
-        scale = 1. / min(1, self.smodel.model._epoch_number)
-
-        majority_vote = optimization.MajorityVote(self.evaluate_parameters,
-                                                  self.num_sets).evaluate
-        point = optimization.modified_powells(majority_vote,
-                                              self.deproject(self.initial),
-                                              max_iters,
-                                              evals_per_vector,
-                                              scale,
-                                              self.cue_rejection_thresh,
-                                              cb_vec=self._cb_vec,
-                                              cb_eval=self._cb_eval,
-                                              cb_acc=self._cb_acc,
-                                              cb_rej=self._cb_rej)
-        point = self.project(point)
-
-        # Start normal training from the checkpoint using the optimized weight
-        self._load_checkpoint()
-        self.smodel.model.training_focus = None
-        self.smodel.model.toggle_callbacks(callbacks)
-        for (i, val) in enumerate(point):
-            self.setters[i](self.smodel.model, val)
-        _logger.info('WL Learned weights: {}'.format(point))
-
-        return point != self.initial
-
-    def project(self, point):
-        return [(math.exp(a) * ia)
-                for (a, ia) in zip(point, self.initial)]
-
-    def deproject(self, point):
-        return [(math.log(a) - math.log(ia))
-                for (a, ia) in zip(point, self.initial)]
-
-    def evaluate_parameters(self, point, focus):
-        point = self.project(point)
-        self._load_checkpoint()
-        for (i, val) in enumerate(point):
-            self.setters[i](self.smodel.model, val)
-        self.smodel.model.set_focus_sample(focus)
-        for _ in range(self.depth_current):
-            self.smodel.model.weightlearn_probe()
-        (f, d, pre, rec) = self._evaluate()
-        direction_cues = [cue(f, d, pre, rec)
-                          for cue in self.cues]
-        return (f, direction_cues)
-
-    def _evaluate(self):
-        model = self.smodel.model
-        tmp = self.dev_annotations.items()
-        wlist, annotations = zip(*tmp)
-
-        if self.heuristic is None:
-            heuristic_func = lambda x: x
-        else:
-            heuristic_func = lambda x: self.heuristic.remove_nonmorphemes(x,
-                                                                      model)
-
-        segments = [heuristic_func(model.viterbi_segment(w)[0])
-                    for w in wlist]
-        pre, rec, f = baseline.AnnotationsModelUpdate._bpr_evaluation(
-                         [[x] for x in segments], annotations)
-        if abs(pre - rec) < self.threshold:
-            direction = 0
-        elif rec > pre:
-            direction = 1
-        else:
-            direction = -1
-        return (f, direction, pre, rec)
-
-    def _make_checkpoint(self):
-        callbacks = self.smodel.model.toggle_callbacks(None)
-        self.smodel.model._epoch_update(no_increment=True)
-        self.smodel.model.pre_save()
-        self.io.write_binary_model_file(self.checkpointfile, self.smodel.model)
-        return callbacks
-
-    def _load_checkpoint(self):
-        self.smodel.model = self.io.read_binary_model_file(self.checkpointfile)
-        self.smodel.model.post_load()
-
-    def _cb_vec(self, iteration, tot_iters, vec_num, tot_vecs,
-                vector, point, best_f, cues=None):
-        if iteration == 'final':
-            _logger.info(
-                'WL final iter. Searching along vector ({})'.format(vector))
-        else:
-            _logger.info(
-                'WL iter {}/{}. Searching along vector {}/{} ({})'.format(
-                    iteration + 1, tot_iters, vec_num + 1, tot_vecs, vector))
-        self._log_point('Current best weights', point, best_f, cues)
-
-    def _cb_eval(self, eval_num, tot_evals, point):
-        if eval_num == 'initial':
-            label = 'WL evaluating initial'
-        else:
-            label = 'WL step {}/{}. Evaluating'.format(eval_num + 1, tot_evals)
-        self._log_point(label, point)
-
-    def _cb_acc(self, eval_num, tot_evals, point, f, cues):
-        if eval_num == 'initial':
-            label = 'WL initial point'
-        else:
-            label = 'WL accepted step {}/{}'.format(eval_num + 1, tot_evals)
-        self._log_point(label, point, f, cues)
-
-    def _cb_rej(self, eval_num, tot_evals, point, f, best, best_f, best_cues):
-        label = 'WL rejected step {}/{}'.format(eval_num + 1, tot_evals)
-        self._log_point(label, point, f)
-        self._log_point('WL reverting to', best, best_f, best_cues)
-
-    def _log_point(self, label, point, f=None, cues=None):
-        if f is None:
-            _logger.info('{} parameters:'.format(label))
-        else:
-            _logger.info('{}. F-measure {}. Parameters:'.format(label, f))
-        point = self.project(point)
-        if cues is None:
-            cues = [None] * len(point)
-        for (dim, val, cue) in zip(self.dimensions, point, cues):
-            if cue is None:
-                _logger.info('{}: {}'.format(dim, val))
-            else:
-                _logger.info('{}: {}. Direction cue: {}'.format(dim, val, cue))
 
 
 class ChangeCounts(object):

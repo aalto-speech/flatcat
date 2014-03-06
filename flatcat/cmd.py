@@ -89,6 +89,7 @@ Simple usage examples (training and testing):
     add_training_arguments(groups)
     add_semisupervised_arguments(groups)
     #add_weightlearning_arguments(groups)
+    add_diagnostic_arguments(groups)
     add_other_arguments(groups)
     return parser
 
@@ -180,7 +181,7 @@ def add_common_io_arguments(argument_groups):
             type=str, default=' ', metavar='<str>',
             help='Construction separator for analysis in --output file '
                  '(default: "%(default)s")')
-    add_arg('--output-tags', dest='test_output_tags', default=False,
+    add_arg('--output-categories', dest='test_output_tags', default=False,
             action='store_true',
             help='Output category tags in test data. '
                  'Default is to output only the morphs')
@@ -426,6 +427,18 @@ def add_weightlearning_arguments(argument_groups):
                  '(default %(default)s); ')
 
 
+def add_diagnostic_arguments(argument_groups):
+    # Options for diagnostics
+    add_arg = argument_groups.get('diagnostic options')
+    add_arg('--statsfile', dest='stats_file', metavar='<file>',
+            help='Collect iteration statistics and pickle them '
+                 'into this file.')
+    add_arg('--stats-annotations', dest='statsannotfile', default=None,
+            metavar='<file>',
+            help='Load annotated data for f-measure diagnostics. '
+                 'Useful for analyzing convergence properties.')
+
+
 def add_other_arguments(argument_groups):
     # Options for logging
     add_arg = argument_groups.get('logging options')
@@ -440,13 +453,6 @@ def add_other_arguments(argument_groups):
     add_arg('--progressbar', dest='progress', default=False,
             action='store_true',
             help='Force the progressbar to be displayed.')
-    add_arg('--statsfile', dest='stats_file', metavar='<file>',
-            help='Collect iteration statistics and pickle them '
-                 'into this file.')
-    add_arg('--stats-annotations', dest='statsannotfile', default=None,
-            metavar='<file>',
-            help='Load annotated data for f-measure diagnostics. '
-                 'Useful for analyzing convergence properties.')
 
     add_arg = argument_groups.get('other options')
     add_arg('-h', '--help', action='help',
@@ -777,7 +783,7 @@ def add_reformatting_arguments(argument_groups):
                  'To perform multiple mappings simultaneously, '
                  'specify the option several times. '
                  'Default: do not map any categories.')
-    add_arg('--strip-tags', dest='strip_tags', default=False,
+    add_arg('--strip-categories', dest='strip_tags', default=False,
             action='store_true',
             help='If the input contains category tags, '
                  'omit them from the output. '
@@ -809,7 +815,7 @@ Usage examples:
 
   Removal of short affixes from tagged segmentation:
     %(prog)s segmentation.tagged segmentation.txt \\
-        --filter-categories PRE,SUF --strip-tags
+        --filter-categories PRE,SUF --strip-categories
 
   Convert the first alternative annotation to analysis format:
     %(prog)s annotations.txt analysis.txt -i annotations --first
@@ -817,7 +823,7 @@ Usage examples:
   Convert analysis into annotation format:
     %(prog)s analysis.gz annotations.gz -o annotations
 
-  Replace all afffix taggings with stems:
+  Replace all affix tags with stem tags:
     %(prog)s analysis.gz modified.gz --map-categories PRE,STM \\
         --map-categories SUF,STM
 """,
@@ -826,4 +832,9 @@ Usage examples:
     groups = ArgumentGroups(parser)
     add_common_io_arguments(groups)
     add_reformatting_arguments(groups)
+    add_other_arguments(groups)
     return parser
+
+
+def reformat_main(args):
+    pass

@@ -1,5 +1,6 @@
 from __future__ import unicode_literals
 
+import collections
 import logging
 import math
 import random
@@ -13,7 +14,7 @@ from .categorizationscheme import MorphUsageProperties, HeuristicPostprocessor
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
 from .io import FlatcatIO
-from .utils import _generator_progress, LOGPROB_ZERO, memlog
+from .utils import _generator_progress, LOGPROB_ZERO, memlog, map_category
 
 PY3 = sys.version_info.major == 3
 
@@ -845,6 +846,10 @@ Usage examples:
     return parser
 
 
+IntermediaryFormat = collections.namedtuple('IntermediaryFormat',
+    ['count', 'compound', 'alternatives'])
+
+
 def reformat_main(args):
 
     inio = FlatcatIO(encoding=args.encoding,
@@ -859,22 +864,41 @@ def reformat_main(args):
                       analysis_separator=args.analysisseparator,
                       category_separator=args.outputtagseparator)
 
-    def analysis_to_annotation(data):
-        pass
+    def read_analysis(file_name):
+        for (count, analysis) in inio.read_segmentation_file(file_name):
+            yield IntermediaryFormat(count,
+                                     ''.join([x.morph for x in analysis]),
+                                     [analysis])
 
-    def annotation_to_analysis(data):
-        pass
+    def read_annotation(file_name):
+        annotations = inio.read_annotations_file(file_name)
+        for (compound, alternatives) in sorted(annotations.items()):
+            if args.first_only:
+                alternatives = alternatives[:1]
+            yield IntermediaryFormat(1, compound, alternatives)
 
-    def analysis_to_custom(data):
-        pass
+    def map_categories(data, from_cat, to_cat):
+        for item in data:
+            yield IntermediaryFormat(
+                item.count,
+                item.compound,
+                [map_category(analysis, from_cat, to_cat)
+                 for analysis in item.alternatives])
 
-    def annotation_to_custom(data):
-        pass
+    def custom_conversion(item):
+        return (item.count, item.compound, item.alternatives, 0)
 
     def custom_format(file_name, data, construction_sep):
-        pass
+        outio.write_formatted_file(
+            file_name,
+            args.outputformat,
+            data,
+            custom_conversion,
+            output_tags=(is_tagged and not args.strip_tags),
+            filter_tags=args.filter_categories,
+            filter_len=args.filter_len)
 
-    readers = {'analysis': inio.read_segmentation_file,
+    readers = {'analysis': read_analysis,
                'annotation': inio.read_annotations_file}
     writers = {'analysis': outio.write_segmentation_file,
                'annotation': outio.write_annotations_file,
@@ -888,6 +912,7 @@ def reformat_main(args):
             args.outfiletype))
 
     data = readers[args.infiletype](args.input)
-    if args.outfiletype != args.infiletype:
-        data = converter[(args.infiletype, args.outfiletype)](data)
+    for mapping in args.map_categories:
+        (from_cat, to_cat) = mapping.split(',')
+        data = map_categories(data, from_cat, to_cat)
     writers[args.outfiletype](args.output, args.outputconseparator)

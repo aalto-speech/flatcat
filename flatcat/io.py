@@ -203,6 +203,17 @@ class FlatcatIO(morfessor.MorfessorIO):
                 (count, compound, alternatives, logp) = data_func(item)
 
                 analysis = []
+                if len(alternatives) == 1:
+                    constructions = alternatives[0]
+                    num_morphs = len(constructions)
+                    num_nonmorphemes = sum(1 for cmorph in constructions
+                                           if cmorph.category == 'ZZZ')
+                    num_letters = sum(len(cmorph.morph)
+                                      for cmorph in constructions)
+                else:
+                    num_morphs = None
+                    num_nonmorphemes = None
+                    num_letters = None
                 for constructions in alternatives:
                     if filter_tags is not None:
                         constructions = [cmorph for cmorph in constructions
@@ -216,7 +227,10 @@ class FlatcatIO(morfessor.MorfessorIO):
                                 analysis=analysis,
                                 compound=compound,
                                 count=count,
-                                logprob=logp))
+                                logprob=logp,
+                                num_morphs=num_morphs,
+                                num_nonmorphemes=num_nonmorphemes,
+                                num_letters=num_letters))
 
     def _read_annotation(self, line, construction_sep, analysis_sep):
         if analysis_sep is not None:

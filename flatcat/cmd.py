@@ -158,9 +158,10 @@ def add_common_io_arguments(argument_groups):
     add_arg('--compound-separator', dest='cseparator', type=str, default='\s+',
             metavar='<regexp>',
             help='Compound separator regexp (default "%(default)s").')
+    # FIXME: different defaults needed for diffent situations?
     add_arg('--construction-separator', dest='consseparator', type=str,
             default=' + ', metavar='<string>',
-            help='Compound separator string (default "%(default)s").')
+            help='Construction separator string (default "%(default)s").')
     add_arg('--analysis-separator', dest='analysisseparator', type=str,
             default=',', metavar='<regexp>',
             help='Separator for different analyses in an annotation file. Use '
@@ -772,13 +773,13 @@ def add_reformatting_arguments(argument_groups):
     add_arg('-i', '--input-filetype', dest='infiletype',
             default='analysis', metavar='<format>',
             help='Format of input data. '
-                 '("analysis", "annotation") '
+                 '("analysis", "annotations", "test") '
                  '(default: %(default)s)')
     add_arg('-o', '--output-filetype', dest='outfiletype',
             default='analysis', metavar='<format>',
             help='Format of output data. '
                  'Custom applies --output-format. '
-                 '("analysis", "annotation", "custom") '
+                 '("analysis", "annotations", "test", "custom") '
                  '(default: %(default)s)')
 
     # Output post-processing
@@ -820,9 +821,9 @@ Command-line arguments:
         epilog="""
 Usage examples:
 
-  Convert CatMAP output to FlatCat format:
+  Convert CatMAP test output to FlatCat test output format:
     %(prog)s catmap_segmentation.final.gz analysis.txt \\
-        --construction-separator " + "
+        --strip-categories
 
   Removal of short affixes from tagged segmentation:
     %(prog)s segmentation.tagged segmentation.txt \\
@@ -854,6 +855,7 @@ Usage examples:
 IntermediaryFormat = collections.namedtuple('IntermediaryFormat',
     ['count', 'compound', 'alternatives'])
 
+PseudoAnnotation = collections.namedtuple('PseudoAnnotation', ['alternatives'])
 
 def reformat_main(args):
     configure_logging(args)
@@ -876,6 +878,7 @@ def reformat_main(args):
                                      ''.join([x.morph for x in analysis]),
                                      [analysis])
 
+    # This reader also works for test data
     def read_annotation(file_name):
         annotations = inio.read_annotations_file(file_name)
         for (compound, alternatives) in sorted(annotations.items()):
@@ -907,14 +910,28 @@ def reformat_main(args):
         outio.write_segmentation_file(
             file_name,
             ((item.count, item.alternatives[0])
-             for item in data))
+             for item in data),
+            output_tags=(not args.strip_tags))
 
     def write_annotation(file_name, data):
-        data = {item.compound: item.alternatives
+        data = {item.compound: PseudoAnnotation(item.alternatives)
                 for item in data}
         outio.write_annotations_file(
             file_name, data,
-            construction_sep=args.outputconseparator)
+            construction_sep=args.outputconseparator,
+            output_tags=(not args.strip_tags))
+
+    def write_test(file_name, data):
+        if args.infiletype == 'annotations' and not args.first_only:
+            data = separate_analyses(data)
+        outio.write_formatted_file(
+            file_name,
+            '{compound}\t{analysis}\n',
+            data,
+            custom_conversion,
+            output_tags=(not args.strip_tags),
+            filter_tags=args.filter_categories,
+            filter_len=args.filter_len)
 
     def write_custom(file_name, data):
         outio.write_formatted_file(
@@ -927,17 +944,21 @@ def reformat_main(args):
             filter_len=args.filter_len)
 
     readers = {'analysis': read_analysis,
-               'annotation': inio.read_annotations_file}
+               'annotations': read_annotation,
+               'test': read_analysis}
     writers = {'analysis': write_analysis,
-               'annotation': outio.write_annotations_file,
+               'annotations': write_annotation,
+               'test': write_test,
                'custom': write_custom}
 
     if args.infiletype not in readers:
-        raise ArgumentException('Unknown input format "{}"'.format(
-            args.infiletype))
+        raise ArgumentException(
+            'Unknown input format "{}". Valid formats are {}.'.format(
+            args.infiletype, sorted(readers.keys())))
     if args.outfiletype not in readers:
-        raise ArgumentException('Unknown output format "{}"'.format(
-            args.outfiletype))
+        raise ArgumentException(
+            'Unknown output format "{}". Valid formats are {}.'.format(
+            args.outfiletype, sorted(writers.keys())))
 
     data = readers[args.infiletype](args.input)
     data = _generator_progress(data)

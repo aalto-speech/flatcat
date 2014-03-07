@@ -56,7 +56,8 @@ class FlatcatIO(morfessor.MorfessorIO):
         self.category_separator = category_separator
 
     def write_segmentation_file(self, file_name, segmentations,
-                                construction_sep=None):
+                                construction_sep=None,
+                                output_tags=True):
         """Write segmentation file.
 
         File format (single line, wrapped only for pep8):
@@ -67,15 +68,14 @@ class FlatcatIO(morfessor.MorfessorIO):
                             else self.construction_separator)
 
         _logger.info("Saving analysis to '%s'..." % file_name)
+        output_morph = _make_morph_formatter(self.category_separator, output_tags)
         with self._open_text_file_write(file_name) as file_obj:
             d = datetime.datetime.now().replace(microsecond=0)
             file_obj.write('# Output from Morfessor FlatCat {}, {!s}\n'.format(
                 get_version(), d))
             for count, morphs in segmentations:
                 s = construction_sep.join(
-                    ['{}{}{}'.format(m.morph, self.category_separator,
-                                      m.category)
-                     for m in morphs])
+                    [output_morph(m) for m in morphs])
                 file_obj.write('{} {}\n'.format(count, s))
         _logger.info("Done.")
 
@@ -188,16 +188,7 @@ class FlatcatIO(morfessor.MorfessorIO):
         category_sep = (category_sep if category_sep
                         else self.category_separator)
 
-        if output_tags:
-            def _output_morph(cmorph):
-                if cmorph.category is None:
-                    return cmorph.morph
-                return '{}{}{}'.format(cmorph.morph,
-                                       category_sep,
-                                       cmorph.category)
-        else:
-            def _output_morph(cmorph):
-                return cmorph.morph
+        output_morph = _make_morph_formatter(category_sep, output_tags)
 
         with self._open_text_file_write(file_name) as fobj:
             for item in _generator_progress(data):
@@ -212,7 +203,7 @@ class FlatcatIO(morfessor.MorfessorIO):
                         constructions = [cmorph for cmorph in constructions
                                         if cmorph.category not in filter_tags
                                             or len(cmorph) > filter_len]
-                    constructions = [_output_morph(cmorph)
+                    constructions = [output_morph(cmorph)
                                      for cmorph in constructions]
                     analysis.append(construction_sep.join(constructions))
                 analysis = analysis_sep.join(analysis)
@@ -249,3 +240,18 @@ class FlatcatIO(morfessor.MorfessorIO):
                 raise InvalidCategoryError(category)
         cmorph = CategorizedMorph(morph, category)
         return cmorph
+
+
+def _make_morph_formatter(category_sep, output_tags):
+    if output_tags:
+        def output_morph(cmorph):
+            if cmorph.category is None:
+                return cmorph.morph
+            return '{}{}{}'.format(cmorph.morph,
+                                    category_sep,
+                                    cmorph.category)
+    else:
+        def output_morph(cmorph):
+            return cmorph.morph
+    return output_morph
+

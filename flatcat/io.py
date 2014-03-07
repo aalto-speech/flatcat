@@ -55,13 +55,16 @@ class FlatcatIO(morfessor.MorfessorIO):
         self.analysis_separator = analysis_separator
         self.category_separator = category_separator
 
-    def write_segmentation_file(self, file_name, segmentations):
+    def write_segmentation_file(self, file_name, segmentations,
+                                construction_sep=None):
         """Write segmentation file.
 
         File format (single line, wrapped only for pep8):
         <count> <construction1><cat_sep><category1><cons_sep>...
                 <constructionN><cat_sep><categoryN>
         """
+        construction_sep = (construction_sep if construction_sep
+                            else self.construction_separator)
 
         _logger.info("Saving analysis to '%s'..." % file_name)
         with self._open_text_file_write(file_name) as file_obj:
@@ -69,7 +72,7 @@ class FlatcatIO(morfessor.MorfessorIO):
             file_obj.write('# Output from Morfessor FlatCat {}, {!s}\n'.format(
                 get_version(), d))
             for count, morphs in segmentations:
-                s = self.construction_separator.join(
+                s = construction_sep.join(
                     ['{}{}{}'.format(m.morph, self.category_separator,
                                       m.category)
                      for m in morphs])

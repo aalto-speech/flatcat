@@ -158,8 +158,8 @@ def add_common_io_arguments(argument_groups):
             metavar='<regexp>',
             help='Compound separator regexp (default "%(default)s").')
     add_arg('--construction-separator', dest='consseparator', type=str,
-            default=' + ', metavar='<regexp>',
-            help='Compound separator regexp (default "%(default)s").')
+            default=' + ', metavar='<string>',
+            help='Compound separator string (default "%(default)s").')
     add_arg('--analysis-separator', dest='analysisseparator', type=str,
             default=',', metavar='<regexp>',
             help='Separator for different analyses in an annotation file. Use '
@@ -177,9 +177,13 @@ def add_common_io_arguments(argument_groups):
                  '{count} = count of the word (currently always 1), and '
                  '{logprob} = log-probability of the analysis. Valid escape '
                  'sequences are "\\n" (newline) and "\\t" (tabular)')
-    add_arg('--output-format-separator', dest='outputformatseparator',
+    add_arg('--output-construction-separator', dest='outputconseparator',
             type=str, default=' ', metavar='<str>',
             help='Construction separator for analysis in --output file '
+                 '(default: "%(default)s")')
+    add_arg('--output-category-separator', dest='outputtagseparator',
+            type=str, default='/', metavar='<str>',
+            help='Category tag separator for analysis in --output file '
                  '(default: "%(default)s")')
     add_arg('--output-categories', dest='test_output_tags', default=False,
             action='store_true',
@@ -712,10 +716,12 @@ def flatcat_main(args):
     if len(args.testfiles) > 0:
         _logger.info("Segmenting test data...")
         outformat = args.outputformat
-        csep = args.outputformatseparator
+        csep = args.outputconseparator
+        tsep = args.outputtagseparator
         if not PY3:
             outformat = unicode(outformat)
             csep = unicode(csep)
+            tsep = unicode(tsep)
         outformat = outformat.replace(r"\n", "\n")
         outformat = outformat.replace(r"\t", "\t")
 
@@ -747,6 +753,7 @@ def flatcat_main(args):
             newline_func=newline_func,
             output_tags=args.test_output_tags,
             construction_sep=csep,
+            category_sep=tsep,
             filter_tags=filter_tags,
             filter_len=args.filter_len)
 
@@ -761,28 +768,26 @@ def add_reformatting_arguments(argument_groups):
     # File format options
     add_arg = argument_groups.get('file format options')
     add_arg('-i', '--input-filetype', dest='infiletype',
-            default=None, metavar='<format>',
+            default='analysis', metavar='<format>',
             help='Format of input data. '
-                 '("analysis", "segmentation", "annotation") '
-                 'Default: analysis/segmentation '
-                 '(autodetected using presence of categories) ')
+                 '("analysis", "annotation") '
+                 '(default: %(default)s)')
     add_arg('-o', '--output-filetype', dest='outfiletype',
-            default=None, metavar='<format>',
+            default='analysis', metavar='<format>',
             help='Format of output data. '
-                 'Overridden by --output-format. '
-                 '("analysis", "segmentation", "annotation") '
-                 'Default: analysis/segmentation '
-                 '(autodetected using presence of categories) ')
+                 'Custom applies --output-format. '
+                 '("analysis", "annotation", "custom") '
+                 '(default: %(default)s)')
 
     # Output post-processing
     add_arg = argument_groups.get('output post-processing options')
-    add_arg('--map-categories', dest='filter_categories', type=list,
+    add_arg('--map-categories', dest='map_categories', type=str,
             default=[], action='append', metavar='<from>,<to>',
             help='Map the <from> morph category to the <to> category. '
                  'Separate the categories with a single ",". '
                  'To perform multiple mappings simultaneously, '
                  'specify the option several times. '
-                 'Default: do not map any categories.')
+                 '(default: do not map any categories.)')
     add_arg('--strip-categories', dest='strip_tags', default=False,
             action='store_true',
             help='If the input contains category tags, '
@@ -817,7 +822,7 @@ Usage examples:
     %(prog)s segmentation.tagged segmentation.txt \\
         --filter-categories PRE,SUF --strip-categories
 
-  Convert the first alternative annotation to analysis format:
+  Convert the first alternative in the annotations to analysis format:
     %(prog)s annotations.txt analysis.txt -i annotations --first
 
   Convert analysis into annotation format:
@@ -830,6 +835,10 @@ Usage examples:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False)
     groups = ArgumentGroups(parser)
+    parser.add_argument('input', metavar='<infile>',
+                        help='Input file to process.')
+    parser.add_argument('output', metavar='<outfile>',
+                        help='Output file for reformatted results.')
     add_common_io_arguments(groups)
     add_reformatting_arguments(groups)
     add_other_arguments(groups)
@@ -837,4 +846,48 @@ Usage examples:
 
 
 def reformat_main(args):
-    pass
+
+    inio = FlatcatIO(encoding=args.encoding,
+                     construction_separator=args.consseparator,
+                     compound_separator=args.cseparator,
+                     analysis_separator=args.analysisseparator,
+                     category_separator=args.catseparator)
+    # encoding, compound separator and analysis separator not yet modifiable
+    outio = FlatcatIO(encoding=args.encoding,
+                      construction_separator=args.outputconseparator,
+                      compound_separator=args.cseparator,
+                      analysis_separator=args.analysisseparator,
+                      category_separator=args.outputtagseparator)
+
+    def analysis_to_annotation(data):
+        pass
+
+    def annotation_to_analysis(data):
+        pass
+
+    def analysis_to_custom(data):
+        pass
+
+    def annotation_to_custom(data):
+        pass
+
+    def custom_format(file_name, data, construction_sep):
+        pass
+
+    readers = {'analysis': inio.read_segmentation_file,
+               'annotation': inio.read_annotations_file}
+    writers = {'analysis': outio.write_segmentation_file,
+               'annotation': outio.write_annotations_file,
+               'custom': custom_format}
+
+    if args.infiletype not in readers:
+        raise ArgumentException('Unknown input format "{}"'.format(
+            args.infiletype))
+    if args.outfiletype not in readers:
+        raise ArgumentException('Unknown output format "{}"'.format(
+            args.outfiletype))
+
+    data = readers[args.infiletype](args.input)
+    if args.outfiletype != args.infiletype:
+        data = converter[(args.infiletype, args.outfiletype)](data)
+    writers[args.outfiletype](args.output, args.outputconseparator)

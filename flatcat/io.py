@@ -173,6 +173,7 @@ class FlatcatIO(morfessor.MorfessorIO):
                              data,
                              data_func,
                              newline_func=None,
+                             output_newlines=False,
                              output_tags=False,
                              construction_sep=None,
                              analysis_sep=None,
@@ -196,7 +197,8 @@ class FlatcatIO(morfessor.MorfessorIO):
         with self._open_text_file_write(file_name) as fobj:
             for item in _generator_progress(data):
                 if newline_func is not None and newline_func(item):
-                    fobj.write("\n")
+                    if output_newlines:
+                        fobj.write("\n")
                     continue
                 (count, compound, alternatives, logp) = data_func(item)
 

@@ -733,12 +733,10 @@ def flatcat_main(args):
                            for x in args.filter_categories.split(',')]
         else:
             filter_tags = None
-        if args.outputnewlines:
-            def newline_func(item):
-                (_, _, atoms) = item
-                return len(atoms) == 0
-        else:
-            newline_func = None
+
+        def newline_func(item):
+            (_, _, atoms) = item
+            return len(atoms) == 0
 
         def segment_func(item):
             (count, compound, atoms) = item
@@ -754,6 +752,7 @@ def flatcat_main(args):
             io.read_corpus_files(args.testfiles),
             segment_func,
             newline_func=newline_func,
+            output_newlines=args.outputnewlines,
             output_tags=args.test_output_tags,
             construction_sep=csep,
             category_sep=tsep,

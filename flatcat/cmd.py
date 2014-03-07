@@ -10,11 +10,11 @@ import time
 import string
 
 from . import get_version, _logger, flatcat
-from .categorizationscheme import MorphUsageProperties, HeuristicPostprocessor
+from . import categorizationscheme
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
 from .io import FlatcatIO
-from .utils import _generator_progress, LOGPROB_ZERO, memlog, map_category
+from .utils import _generator_progress, LOGPROB_ZERO, memlog
 
 PY3 = sys.version_info.major == 3
 
@@ -467,8 +467,7 @@ def add_other_arguments(argument_groups):
             help='Show version number and exit.')
 
 
-def flatcat_main(args):
-    # FIXME contains lots of copy-pasta from morfessor.cmd.main (refactor)
+def configure_logging(args):
     if args.verbose >= 2:
         loglevel = logging.DEBUG
     elif args.verbose >= 1:
@@ -510,6 +509,9 @@ def flatcat_main(args):
         show_progress_bar = True
         ch.setLevel(min(ch.level, logging.INFO))
 
+
+def flatcat_main(args):
+    configure_logging(args)
     # Set frequency dampening function
     if args.dampening == 'none':
         dampfunc = None
@@ -519,7 +521,6 @@ def flatcat_main(args):
         dampfunc = lambda x: 1
     else:
         raise ArgumentException("unknown dampening type '%s'" % args.dampening)
-    # FIXME everything directly pasted up to this point
 
     # Arguments needing processing
     training_ops = args.training_operations.split(',')
@@ -544,7 +545,7 @@ def flatcat_main(args):
         model.post_load()
     else:
         _logger.info('Initializing from segmentation...')
-        m_usage = MorphUsageProperties(
+        m_usage = categorizationscheme.MorphUsageProperties(
             ppl_threshold=args.ppl_threshold,
             ppl_slope=args.ppl_slope,
             length_threshold=args.length_threshold,
@@ -608,7 +609,7 @@ def flatcat_main(args):
     # Heuristic nonmorpheme removal
     heuristic = None
     if args.rm_nonmorph:
-        heuristic = HeuristicPostprocessor()
+        heuristic = categorizationscheme.HeuristicPostprocessor()
 
     # Perform weight learning using development annotations
 #     if args.develfile is not None:
@@ -819,6 +820,10 @@ Command-line arguments:
         epilog="""
 Usage examples:
 
+  Convert CatMAP output to FlatCat format:
+    %(prog)s catmap_segmentation.final.gz analysis.txt \\
+        --construction-separator " + "
+
   Removal of short affixes from tagged segmentation:
     %(prog)s segmentation.tagged segmentation.txt \\
         --filter-categories PRE,SUF --strip-categories
@@ -851,6 +856,7 @@ IntermediaryFormat = collections.namedtuple('IntermediaryFormat',
 
 
 def reformat_main(args):
+    configure_logging(args)
 
     inio = FlatcatIO(encoding=args.encoding,
                      construction_separator=args.consseparator,
@@ -882,27 +888,49 @@ def reformat_main(args):
             yield IntermediaryFormat(
                 item.count,
                 item.compound,
-                [map_category(analysis, from_cat, to_cat)
+                [categorizationscheme.map_category(
+                        analysis, from_cat, to_cat)
                  for analysis in item.alternatives])
 
     def custom_conversion(item):
         return (item.count, item.compound, item.alternatives, 0)
 
-    def custom_format(file_name, data, construction_sep):
+    def separate_analyses(data):
+        for item in data:
+            for analysis in item.alternatives:
+                yield IntermediaryFormat(
+                    item.count, item.compound, [analysis])
+
+    def write_analysis(file_name, data):
+        if args.infiletype == 'annotations' and not args.first_only:
+            data = separate_analyses(data)
+        outio.write_segmentation_file(
+            file_name,
+            ((item.count, item.alternatives[0])
+             for item in data))
+
+    def write_annotation(file_name, data):
+        data = {item.compound: item.alternatives
+                for item in data}
+        outio.write_annotations_file(
+            file_name, data,
+            construction_sep=args.outputconseparator)
+
+    def write_custom(file_name, data):
         outio.write_formatted_file(
             file_name,
             args.outputformat,
             data,
             custom_conversion,
-            output_tags=(is_tagged and not args.strip_tags),
+            output_tags=(not args.strip_tags),
             filter_tags=args.filter_categories,
             filter_len=args.filter_len)
 
     readers = {'analysis': read_analysis,
                'annotation': inio.read_annotations_file}
-    writers = {'analysis': outio.write_segmentation_file,
+    writers = {'analysis': write_analysis,
                'annotation': outio.write_annotations_file,
-               'custom': custom_format}
+               'custom': write_custom}
 
     if args.infiletype not in readers:
         raise ArgumentException('Unknown input format "{}"'.format(
@@ -912,7 +940,8 @@ def reformat_main(args):
             args.outfiletype))
 
     data = readers[args.infiletype](args.input)
+    data = _generator_progress(data)
     for mapping in args.map_categories:
         (from_cat, to_cat) = mapping.split(',')
         data = map_categories(data, from_cat, to_cat)
-    writers[args.outfiletype](args.output, args.outputconseparator)
+    writers[args.outfiletype](args.output, data)

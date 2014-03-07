@@ -689,3 +689,13 @@ class Marginalizer(object):
     def category_token_count(self):
         """Tokens seen per category."""
         return ByCategory(*self._counts)
+
+
+def map_category(analysis, from_cat, to_cat):
+    out = []
+    for cmorph in analysis:
+        if cmorph.category == from_cat:
+            out.append(CategorizedMorph(cmorph.morph, to_cat))
+        else:
+            out.append(cmorph)
+    return tuple(out)

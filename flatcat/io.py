@@ -190,9 +190,11 @@ class FlatcatIO(morfessor.MorfessorIO):
 
         if output_tags:
             def _output_morph(cmorph):
+                if cmorph.category is None:
+                    return cmorph.morph
                 return '{}{}{}'.format(cmorph.morph,
-                                        category_sep,
-                                        cmorph.category)
+                                       category_sep,
+                                       cmorph.category)
         else:
             def _output_morph(cmorph):
                 return cmorph.morph

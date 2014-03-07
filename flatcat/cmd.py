@@ -857,6 +857,7 @@ IntermediaryFormat = collections.namedtuple('IntermediaryFormat',
 
 PseudoAnnotation = collections.namedtuple('PseudoAnnotation', ['alternatives'])
 
+
 def reformat_main(args):
     configure_logging(args)
 
@@ -911,7 +912,8 @@ def reformat_main(args):
             file_name,
             ((item.count, item.alternatives[0])
              for item in data),
-            output_tags=(not args.strip_tags))
+            output_tags=(not args.strip_tags),
+            comment_string=' reformatting tool')
 
     def write_annotation(file_name, data):
         data = {item.compound: PseudoAnnotation(item.alternatives)

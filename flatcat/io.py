@@ -57,7 +57,8 @@ class FlatcatIO(morfessor.MorfessorIO):
 
     def write_segmentation_file(self, file_name, segmentations,
                                 construction_sep=None,
-                                output_tags=True):
+                                output_tags=True,
+                                comment_string=''):
         """Write segmentation file.
 
         File format (single line, wrapped only for pep8):
@@ -68,11 +69,13 @@ class FlatcatIO(morfessor.MorfessorIO):
                             else self.construction_separator)
 
         _logger.info("Saving analysis to '%s'..." % file_name)
-        output_morph = _make_morph_formatter(self.category_separator, output_tags)
+        output_morph = _make_morph_formatter(
+            self.category_separator, output_tags)
         with self._open_text_file_write(file_name) as file_obj:
             d = datetime.datetime.now().replace(microsecond=0)
-            file_obj.write('# Output from Morfessor FlatCat {}, {!s}\n'.format(
-                get_version(), d))
+            file_obj.write(
+                '# Output from Morfessor FlatCat {}{}, {!s}\n'.format(
+                get_version(), comment_string, d))
             for count, morphs in segmentations:
                 s = construction_sep.join(
                     [output_morph(m) for m in morphs])
@@ -254,4 +257,3 @@ def _make_morph_formatter(category_sep, output_tags):
         def output_morph(cmorph):
             return cmorph.morph
     return output_morph
-

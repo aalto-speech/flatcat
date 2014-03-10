@@ -2,18 +2,19 @@
 import cPickle as pickle
 import sys
 
-from morfessor import diagnostics
-from morfessor.exception import ArgumentException
+from flatcat import diagnostics
+from flatcat.exception import ArgumentException
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        raise ArgumentException('Expects filename of picked stats object as argument')
+        raise ArgumentException(
+            'Expects filename of picked stats object as argument')
     if len(sys.argv) == 3:
-	style = sys.argv[2]
+        style = sys.argv[2]
     else:
-	style = 'stacked'
+        style = 'stacked'
     with open(sys.argv[1], 'r') as fobj:
         stats = pickle.load(fobj)
         isp = diagnostics.IterationStatisticsPlotter(stats)
         isp.show(style)
-

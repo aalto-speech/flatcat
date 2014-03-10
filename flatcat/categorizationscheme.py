@@ -557,7 +557,7 @@ class MorphUsageProperties(object):
     def __contains__(self, morph):
         return morph in self._contexts
 
-    def get(self, morph):
+    def get_context_features(self, morph):
         """Returns the context features of a seen morph."""
         return self._contexts[morph]
 

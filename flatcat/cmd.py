@@ -740,7 +740,7 @@ def flatcat_main(args):
 
         def segment_func(item):
             (count, compound, atoms) = item
-            (constructions, logp) = model.viterbi_segment(atoms)
+            (constructions, logp) = model.viterbi_analyze(atoms)
             if heuristic is not None:
                 constructions = heuristic.remove_nonmorphemes(
                                     constructions, model)

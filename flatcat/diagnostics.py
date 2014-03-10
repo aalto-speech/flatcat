@@ -101,7 +101,7 @@ class IterationStatistics(object):
         if self._reference is not None:
             tmp = self._reference.items()
             wlist, annotations = zip(*tmp)
-            segments = [model.viterbi_segment(w)[0] for w in wlist]
+            segments = [model.viterbi_analyze(w)[0] for w in wlist]
             self.gold_bpr.append(
                 baseline.AnnotationsModelUpdate._bpr_evaluation(
                     [[x] for x in segments],

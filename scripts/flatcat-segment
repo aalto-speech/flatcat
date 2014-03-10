@@ -14,7 +14,7 @@ def main(argv):
     parser.epilog = """
 Simple usage example (load a saved model and use it to segment test corpus):
 
-  %(prog)s -i analysis.gz -L parameters.txt -o test_corpus.segmented \\
+  %(prog)s analysis.gz -L parameters.txt -o test_corpus.segmented \\
         test_corpus.txt
 
 """
@@ -35,7 +35,7 @@ Simple usage example (load a saved model and use it to segment test corpus):
             if arg.dest in override_defaults:
                 arg.default = override_defaults[arg.dest]
 
-    parser.add_argument('testfiles', metavar='<file>', nargs='+',
+    parser.add_argument('testfiles', metavar='<testfile>', nargs='+',
                         help='corpus files to segment')
 
     try:

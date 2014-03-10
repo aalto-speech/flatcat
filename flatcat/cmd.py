@@ -77,13 +77,22 @@ Command-line arguments:
         epilog="""
 Simple usage examples (training and testing):
 
-  %(prog)s -i baseline_segmentation.txt -p 10 -s analysis.gz -S parameters.txt
-  %(prog)s -m none -i analysis.gz -L parameters.txt -T test_corpus.txt \\
+  %(prog)s baseline_segmentation.txt -p 10 -s analysis.gz -S parameters.txt
+  %(prog)s analysis.gz -L parameters.txt -m none -T test_corpus.txt \\
         -o test_corpus.segmented
 
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False)
+    parser.add_argument('initfile',
+        metavar='<init file>',
+        help='Initialize by loading model from file. '
+                'Supported formats: '
+                'Untagged segmentation '
+                '(Morfessor Baseline; plaintext, ".gz" or ."bz2"), '
+                'Tagged analysis '
+                '(Morfessor FlatCat; plaintext, ".gz" or ".bz2"), '
+                'Binary FlatCat model (pickled in a ".pickled" file)')
     groups = ArgumentGroups(parser)
     add_model_io_arguments(groups)
     add_common_io_arguments(groups)
@@ -98,15 +107,6 @@ Simple usage examples (training and testing):
 def add_model_io_arguments(argument_groups):
     # Options for input data files
     add_arg = argument_groups.get('input data files')
-    add_arg('-i', '--initialize', dest='initfile',
-            default=None, metavar='<file>',
-            help='Initialize by loading model from file. '
-                 'Supported formats: '
-                 'Untagged segmentation '
-                 '(Morfessor Baseline; plaintext, ".gz" or ."bz2"), '
-                 'Tagged analysis '
-                 '(Morfessor FlatCat; plaintext, ".gz" or ".bz2"), '
-                 'Binary FlatCat model (pickled in a ".pickled" file)')
     add_arg('--extend', dest='extendfiles', default=[],
             action='append', metavar='<file>',
             help='Extend the model using the segmentation from a file. '

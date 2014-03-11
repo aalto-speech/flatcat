@@ -599,6 +599,132 @@ class MorphUsageProperties(object):
         return cls._valid_transitions
 
 
+class MaximumLikelihoodMorphUsage(object):
+    """This is a replacement for MorphUsageProperties,
+    that uses ML-estimation to replace the property-based
+    conditional category probabilities.
+    """
+
+    zero_transitions = MorphUsageProperties.zero_transitions
+    forbid_zzz = MorphUsageProperties.forbid_zzz
+    _valid_transitions = MorphUsageProperties._valid_transitions
+
+    def __init__(self, corpus_coding, param_dict):
+        self._corpus_coding = corpus_coding
+        self._param_dict = param_dict
+        self._seen = collections.defaultdict(int)
+
+    def get_params(self):
+        """Returns a dict of hyperparameters."""
+        return self._param_dict
+
+    def set_params(self, params):
+        """Sets hyperparameters to loaded values."""
+        self._param_dict = params
+
+    def calculate_usage_features(self, seg_func):
+        """Recalculate morph counts"""
+        self._seen.clear()
+        for rcount, segments in seg_func():
+            for morph in segments:
+                self._seen[morph] += rcount
+
+    def feature_cost(self, morph):
+        """The cost of encoding the necessary features along with a morph.
+        Always zero in the ML-estimation stage.
+        Exists for drop-in compatibility with MorphUsageProperties"""
+        return 0
+
+    def estimate_contexts(self, old_morphs, new_morphs):
+        """Exists for drop-in compatibility with MorphUsageProperties"""
+        return []
+
+    def remove_temporaries(self, temporaries):
+        """Exists for drop-in compatibility with MorphUsageProperties"""
+        pass
+
+    def remove_zeros(self):
+        """Exists for drop-in compatibility with MorphUsageProperties"""
+        pass
+
+    def condprobs(self, morph):
+        """Calculate feature-based conditional probabilities P(Category|Morph)
+        from the contexts in which the morphs occur.
+
+        Arguments:
+            morph -- A string representation of the morph type.
+        """
+        counts = self._corpus_coding.get_emission_counts(morph)
+        return self._normalize(counts)
+
+    @property
+    def marginal_class_probs(self):
+        """True distribution of class probabilities,
+        calculated by marginalizing over the feature based conditional
+        probabilities over all observed morphs.
+        This will not give the same result as the observed count based
+        calculation.
+        """
+        return self._normalize(self.category_token_count)
+
+    @property
+    def category_token_count(self):
+        """Un-normalized distribution of class probabilities,
+        the sum of which is the number of observed morphs.
+        See marginal_class_probs for the normalized version.
+        """
+        return ByCategory(
+            self._corpus_coding._cat_tagcount[category]
+            for category in get_categories())
+
+    @staticmethod
+    def _normalize(counts):
+        total = sum(counts)
+        if total == 0:
+            assert False    # FIXME
+        return ByCategory((float(x) / sum for x in counts))
+
+
+    @staticmethod
+    def context_type(prev_morph, next_morph, prev_cat, next_cat):
+        """Cluster certain types of context, to allow making context-dependant
+        joining decisions."""
+        return MorphUsageProperties.context_type(prev_morph, next_morph,
+                                                 prev_cat, next_cat)
+
+    def seen_morphs(self):
+        """All morphs that have defined emissions."""
+        return [morph for (morph, count) in self._seen.items()
+                if count > 0]
+
+    def __contains__(self, morph):
+        return morph in self._seen
+
+    def get_context_features(self, morph):
+        """Returns dummy context features."""
+        return MorphContext(self.count(morph), 1., 1.)
+
+    def count(self, morph):
+        """The counts in the corpus of morphs with contexts."""
+        if morph not in self._seen:
+            return 0
+        return self._seen[morph]
+
+    def set_count(self, morph, new_count):
+        """Set the number of observed occurences of a morph.
+        Also updates the true category distribution.
+        """
+        self._seen[morph] = new_count
+
+    @classmethod
+    def valid_transitions(cls):
+        """Returns (and caches) all valid transitions as pairs
+        (from_category, to_category). Any transitions not included
+        in the list are forbidden, and must have count 0 and probability 0.
+        """
+        return cls._valid_transitions
+
+
 class CategorizedMorph(object):
     """Represents a morph with attached category information.
     These objects should be treated as immutable, even though

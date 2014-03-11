@@ -23,6 +23,7 @@ from . import optimization
 from .categorizationscheme import MorphUsageProperties, WORD_BOUNDARY
 from .categorizationscheme import ByCategory, get_categories, CategorizedMorph
 from .categorizationscheme import DEFAULT_CATEGORY
+from .categorizationscheme import MaximumLikelihoodMorphUsage
 from .exception import InvalidOperationError
 from .utils import LOGPROB_ZERO, zlog
 
@@ -1309,6 +1310,12 @@ class FlatcatModel(object):
         self._operation_number = 0
         if not no_increment:
             self._epoch_number += 1
+
+        if self._epoch_number == 3:      # FIXME CLI option
+            _logger.info('Switching over to ML-estimation')
+            self._morph_usage = MaximumLikelihoodMorphUsage(
+                self._corpus_coding, self._morph_usage.get_params())
+            return True
         return force_another
 
     def _update_annotation_choices(self):

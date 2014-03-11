@@ -1,7 +1,7 @@
 Generating Documentation
 ------------------------
 
-The user instructions for Morfessor 2.0 are available as Sphinx source
+The user instructions for Morfessor FlatCat 1.0 are available as Sphinx source
 files (see http://sphinx-doc.org/). To build the documentation you need
 both the 'sphinx' and the 'sphinxcontrib-napoleon' package. With a recent
 version of pip you could do::
@@ -16,4 +16,4 @@ example, to generate a PDF file, type "make latexpdf", and to generate
 a single HTML file, type "make singlehtml". Type "make help" to see
 all available formats.
 
-The documentation can also be read online on http://morfessor.readthedocs.org/
+The documentation can also be read online on FIXME

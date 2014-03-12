@@ -316,7 +316,7 @@ class MorphUsageProperties(object):
 
     def calculate_usage_features(self, seg_func):
         """Calculate the usage features of morphs in the corpus."""
-        self._clear()
+        self.clear()
         while True:
             # If risk of running out of memory, perform calculations in
             # multiple loops over the data
@@ -342,7 +342,7 @@ class MorphUsageProperties(object):
             if not conserving_memory:
                 break
 
-    def _clear(self):
+    def clear(self):
         """Resets the context variables.
         Use before fully reprocessing a segmented corpus."""
         self._contexts.clear()
@@ -622,6 +622,9 @@ class MaximumLikelihoodMorphUsage(object):
         """Sets hyperparameters to loaded values."""
         self._param_dict = params
 
+    def clear(self):
+        self._seen.clear()
+
     def calculate_usage_features(self, seg_func):
         """Recalculate morph counts"""
         self._seen.clear()
@@ -683,7 +686,6 @@ class MaximumLikelihoodMorphUsage(object):
         if total == 0:
             assert False    # FIXME
         return ByCategory((float(x) / sum for x in counts))
-
 
     @staticmethod
     def context_type(prev_morph, next_morph, prev_cat, next_cat):

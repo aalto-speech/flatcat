@@ -55,7 +55,7 @@ class FlatcatModel(object):
     DEFAULT_TRAIN_OPS = ['split', 'join', 'shift', 'resegment']
 
     def __init__(self, morph_usage, forcesplit=None, nosplit=None,
-                 corpusweight=1.0, use_skips=False):
+                 corpusweight=1.0, use_skips=False, ml_emissions_epoch=-1):
         """
         FIXME
         Arguments:
@@ -118,6 +118,7 @@ class FlatcatModel(object):
         self._max_resegment_iterations = 1
         self._min_shift_remainder = 2
         self._max_shift = 2
+        self._ml_emissions_epoch = ml_emissions_epoch
 
         # Callbacks for cleanup/bookkeeping after each operation.
         # Should take exactly one argument: the model.
@@ -911,7 +912,7 @@ class FlatcatModel(object):
         # These will be restored
         self.morph_backlinks.clear()
         self._interned_morphs.clear()
-        self._morph_usage._clear()
+        self._morph_usage.clear()
         # These are merely cleared
         self._skipcounter.clear()
         self._corpus_coding.clear_transition_cache()
@@ -1311,10 +1312,11 @@ class FlatcatModel(object):
         if not no_increment:
             self._epoch_number += 1
 
-        if self._epoch_number == 3:      # FIXME CLI option
+        if self._epoch_number == self._ml_emissions_epoch:
             _logger.info('Switching over to ML-estimation')
             self._morph_usage = MaximumLikelihoodMorphUsage(
                 self._corpus_coding, self._morph_usage.get_params())
+            self._calculate_usage_features()
             return True
         return force_another
 

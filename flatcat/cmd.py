@@ -291,6 +291,12 @@ def add_training_arguments(argument_groups):
             help='Minimum number of letters remaining in the shorter morph '
                  'after a shift operation. '
                  '(default %(default)s).')
+    add_arg('--ml-emissions-epoch', dest='ml_emissions_epoch',
+            type=int, default=-1, metavar='<int>',
+            help='The first epoch to use Maximum Likelihood estimation '
+                 'for emission probabilities, '
+                 'instead of using the morph property based probability. '
+                 '(default: do not switch over to ML estimation.')
 
     # Options for controlling training iteration sequence
     add_arg = argument_groups.get('training iteration sequence options')
@@ -553,11 +559,13 @@ def flatcat_main(args):
             length_slope=args.length_slope,
             use_word_tokens=not args.type_ppl,
             min_perplexity_length=args.min_ppl_length)
-        model = flatcat.FlatcatModel(m_usage,
-                                     forcesplit=args.forcesplit,
-                                     nosplit=args.nosplit,
-                                     corpusweight=args.corpusweight,
-                                     use_skips=args.skips)
+        model = flatcat.FlatcatModel(
+            m_usage,
+            forcesplit=args.forcesplit,
+            nosplit=args.nosplit,
+            corpusweight=args.corpusweight,
+            use_skips=args.skips,
+            ml_emissions_epoch=args.ml_emissions_epoch)
         # Add the initial corpus data
         model.add_corpus_data(
             io.read_segmentation_file(args.initfile),

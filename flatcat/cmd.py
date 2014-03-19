@@ -788,6 +788,8 @@ def add_reformatting_arguments(argument_groups):
                  'Custom applies --output-format. '
                  '("analysis", "annotations", "test", "custom") '
                  '(default: %(default)s)')
+    # FIXME: giving output-format should override default to custom,
+    # or maybe die
 
     # Output post-processing
     add_arg = argument_groups.get('output post-processing options')
@@ -942,10 +944,16 @@ def reformat_main(args):
             filter_tags=args.filter_categories,
             filter_len=args.filter_len)
 
+    outformat = args.outputformat
+    if not PY3:
+        outformat = unicode(outformat)
+    outformat = outformat.replace(r"\n", "\n")
+    outformat = outformat.replace(r"\t", "\t")
+
     def write_custom(file_name, data):
         outio.write_formatted_file(
             file_name,
-            args.outputformat,
+            outformat,
             data,
             custom_conversion,
             output_tags=(not args.strip_tags),
@@ -964,7 +972,7 @@ def reformat_main(args):
         raise ArgumentException(
             'Unknown input format "{}". Valid formats are {}.'.format(
             args.infiletype, sorted(readers.keys())))
-    if args.outfiletype not in readers:
+    if args.outfiletype not in writers:
         raise ArgumentException(
             'Unknown output format "{}". Valid formats are {}.'.format(
             args.outfiletype, sorted(writers.keys())))

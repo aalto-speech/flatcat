@@ -1313,10 +1313,11 @@ class FlatcatModel(object):
             self._epoch_number += 1
 
         if self._epoch_number == self._ml_emissions_epoch:
-            _logger.info('Switching over to ML-estimation')
+            _logger.info('Switching over to ML-estimation (resegment only)')
             self._morph_usage = MaximumLikelihoodMorphUsage(
                 self._corpus_coding, self._morph_usage.get_params())
             self._calculate_usage_features()
+            self.training_operations = ['resegment']
             return True
         return force_another
 

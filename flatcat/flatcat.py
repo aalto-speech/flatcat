@@ -1144,10 +1144,6 @@ class FlatcatModel(object):
         """
 
         def shift_helper(prefix, suffix):
-            if (len(prefix) < self._min_shift_remainder or
-                    len(suffix) < self._min_shift_remainder):
-                # only shift long morphs
-                return []
             results = []
             for i in range(1, self._max_shift + 1):
                 # Move backward

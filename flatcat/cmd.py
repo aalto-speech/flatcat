@@ -292,10 +292,12 @@ def add_training_arguments(argument_groups):
                  'after a shift operation. '
                  '(default %(default)s).')
     add_arg('--ml-emissions-epoch', dest='ml_emissions_epoch',
-            type=int, default=-1, metavar='<int>',
-            help='The first epoch to use Maximum Likelihood estimation '
+            type=int, default=0, metavar='<int>',
+            help='The number of epochs of resegmentation '
+                 'using Maximum Likelihood estimation '
                  'for emission probabilities, '
                  'instead of using the morph property based probability. '
+                 'These are performed after the normal training. '
                  '(default: do not switch over to ML estimation.')
 
     # Options for controlling training iteration sequence

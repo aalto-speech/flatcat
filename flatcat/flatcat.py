@@ -300,7 +300,11 @@ class FlatcatModel(object):
         previous_cost = self.get_cost()
         wl_force_another = False
         u_force_another = False
-        for epoch in range(self._max_epochs):
+        if self._ml_emissions_epoch > 0:
+            ml_epochs = self._ml_emissions_epoch
+        else:
+            ml_epochs = 0
+        for epoch in range(self._max_epochs + ml_epochs):
             self._train_epoch()
 
             cost = self.get_cost()
@@ -1312,7 +1316,8 @@ class FlatcatModel(object):
         if not no_increment:
             self._epoch_number += 1
 
-        if self._epoch_number == self._ml_emissions_epoch:
+        if (self._ml_emissions_epoch > 0 and
+                self._epoch_number == self._max_epochs + 1):
             _logger.info('Switching over to ML-estimation (resegment only)')
             self._morph_usage = MaximumLikelihoodMorphUsage(
                 self._corpus_coding, self._morph_usage.get_params())

@@ -876,13 +876,15 @@ def reformat_main(args):
                      construction_separator=args.consseparator,
                      compound_separator=args.cseparator,
                      analysis_separator=args.analysisseparator,
-                     category_separator=args.catseparator)
+                     category_separator=args.catseparator,
+                     strict=False)
     # encoding, compound separator and analysis separator not yet modifiable
     outio = FlatcatIO(encoding=args.encoding,
                       construction_separator=args.outputconseparator,
                       compound_separator=args.cseparator,
                       analysis_separator=args.analysisseparator,
-                      category_separator=args.outputtagseparator)
+                      category_separator=args.outputtagseparator,
+                      strict=False)
 
     def read_analysis(file_name):
         for (count, analysis) in inio.read_segmentation_file(file_name):

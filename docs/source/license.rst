@@ -1,6 +1,6 @@
 License
 =======
-Copyright (c) 2012-2013, Sami Virpioja and Peter Smit.
+Copyright (c) 2014, Stig-Arne Grönroos
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without

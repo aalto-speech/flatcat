@@ -40,20 +40,21 @@ def _load_baseline():
         return baseline
 
 
-def _load_flatcat(baseline_seg, no_emissions=False):
+def _load_flatcat(baseline_seg, init='full'):
         """
         Arguments:
             baseline_seg -- Segmentation of corpus using the baseline method.
                              Format: (count, (morph1, morph2, ...))
-            no_emissions -- If True, no retagging/reestimation
-                            will be performed.
-                            Transition probabilities will remain as unigram
-                            estimates, emission counts will be zero and
-                            category total counts will be zero.
-                            This means that the model is not completely
-                            initialized: you will need to set the
-                            emission counts and category totals.
-                            (Default: False)
+            init -- Controls how far the initialization with regard to 
+                    retagging/reestimation
+                    will be performed.
+                    Transition probabilities will remain as unigram
+                    estimates, emission counts will be zero and
+                    category total counts will be zero.
+                    This means that the model is not completely
+                    initialized: you will need to set the
+                    emission counts and category totals.
+                    (Default: full init)
         """
 
         m_usage = flatcat.MorphUsageProperties(ppl_threshold=10, ppl_slope=1,
@@ -62,11 +63,18 @@ def _load_flatcat(baseline_seg, no_emissions=False):
                                               use_word_tokens=False)
         model = flatcat.FlatcatModel(m_usage)
         model.add_corpus_data(baseline_seg)
-        if no_emissions:
+        if init == 'no_emissions':
             model._calculate_usage_features()
             model._unigram_transition_probs()
+        elif init == 'first':
+            model._calculate_usage_features()
+            model._unigram_transition_probs()
+            model.viterbi_tag_corpus()
+            model._calculate_transition_counts()
+            model._calculate_emission_counts()
         else:
             model.initialize_baseline()
+            model.reestimate_probabilities()
         return model
 
 
@@ -76,7 +84,7 @@ class TestProbabilityEstimation(unittest.TestCase):
         self.reference_file = REFERENCE_BASELINE_PROBS
         self.baseline = _load_baseline()
         self.model = _load_flatcat(self.baseline.get_segmentations(),
-                                   no_emissions=True)
+                                   init='no_emissions')
 
     def setUp(self):
         self.perplexities = dict()
@@ -221,7 +229,8 @@ class TestProbabilityReEstimation(TestProbabilityEstimation):
     def _config(self):
         self.reference_file = REFERENCE_REESTIMATE_PROBS
         self.baseline = _load_baseline()
-        self.model = _load_flatcat(self.baseline.get_segmentations())
+        self.model = _load_flatcat(self.baseline.get_segmentations(),
+                                   init='first')
         self.retagged = []
 
         io = morfessor.MorfessorIO(encoding='latin-1')
@@ -233,7 +242,7 @@ class TestBaselineSegmentation(unittest.TestCase):
     def setUp(self):
         self.baseline = _load_baseline()
         self.model = _load_flatcat(self.baseline.get_segmentations(),
-                                  no_emissions=True)
+                                   init='no_emissions')
 
         io = morfessor.MorfessorIO(encoding='latin-1')
         line_re = re.compile(r'^[0-9]* (.*)')
@@ -272,7 +281,7 @@ class TestOnline(unittest.TestCase):
     def setUp(self):
         self.baseline = _load_baseline()
         self.model = _load_flatcat(self.baseline.get_segmentations(),
-                                  no_emissions=True)
+                                   init='no_emissions')
 
     def test_focus(self):
         assert self.model.training_focus is None

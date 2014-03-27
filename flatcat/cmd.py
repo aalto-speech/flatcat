@@ -77,13 +77,22 @@ Command-line arguments:
         epilog="""
 Simple usage examples (training and testing):
 
-  %(prog)s -i baseline_segmentation.txt -p 10 -s analysis.gz -S parameters.txt
-  %(prog)s -m none -i analysis.gz -L parameters.txt -T test_corpus.txt \\
+  %(prog)s baseline_segmentation.txt -p 10 -s analysis.gz -S parameters.txt
+  %(prog)s analysis.gz -L parameters.txt -m none -T test_corpus.txt \\
         -o test_corpus.segmented
 
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False)
+    parser.add_argument('initfile',
+        metavar='<init file>',
+        help='Initialize by loading model from file. '
+                'Supported formats: '
+                'Untagged segmentation '
+                '(Morfessor Baseline; plaintext, ".gz" or ."bz2"), '
+                'Tagged analysis '
+                '(Morfessor FlatCat; plaintext, ".gz" or ".bz2"), '
+                'Binary FlatCat model (pickled in a ".pickled" file)')
     groups = ArgumentGroups(parser)
     add_model_io_arguments(groups)
     add_common_io_arguments(groups)
@@ -98,15 +107,6 @@ Simple usage examples (training and testing):
 def add_model_io_arguments(argument_groups):
     # Options for input data files
     add_arg = argument_groups.get('input data files')
-    add_arg('-i', '--initialize', dest='initfile',
-            default=None, metavar='<file>',
-            help='Initialize by loading model from file. '
-                 'Supported formats: '
-                 'Untagged segmentation '
-                 '(Morfessor Baseline; plaintext, ".gz" or ."bz2"), '
-                 'Tagged analysis '
-                 '(Morfessor FlatCat; plaintext, ".gz" or ".bz2"), '
-                 'Binary FlatCat model (pickled in a ".pickled" file)')
     add_arg('--extend', dest='extendfiles', default=[],
             action='append', metavar='<file>',
             help='Extend the model using the segmentation from a file. '
@@ -291,6 +291,14 @@ def add_training_arguments(argument_groups):
             help='Minimum number of letters remaining in the shorter morph '
                  'after a shift operation. '
                  '(default %(default)s).')
+    add_arg('--ml-emissions-epoch', dest='ml_emissions_epoch',
+            type=int, default=0, metavar='<int>',
+            help='The number of epochs of resegmentation '
+                 'using Maximum Likelihood estimation '
+                 'for emission probabilities, '
+                 'instead of using the morph property based probability. '
+                 'These are performed after the normal training. '
+                 '(default: do not switch over to ML estimation.')
 
     # Options for controlling training iteration sequence
     add_arg = argument_groups.get('training iteration sequence options')
@@ -553,11 +561,13 @@ def flatcat_main(args):
             length_slope=args.length_slope,
             use_word_tokens=not args.type_ppl,
             min_perplexity_length=args.min_ppl_length)
-        model = flatcat.FlatcatModel(m_usage,
-                                     forcesplit=args.forcesplit,
-                                     nosplit=args.nosplit,
-                                     corpusweight=args.corpusweight,
-                                     use_skips=args.skips)
+        model = flatcat.FlatcatModel(
+            m_usage,
+            forcesplit=args.forcesplit,
+            nosplit=args.nosplit,
+            corpusweight=args.corpusweight,
+            use_skips=args.skips,
+            ml_emissions_epoch=args.ml_emissions_epoch)
         # Add the initial corpus data
         model.add_corpus_data(
             io.read_segmentation_file(args.initfile),
@@ -740,7 +750,7 @@ def flatcat_main(args):
 
         def segment_func(item):
             (count, compound, atoms) = item
-            (constructions, logp) = model.viterbi_segment(atoms)
+            (constructions, logp) = model.viterbi_analyze(atoms)
             if heuristic is not None:
                 constructions = heuristic.remove_nonmorphemes(
                                     constructions, model)
@@ -780,6 +790,8 @@ def add_reformatting_arguments(argument_groups):
                  'Custom applies --output-format. '
                  '("analysis", "annotations", "test", "custom") '
                  '(default: %(default)s)')
+    # FIXME: giving output-format should override default to custom,
+    # or maybe die
 
     # Output post-processing
     add_arg = argument_groups.get('output post-processing options')
@@ -864,13 +876,15 @@ def reformat_main(args):
                      construction_separator=args.consseparator,
                      compound_separator=args.cseparator,
                      analysis_separator=args.analysisseparator,
-                     category_separator=args.catseparator)
+                     category_separator=args.catseparator,
+                     strict=False)
     # encoding, compound separator and analysis separator not yet modifiable
     outio = FlatcatIO(encoding=args.encoding,
                       construction_separator=args.outputconseparator,
                       compound_separator=args.cseparator,
                       analysis_separator=args.analysisseparator,
-                      category_separator=args.outputtagseparator)
+                      category_separator=args.outputtagseparator,
+                      strict=False)
 
     def read_analysis(file_name):
         for (count, analysis) in inio.read_segmentation_file(file_name):
@@ -934,10 +948,16 @@ def reformat_main(args):
             filter_tags=args.filter_categories,
             filter_len=args.filter_len)
 
+    outformat = args.outputformat
+    if not PY3:
+        outformat = unicode(outformat)
+    outformat = outformat.replace(r"\n", "\n")
+    outformat = outformat.replace(r"\t", "\t")
+
     def write_custom(file_name, data):
         outio.write_formatted_file(
             file_name,
-            args.outputformat,
+            outformat,
             data,
             custom_conversion,
             output_tags=(not args.strip_tags),
@@ -956,7 +976,7 @@ def reformat_main(args):
         raise ArgumentException(
             'Unknown input format "{}". Valid formats are {}.'.format(
             args.infiletype, sorted(readers.keys())))
-    if args.outfiletype not in readers:
+    if args.outfiletype not in writers:
         raise ArgumentException(
             'Unknown output format "{}". Valid formats are {}.'.format(
             args.outfiletype, sorted(writers.keys())))

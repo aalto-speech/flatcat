@@ -23,6 +23,7 @@ from . import optimization
 from .categorizationscheme import MorphUsageProperties, WORD_BOUNDARY
 from .categorizationscheme import ByCategory, get_categories, CategorizedMorph
 from .categorizationscheme import DEFAULT_CATEGORY
+from .categorizationscheme import MaximumLikelihoodMorphUsage
 from .exception import InvalidOperationError
 from .utils import LOGPROB_ZERO, zlog
 
@@ -54,7 +55,7 @@ class FlatcatModel(object):
     DEFAULT_TRAIN_OPS = ['split', 'join', 'shift', 'resegment']
 
     def __init__(self, morph_usage, forcesplit=None, nosplit=None,
-                 corpusweight=1.0, use_skips=False):
+                 corpusweight=1.0, use_skips=False, ml_emissions_epoch=-1):
         """
         FIXME
         Arguments:
@@ -117,6 +118,7 @@ class FlatcatModel(object):
         self._max_resegment_iterations = 1
         self._min_shift_remainder = 2
         self._max_shift = 2
+        self._ml_emissions_epoch = ml_emissions_epoch
 
         # Callbacks for cleanup/bookkeeping after each operation.
         # Should take exactly one argument: the model.
@@ -298,7 +300,11 @@ class FlatcatModel(object):
         previous_cost = self.get_cost()
         wl_force_another = False
         u_force_another = False
-        for epoch in range(self._max_epochs):
+        if self._ml_emissions_epoch > 0:
+            ml_epochs = self._ml_emissions_epoch
+        else:
+            ml_epochs = 0
+        for epoch in range(self._max_epochs + ml_epochs):
             self._train_epoch()
 
             cost = self.get_cost()
@@ -379,8 +385,7 @@ class FlatcatModel(object):
                                                               i_word)
                     assert i_word is not None
                     word_backlinks[w] = i_word
-                #segments = self.segmentations[i_word].analysis
-                (segments, _) = self.viterbi_segment(w)
+                (segments, _) = self.viterbi_analyze(w)
 
                 _logger.debug("#%s: %s -> %s" %
                               (token_num, w, segments))
@@ -393,7 +398,7 @@ class FlatcatModel(object):
 
             # also reestimates the probabilities
             _logger.info("Epoch reached, resegmenting corpus")
-            self._viterbi_segment_corpus()
+            self._viterbi_analyze_corpus()
             if self._supervised:
                 self._update_annotation_choices()
 
@@ -495,7 +500,7 @@ class FlatcatModel(object):
         if skip_this:
             segments = self.segmentations[i_word].analysis
         else:
-            segments, _ = self.viterbi_segment(word)
+            segments, _ = self.viterbi_analyze(word)
 
         change_counts = ChangeCounts()
         if i_word is not None:
@@ -527,7 +532,13 @@ class FlatcatModel(object):
         assert i_word is not None
         return i_word
 
-    def viterbi_segment(self, segments, strict_annot=True):
+    def viterbi_segment(self, segments):
+        """Compatible with Morfessor Baseline."""
+        # FIXME: both this and baseline should hide the logp
+        analysis, logp = self.viterbi_analyze(segments)
+        return (self.detag_word(analysis), logp)
+
+    def viterbi_analyze(self, segments, strict_annot=True):
         """Simultaneously segment and tag a word using the learned model.
         Can be used to segment unseen words.
 
@@ -558,7 +569,7 @@ class FlatcatModel(object):
                 alternatives = tuple(self.viterbi_tag(alt, forbid_zzz=True)
                                      for alt in alternatives)
 
-            sorted_alts = self.best_analysis([AnalysisAlternative(alt, 0)
+            sorted_alts = self.rank_analyses([AnalysisAlternative(alt, 0)
                                               for alt in alternatives])
             best = sorted_alts[0]
             return best.analysis, best.cost
@@ -675,7 +686,7 @@ class FlatcatModel(object):
                         Raises KeyError if morph is not present in the
                         training data.
                         For segmenting and tagging new words,
-                        use viterbi_segment(word).
+                        use viterbi_analyze(word).
             forbid_zzz -- If True, no morph can be tagged as a
                           non-morpheme.
         """
@@ -823,12 +834,6 @@ class FlatcatModel(object):
         for word in self.segmentations:
             yield WordAnalysis(word.count, func(word.analysis))
 
-    def weightlearn_probe(self):
-        """Partial training used in weight learning."""
-        self._single_iteration_epoch()
-        self.reestimate_probabilities()
-        self._epoch_update(no_increment=True)
-
     def get_params(self):
         """Returns a dict of hyperparameters."""
         params = {'corpusweight': self.get_corpus_coding_weight()}
@@ -911,7 +916,7 @@ class FlatcatModel(object):
         # These will be restored
         self.morph_backlinks.clear()
         self._interned_morphs.clear()
-        self._morph_usage._clear()
+        self._morph_usage.clear()
         # These are merely cleared
         self._skipcounter.clear()
         self._corpus_coding.clear_transition_cache()
@@ -924,7 +929,7 @@ class FlatcatModel(object):
 
     ### Public diagnostic methods
     #
-    def best_analysis(self, choices):
+    def rank_analyses(self, choices):
         """Choose the best analysis of a set of choices.
 
         Observe that the call and return signatures are different
@@ -983,7 +988,7 @@ class FlatcatModel(object):
                 tagged.append(AnalysisAlternative(self.viterbi_tag(seg), 0))
         else:
             tagged = [AnalysisAlternative(x, 0) for x in segmentations]
-        return self.best_analysis(tagged)
+        return self.rank_analyses(tagged)
 
     def words_with_morph(self, morph):
         """Diagnostic function.
@@ -1006,7 +1011,7 @@ class FlatcatModel(object):
         for (word, anno) in self.annotations.items():
             alts_de = [self.detag_word(alt) for alt in anno.alternatives]
             seg_de = self.detag_word(
-                self.viterbi_segment(
+                self.viterbi_analyze(
                     word,
                     strict_annot=False)[0])
 
@@ -1014,7 +1019,7 @@ class FlatcatModel(object):
                 yield (seg_de, alts_de)
 
     def viterbi_analyze_list(self, corpus):
-        """Convenience wrapper around viterbi_segment for a
+        """Convenience wrapper around viterbi_analyze for a
         list of word strings or segmentations with attached counts.
         Segmented input can be with or without tags.
         This function can be used to analyze previously unseen data.
@@ -1029,7 +1034,7 @@ class FlatcatModel(object):
                 count = 1
             if isinstance(word, basestring):
                 word = (word,)
-            yield WordAnalysis(count, self.viterbi_segment(word)[0])
+            yield WordAnalysis(count, self.viterbi_analyze(word)[0])
 
     ### Training operations
     #
@@ -1175,7 +1180,7 @@ class FlatcatModel(object):
 
     def _op_resegment_generator(self):
         """Generates special transformations that resegment and tag
-        all words in the corpus using viterbi_segment.
+        all words in the corpus using viterbi_analyze.
         Use with _operation_loop
         """
         if self.training_focus is None:
@@ -1310,6 +1315,15 @@ class FlatcatModel(object):
         self._operation_number = 0
         if not no_increment:
             self._epoch_number += 1
+
+        if (self._ml_emissions_epoch > 0 and
+                self._epoch_number == self._max_epochs + 1):
+            _logger.info('Switching over to ML-estimation (resegment only)')
+            self._morph_usage = MaximumLikelihoodMorphUsage(
+                self._corpus_coding, self._morph_usage.get_params())
+            self._calculate_usage_features()
+            self.training_operations = ['resegment']
+            return True
         return force_another
 
     def _update_annotation_choices(self):
@@ -1334,7 +1348,7 @@ class FlatcatModel(object):
                 alternatives = tuple(self.viterbi_tag(alt, forbid_zzz=True)
                                      for alt in alternatives)
 
-            sorted_alts = self.best_analysis([AnalysisAlternative(alt, 0)
+            sorted_alts = self.rank_analyses([AnalysisAlternative(alt, 0)
                                               for alt in alternatives])
             new_active = sorted_alts[0].analysis
 
@@ -1872,12 +1886,12 @@ class FlatcatModel(object):
                 num_matches += tmp_matches
         return matched_targets, num_matches
 
-    def _viterbi_segment_corpus(self):
-        """(Re)segments the corpus using viterbi_segment"""
+    def _viterbi_analyze_corpus(self):
+        """(Re)segments the corpus using viterbi_analyze"""
         num_changed_words = 0
         for (i, word) in enumerate(self.segmentations):
             self.segmentations[i] = WordAnalysis(word.count,
-                self.viterbi_segment(word.analysis)[0])
+                self.viterbi_analyze(word.analysis)[0])
             if word != self.segmentations[i]:
                 num_changed_words += 1
         self.reestimate_probabilities()
@@ -2541,12 +2555,12 @@ class Transformation(object):
 
 class ViterbiResegmentTransformation(object):
     """Special transformation that resegments and tags
-    words in the corpus using viterbi_segment.
+    words in the corpus using viterbi_analyze.
     """
 
     def __init__(self, word, model):
         self.rule = TransformationRule(tuple(word.analysis))
-        self.result, _ = model.viterbi_segment(word.analysis)
+        self.result, _ = model.viterbi_analyze(word.analysis)
         self.change_counts = ChangeCounts()
 
     def __repr__(self):
@@ -2572,7 +2586,7 @@ class ViterbiResegmentTransformation(object):
 
 
 class CostBreakdown(object):
-    """Helper for utility functions cost_breakdown and best_analysis"""
+    """Helper for utility functions cost_breakdown and rank_analyses"""
     def __init__(self):
         self.components = []
         self.cost = 0

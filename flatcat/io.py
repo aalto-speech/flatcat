@@ -45,7 +45,8 @@ class FlatcatIO(morfessor.MorfessorIO):
                  comment_start='#',
                  compound_separator='\s+',
                  analysis_separator=',',
-                 category_separator='/'):
+                 category_separator='/',
+                 strict=True):
         super(FlatcatIO, self).__init__(
             encoding=encoding,
             construction_separator=construction_separator,
@@ -54,6 +55,7 @@ class FlatcatIO(morfessor.MorfessorIO):
             atom_separator=None)
         self.analysis_separator = analysis_separator
         self.category_separator = category_separator
+        self._strict = strict
 
     def write_segmentation_file(self, file_name, segmentations,
                                 construction_sep=None,
@@ -255,7 +257,7 @@ class FlatcatIO(morfessor.MorfessorIO):
             category = None
         else:
             category = parts[1]
-            if category not in get_categories():
+            if self._strict and category not in get_categories():
                 raise InvalidCategoryError(category)
         cmorph = CategorizedMorph(morph, category)
         return cmorph

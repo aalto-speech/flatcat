@@ -860,6 +860,11 @@ class FlatcatModel(object):
     def set_corpus_coding_weight(self, weight):
         self._corpus_coding.weight = weight
 
+    def get_lexicon(self):
+        """Returns morphs in lexicon, with emission counts"""
+        for morph in sorted(self._morph_usage.seen_morphs()):
+            yield (morph, self._corpus_coding.get_emission_counts(morph))
+
     def _training_focus_filter(self):
         """Yields segmentations.
         If no training filter is selected, the whole corpus is generated.

@@ -134,6 +134,8 @@ def add_model_io_arguments(argument_groups):
                  'Use of a filename ending in ".pickled" is recommended '
                  'This format is suceptible to bit-rot, '
                  'and is not recommended for long-time storage.')
+    add_arg('-x', '--lexicon', dest="lexfile", default=None, metavar='<file>',
+            help='Output final lexicon with emission counts to given file')
     add_arg('-o', '--output', dest='outfile', default='-', metavar='<file>',
             help='Output file for test data results (for standard output, '
                  'use "-"; default "%(default)s").')
@@ -711,6 +713,10 @@ def flatcat_main(args):
             model.annotations,
             construction_sep=' ',
             output_tags=model._annotations_tagged)
+
+    # Save lexicon
+    if args.lexfile is not None:
+        io.write_lexicon_file(args.lexfile, model.get_lexicon())
 
     # Save binary model
     if args.savepicklefile is not None:

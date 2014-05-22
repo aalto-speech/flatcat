@@ -182,7 +182,11 @@ class FlatcatModel(object):
                              given times in the corpus (default 1).
             count_modifier -- function for adjusting the counts of each
                               word.
-            extend -- FIXME
+            extend -- True if the segmented but untagged data to be added
+                      should immediately be tagged with the current model.
+                      The model must be initialized before this.
+                      Alternatively the model must be re-initialized from
+                      a unigram tag distribution.
         """
         assert isinstance(freqthreshold, (int, float))
         i = len(self.segmentations)

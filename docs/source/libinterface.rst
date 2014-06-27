@@ -10,19 +10,14 @@ The classes are documented below.
 
 IO class
 --------
-.. automodule:: morfessor.io
+.. automodule:: flatcat.io
    :members:
 
 .. _baseline-model-label:
 
 Model classes
 -------------
-.. automodule:: morfessor.baseline
-   :members:
-
-Evaluation classes
-------------------
-.. automodule:: morfessor.evaluation
+.. automodule:: flatcat.flatcat
    :members:
 
 

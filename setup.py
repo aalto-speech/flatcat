@@ -19,7 +19,7 @@ setup(name='Morfessor FlatCat',
       author_email='morfessor@cis.hut.fi',
       url='http://www.cis.hut.fi/projects/morpho/',
       description='Morfessor FlatCat',
-      packages=['flatcat', 'flatcat.test'],
+      packages=['flatcat', 'flatcat.tests'],
       classifiers=[
           'Development Status :: 4 - Beta',
           'Intended Audience :: Science/Research',

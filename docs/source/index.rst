@@ -3,11 +3,11 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Morfessor 2.0 documentation
+Morfessor FlatCat documentation
 =====================================
 
-.. note:: The Morfessor 2.0 documentation is still a work in progress and
-  contains some unfinished parts
+.. note:: The Morfessor FlatCat documentation is still a work in progress and
+  contains some unfinished parts.
 
 
 Contents:

@@ -204,6 +204,9 @@ class IterationStatistics(object):
             self.len_th.add('longest', lengths[0])
             for length in lengths[1:]:
                 self.len_th.add('non-longest', length)
+        self.len_th.step()
+        self.rppl_th.step()
+        self.lppl_th.step()
 
         self.t_prev = t_cur
 
@@ -432,8 +435,9 @@ class IterationStatisticsPlotter(object):
     def _title(self):
         plt.title(self.stats.title)
 
-    def _time_histogram(self, th, group):
+    def _time_histogram(self, th, group, xlabel=True):
         arr = np.array(th.data[group]).transpose()
         plt.imshow(arr, origin='lower', interpolation='nearest', cmap=plt.cm.gray)
         plt.yticks([x + .5 for x in range(len(th.bins))],
-                   ['{:.3}'.format(x) for x in th.bins])
+                   ['{:.3}'.format(float(x)) for x in th.bins])
+        self._epoch_grid(xlabel=xlabel)

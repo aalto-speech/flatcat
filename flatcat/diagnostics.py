@@ -11,12 +11,65 @@ NO_PLOTTING = True
 if not PY3:     # my version of matplotlib doesn't support python 3
     try:
         from matplotlib import pyplot as plt
+        import numpy as np
         NO_PLOTTING = False
     except ImportError:
-        _logger.info('Unable to import matplotlib.pyplot: plotting disabled')
+        _logger.info('Unable to import matplotlib.pyplot or numpy: plotting disabled')
 
 from morfessor import baseline
 from .exception import UnsupportedConfigurationError, ArgumentException
+
+
+class TimeHistogram(object):
+    # FIXME: this could be refactored with numpy
+    def __init__(self, groups, bins=50, outliers=True):
+        self.groups = groups
+        self._buffer = {group: [] for group in groups}
+        self.data = {group: [] for group in groups}
+        try:
+            self.bins = tuple(bins)
+            self.step()
+        except TypeError:
+            self.bins = None
+            self._num_bins = bins
+        self._outliers = outliers
+
+    def add(self, group, value):
+        if self.bins is None:
+            self._buffer[group].append(value)
+            return
+        self.data[group][-1][self._bin(value)] += 1
+
+    def step(self):
+        if self.bins is None:
+            self._set_bins()
+            for group in self._buffer:
+                self.data[group].append([0] * (len(self.bins) + 1))
+                for value in self._buffer[group]:
+                    self.add(group, value)
+            del self._buffer
+        for group in self.data:
+            self.data[group].append([0] * (len(self.bins) + 1))
+
+    def _set_bins(self):
+        last_bin = 0
+        for group in self._buffer:
+            values = sorted(self._buffer[group])
+            if len(values) == 0:
+                continue
+            if self._outliers:
+                i = int(len(values) * (1.0 - (1.0 / float(self._num_bins))))
+            else:
+                i = len(values) - 1
+            last_bin = max(last_bin, values[i])
+        self.bins = [last_bin * ((1.0 + i) / float(self._num_bins))
+                     for i in range(self._num_bins)]
+
+    def _bin(self, value):
+        for (i, edge) in enumerate(self.bins):
+            if value < edge:
+                return i
+        return len(self.bins)
 
 
 class IterationStatistics(object):
@@ -39,11 +92,20 @@ class IterationStatistics(object):
         self.gold_bpr = []
         self._reference = None
 
-        self.max_morph_len = 0
-        self.max_morph_len_count = 0
         self.t_prev = None
         self.word_tokens = 1.0
         self.categories = None
+
+        self.len_th = TimeHistogram(
+            ('STM', 'other', 'longest', 'non-longest'),
+            bins=range(1,50),
+            outliers=False)
+        self.rppl_th = TimeHistogram(
+            ('PRE', 'other', 'first', 'non-first'),
+            50)
+        self.lppl_th = TimeHistogram(
+            ('SUF', 'other', 'last', 'non-last'),
+            50)
 
         if title is None:
             self.title = 'epoch statistics {}'.format(
@@ -98,25 +160,51 @@ class IterationStatistics(object):
         else:
             self.violated_annots.append(0)
 
-        if self._reference is not None:
-            tmp = self._reference.items()
-            wlist, annotations = zip(*tmp)
-            segments = [model.viterbi_analyze(w)[0] for w in wlist]
-            self.gold_bpr.append(
-                baseline.AnnotationsModelUpdate._bpr_evaluation(
-                    [[x] for x in segments],
-                    annotations))
+#         if self._reference is not None:
+#             tmp = self._reference.items()
+#             wlist, annotations = zip(*tmp)
+#             segments = [model.viterbi_analyze(w)[0] for w in wlist]
+#             self.gold_bpr.append(
+#                 baseline.AnnotationsModelUpdate._bpr_evaluation(
+#                     [[x] for x in segments],
+#                     annotations))
 
         if self.t_prev is not None:
             self.durations.append(t_cur - self.t_prev)
         current_lengths = collections.Counter()
-        for morph in model._morph_usage.seen_morphs():
-            current_lengths[len(morph)] += 1
-            if current_lengths[len(morph)] > self.max_morph_len_count:
-                self.max_morph_len_count = current_lengths[len(morph)]
-            if len(morph) > self.max_morph_len:
-                self.max_morph_len = len(morph)
-        self.morph_lengths.append(current_lengths)
+        for word in model.segmentations:
+            lengths = []
+            if len(word.analysis) == 1:
+                # single-morph words are not counted in these stats
+                continue
+            for (i, cmorph) in enumerate(word.analysis):
+                measures = model._morph_usage._contexts[cmorph.morph]
+                if i == 0:
+                    self.rppl_th.add('first', measures.right_perplexity)
+                else:
+                    self.rppl_th.add('non-first', measures.right_perplexity)
+                if i == len(word.analysis) - 1:
+                    self.lppl_th.add('last', measures.left_perplexity)
+                else:
+                    self.lppl_th.add('non-last', measures.left_perplexity)
+                if cmorph.category == 'STM':
+                    self.len_th.add('STM', len(cmorph))
+                else:
+                    self.len_th.add('other', len(cmorph))
+                if cmorph.category == 'PRE':
+                    self.rppl_th.add('PRE', measures.right_perplexity)
+                else:
+                    self.rppl_th.add('other', measures.right_perplexity)
+                if cmorph.category == 'SUF':
+                    self.lppl_th.add('SUF', measures.left_perplexity)
+                else:
+                    self.lppl_th.add('other', measures.left_perplexity)
+                lengths.append(len(cmorph))
+            lengths.sort(reverse=True)
+            self.len_th.add('longest', lengths[0])
+            for length in lengths[1:]:
+                self.len_th.add('non-longest', length)
+
         self.t_prev = t_cur
 
     def _extract_tag_counts(self, model):
@@ -343,3 +431,9 @@ class IterationStatisticsPlotter(object):
 
     def _title(self):
         plt.title(self.stats.title)
+
+    def _time_histogram(self, th, group):
+        arr = np.array(th.data[group]).transpose()
+        plt.imshow(arr, origin='lower', interpolation='nearest', cmap=plt.cm.gray)
+        plt.yticks([x + .5 for x in range(len(th.bins))],
+                   ['{:.3}'.format(x) for x in th.bins])

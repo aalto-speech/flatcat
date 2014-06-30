@@ -96,16 +96,28 @@ class IterationStatistics(object):
         self.word_tokens = 1.0
         self.categories = None
 
-        self.len_th = TimeHistogram(
-            ('STM', 'other', 'longest', 'non-longest'),
-            bins=range(1,50),
-            outliers=False)
-        self.rppl_th = TimeHistogram(
-            ('PRE', 'other', 'first', 'non-first'),
-            50)
-        self.lppl_th = TimeHistogram(
-            ('SUF', 'other', 'last', 'non-last'),
-            50)
+        self.corpus_ths = {
+            'len_th': TimeHistogram(
+                ('STM', 'other', 'longest', 'non-longest'),
+                bins=range(1,25),
+                outliers=False),
+            'rppl_th': TimeHistogram(
+                ('PRE', 'other', 'first', 'non-first'),
+                50),
+            'lppl_th': TimeHistogram(
+                ('SUF', 'other', 'last', 'non-last'),
+                50)}
+        self.gold_ths = {
+            'len_th': TimeHistogram(
+                ('STM', 'other', 'longest', 'non-longest'),
+                bins=range(1,25),
+                outliers=False),
+            'rppl_th': TimeHistogram(
+                ('PRE', 'other', 'first', 'non-first'),
+                50),
+            'lppl_th': TimeHistogram(
+                ('SUF', 'other', 'last', 'non-last'),
+                50)}
 
         if title is None:
             self.title = 'epoch statistics {}'.format(
@@ -160,55 +172,63 @@ class IterationStatistics(object):
         else:
             self.violated_annots.append(0)
 
-#         if self._reference is not None:
-#             tmp = self._reference.items()
-#             wlist, annotations = zip(*tmp)
-#             segments = [model.viterbi_analyze(w)[0] for w in wlist]
+        if self._reference is not None:
+            tmp = self._reference.items()
+            wlist, annotations = zip(*tmp)
+            segments = [model.viterbi_analyze(w)[0] for w in wlist]
 #             self.gold_bpr.append(
 #                 baseline.AnnotationsModelUpdate._bpr_evaluation(
 #                     [[x] for x in segments],
 #                     annotations))
+            self._condprob_timehistograms(
+                self.gold_ths, segments, model)
+
+        self._condprob_timehistograms(
+            self.corpus_ths,
+            (x.analysis for x in model.segmentations),
+            model)
 
         if self.t_prev is not None:
             self.durations.append(t_cur - self.t_prev)
         current_lengths = collections.Counter()
-        for word in model.segmentations:
-            lengths = []
-            if len(word.analysis) == 1:
-                # single-morph words are not counted in these stats
-                continue
-            for (i, cmorph) in enumerate(word.analysis):
-                measures = model._morph_usage._contexts[cmorph.morph]
-                if i == 0:
-                    self.rppl_th.add('first', measures.right_perplexity)
-                else:
-                    self.rppl_th.add('non-first', measures.right_perplexity)
-                if i == len(word.analysis) - 1:
-                    self.lppl_th.add('last', measures.left_perplexity)
-                else:
-                    self.lppl_th.add('non-last', measures.left_perplexity)
-                if cmorph.category == 'STM':
-                    self.len_th.add('STM', len(cmorph))
-                else:
-                    self.len_th.add('other', len(cmorph))
-                if cmorph.category == 'PRE':
-                    self.rppl_th.add('PRE', measures.right_perplexity)
-                else:
-                    self.rppl_th.add('other', measures.right_perplexity)
-                if cmorph.category == 'SUF':
-                    self.lppl_th.add('SUF', measures.left_perplexity)
-                else:
-                    self.lppl_th.add('other', measures.left_perplexity)
-                lengths.append(len(cmorph))
-            lengths.sort(reverse=True)
-            self.len_th.add('longest', lengths[0])
-            for length in lengths[1:]:
-                self.len_th.add('non-longest', length)
-        self.len_th.step()
-        self.rppl_th.step()
-        self.lppl_th.step()
 
         self.t_prev = t_cur
+
+    def _condprob_timehistograms(self, ths, source, model):
+        for word in source:
+            lengths = []
+            if len(word) == 1:
+                # single-morph words are not counted in these stats
+                continue
+            for (i, cmorph) in enumerate(word):
+                measures = model._morph_usage._contexts[cmorph.morph]
+                if i == 0:
+                    ths['rppl_th'].add('first', measures.right_perplexity)
+                else:
+                    ths['rppl_th'].add('non-first', measures.right_perplexity)
+                if i == len(word) - 1:
+                    ths['lppl_th'].add('last', measures.left_perplexity)
+                else:
+                    ths['lppl_th'].add('non-last', measures.left_perplexity)
+                if cmorph.category == 'STM':
+                    ths['len_th'].add('STM', len(cmorph))
+                else:
+                    ths['len_th'].add('other', len(cmorph))
+                if cmorph.category == 'PRE':
+                    ths['rppl_th'].add('PRE', measures.right_perplexity)
+                else:
+                    ths['rppl_th'].add('other', measures.right_perplexity)
+                if cmorph.category == 'SUF':
+                    ths['lppl_th'].add('SUF', measures.left_perplexity)
+                else:
+                    ths['lppl_th'].add('other', measures.left_perplexity)
+                lengths.append(len(cmorph))
+            lengths.sort(reverse=True)
+            ths['len_th'].add('longest', lengths[0])
+            for length in lengths[1:]:
+                ths['len_th'].add('non-longest', length)
+        for th in ths.values():
+            th.step()
 
     def _extract_tag_counts(self, model):
         out = []
@@ -252,14 +272,14 @@ class IterationStatisticsPlotter(object):
         plt.figure()
         self.types_and_tokens()
         self._title()
-        #plt.figure()
-        #self.morph_lengths()
         plt.figure()
         self.changes()
         if self.stats._reference is not None:
             plt.figure()
             self.gold_bpr()
             self._title()
+            self.condprobparams(data='gold')
+        self.condprobparams(data='corpus')
         plt.show()
 
     def stacked(self):
@@ -389,17 +409,6 @@ class IterationStatisticsPlotter(object):
         xs = [x + 0.5 for x in xls]
         plt.xticks(xs, xls)
 
-    def morph_lengths(self):
-        for (x, lens) in enumerate(self.stats.morph_lengths):
-            for y in lens:
-                normalized = lens[y] / float(self.stats.max_morph_len_count)
-                c = [1.0 - normalized] * 3
-                plt.plot(x, y, 's', color=c, markersize=(normalized * 20.))
-        self._epoch_grid()
-        plt.xlabel('iteration number')
-        plt.ylabel('Morph type length distribution')
-        self._title()
-
     def gold_bpr(self, xlabel=True):
         plt.plot(self.stats.gold_bpr, marker='+')
         self._epoch_grid(xlabel=xlabel)
@@ -420,6 +429,47 @@ class IterationStatisticsPlotter(object):
             plt.xlabel('iteration number')
         plt.ylabel('Changed segmentations')
 
+    def condprobparams(self, data='corpus'):
+        if data == 'gold':
+            ths = self.stats.gold_ths
+        else:
+            ths = self.stats.corpus_ths
+
+        plt.figure(figsize=(5.5 * 2, 5.5 * 2))
+        plt.subplot(3, 4, 1)
+        self._time_histogram(ths['len_th'], 'STM')
+        plt.ylabel('morph length')
+
+        plt.subplot(3, 4, 2)
+        self._time_histogram(ths['len_th'], 'other', yticks=False)
+        plt.subplot(3, 4, 3)
+        self._time_histogram(ths['len_th'], 'longest', yticks=False)
+        plt.subplot(3, 4, 4)
+        self._time_histogram(ths['len_th'], 'non-longest', yticks=False)
+
+        plt.subplot(3, 4, 5)
+        self._time_histogram(ths['rppl_th'], 'PRE')
+        plt.ylabel('right perplexity')
+        plt.subplot(3, 4, 6)
+        self._time_histogram(ths['rppl_th'], 'other', yticks=False)
+        plt.subplot(3, 4, 7)
+        self._time_histogram(ths['rppl_th'], 'first', yticks=False)
+        plt.subplot(3, 4, 8)
+        self._time_histogram(ths['rppl_th'], 'non-first', yticks=False)
+
+        plt.subplot(3, 4, 9)
+        self._time_histogram(ths['lppl_th'], 'SUF')
+        plt.ylabel('left perplexity')
+        plt.subplot(3, 4, 10)
+        self._time_histogram(ths['lppl_th'], 'other', yticks=False)
+        plt.subplot(3, 4, 11)
+        self._time_histogram(ths['lppl_th'], 'last', yticks=False)
+        plt.xlabel('iteration number')
+        plt.subplot(3, 4, 12)
+        self._time_histogram(ths['lppl_th'], 'non-last', yticks=False)
+        plt.subplots_adjust(left=0.1, bottom=0.06, right=0.98, top=0.97,
+                            wspace=0.06, hspace=0.08)
+
     def _epoch_grid(self, xlabel=True):
         num_ticks = len(self.stats.epoch_numbers) - 1
         for i in range(num_ticks):
@@ -435,9 +485,23 @@ class IterationStatisticsPlotter(object):
     def _title(self):
         plt.title(self.stats.title)
 
-    def _time_histogram(self, th, group, xlabel=True):
+    def _time_histogram(self, th, group, xlabel=True, yticks=True):
         arr = np.array(th.data[group]).transpose()
+        if arr.size == 0:
+            return
         plt.imshow(arr, origin='lower', interpolation='nearest', cmap=plt.cm.gray)
-        plt.yticks([x + .5 for x in range(len(th.bins))],
-                   ['{:.3}'.format(float(x)) for x in th.bins])
+        if yticks:
+            if len(th.bins) > 48:
+                step = 3
+            elif len(th.bins) > 23:
+                step = 2
+            else:
+                step = 1
+            ts = [(i + .5, '{:.3}'.format(float(x)))
+                  for (i, x) in enumerate(th.bins)]
+            ts = ts[::step]
+            plt.yticks(*zip(*ts))
+        else:
+            plt.yticks([])
         self._epoch_grid(xlabel=xlabel)
+        plt.title(group)

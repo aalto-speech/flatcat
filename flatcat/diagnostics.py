@@ -16,7 +16,7 @@ if not PY3:     # my version of matplotlib doesn't support python 3
     except ImportError:
         _logger.info('Unable to import matplotlib.pyplot or numpy: plotting disabled')
 
-from morfessor import baseline
+from morfessor import evaluation
 from .exception import UnsupportedConfigurationError, ArgumentException
 
 
@@ -91,6 +91,7 @@ class IterationStatistics(object):
 
         self.gold_bpr = []
         self._reference = None
+        self._me = None
 
         self.t_prev = None
         self.word_tokens = 1.0
@@ -134,6 +135,7 @@ class IterationStatistics(object):
 
     def set_gold_standard(self, reference):
         self._reference = reference
+        self._me = evaluation.MorfessorEvaluation(reference)
 
     def callback(self, model, iteration_number=0):
         t_cur = time.time()
@@ -176,10 +178,14 @@ class IterationStatistics(object):
             tmp = self._reference.items()
             wlist, annotations = zip(*tmp)
             segments = [model.viterbi_analyze(w)[0] for w in wlist]
-#             self.gold_bpr.append(
-#                 baseline.AnnotationsModelUpdate._bpr_evaluation(
-#                     [[x] for x in segments],
-#                     annotations))
+            mer = self._me.evaluate_model(
+                model,
+                configuration=evaluation.EvaluationConfig(1, len(segments)))
+            self.gold_bpr.append((
+                mer.precision[0],
+                mer.recall[0],
+                mer.fscore[0]
+            ))
             self._condprob_timehistograms(
                 self.gold_ths, segments, model)
 
@@ -299,6 +305,10 @@ class IterationStatisticsPlotter(object):
         self.tag_counts()
         plt.subplots_adjust(left=0.123, bottom=0.06, right=0.98, top=0.97,
                             wspace=None, hspace=0)
+
+        if self.stats._reference is not None:
+            self.condprobparams(data='gold')
+        self.condprobparams(data='corpus')
         plt.show()
 
     def costs(self, xlabel=True, zoom=False):
@@ -464,7 +474,7 @@ class IterationStatisticsPlotter(object):
         self._time_histogram(ths['lppl_th'], 'other', yticks=False)
         plt.subplot(3, 4, 11)
         self._time_histogram(ths['lppl_th'], 'last', yticks=False)
-        plt.xlabel('iteration number')
+        plt.xlabel('iteration number ({})'.format(data))
         plt.subplot(3, 4, 12)
         self._time_histogram(ths['lppl_th'], 'non-last', yticks=False)
         plt.subplots_adjust(left=0.1, bottom=0.06, right=0.98, top=0.97,

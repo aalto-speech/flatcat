@@ -1506,9 +1506,12 @@ class FlatcatModel(object):
                            iteration, max_iterations, converged)
             if converged:
                 _logger.info('{:24s} Cost: {}'.format(
-                    'final iteration.', cost))
+                    'final iteration (converged).', cost))
                 return
             previous_cost = cost
+        if not converged:
+            _logger.info('{:24s} Cost: {}'.format(
+                'final iteration (not converged).', cost))
 
     def _convergence_of_analysis(self, train_func, resegment_func,
                                 min_difference_proportion=0,

@@ -507,7 +507,7 @@ class IterationStatisticsPlotter(object):
                 step = 2
             else:
                 step = 1
-            ts = [(i + .5, '{:.3}'.format(float(x)))
+            ts = [(i + .5, '{}'.format(int(x)))
                   for (i, x) in enumerate(th.bins)]
             ts = ts[::step]
             plt.yticks(*zip(*ts))

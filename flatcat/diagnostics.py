@@ -1,4 +1,5 @@
 import collections
+import heapq
 import logging
 import time
 import sys
@@ -22,9 +23,10 @@ from .exception import UnsupportedConfigurationError, ArgumentException
 
 class TimeHistogram(object):
     # FIXME: this could be refactored with numpy
-    def __init__(self, groups, bins=50, outliers=True):
+    def __init__(self, groups, bins=50, outliers=10):
         self.groups = groups
         self._buffer = {group: [] for group in groups}
+        self._buffersize = 0
         self.data = {group: [] for group in groups}
         try:
             self.bins = tuple(bins)
@@ -36,7 +38,11 @@ class TimeHistogram(object):
 
     def add(self, group, value):
         if self.bins is None:
-            self._buffer[group].append(value)
+            if self._outliers and self._buffersize % self._outliers:
+                # Expand heap every outliers:th time
+                heapq.heappush(self._buffer[group], value)
+            else:
+                heapq.heappushpop(self._buffer[group], value)
             return
         self.data[group][-1][self._bin(value)] += 1
 
@@ -54,16 +60,12 @@ class TimeHistogram(object):
     def _set_bins(self):
         last_bin = 0
         for group in self._buffer:
-            values = sorted(self._buffer[group])
-            if len(values) == 0:
+            if len(self._buffer[group]) == 0:
                 continue
-            if self._outliers:
-                i = int(len(values) * (1.0 - (1.0 / float(self._num_bins))))
-            else:
-                i = len(values) - 1
-            last_bin = max(last_bin, values[i])
+            last_bin = max(last_bin, heapq.heappop(self._buffer[group])
         self.bins = [last_bin * ((1.0 + i) / float(self._num_bins))
                      for i in range(self._num_bins)]
+        self._buffer = None
 
     def _bin(self, value):
         for (i, edge) in enumerate(self.bins):

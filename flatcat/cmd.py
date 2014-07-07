@@ -814,6 +814,15 @@ def add_reformatting_arguments(argument_groups):
                  'omit them from the output. '
                  'Has no effect on untagged input. '
                  '(default: output category tags if they are known)')
+    add_arg('--filter-junk', dest='filter_junk', default=False,
+            action='store_true',
+            help='Filter unwanted words from data. ')
+    add_arg('--filter-max-chars', dest='filter_max_chars', type=int,
+            default=60, metavar='<len>',
+            help='Maximum number of characters in word')
+    add_arg('--filter-max-morphs', dest='filter_max_morphs', type=int,
+            default=15, metavar='<len>',
+            help='Maximum number of morphs in initial segmentation')
 
     # Annotation processing
     add_arg = argument_groups.get('annotation processing options')
@@ -906,6 +915,17 @@ def reformat_main(args):
                 alternatives = alternatives[:1]
             yield IntermediaryFormat(1, compound, alternatives)
 
+    def filter_junk(data, max_chars, max_morphs):
+        for item in data:
+            if len(item.alternatives) > 1:
+                # Can't filter annotations
+                yield item
+            if len(item.compound) > max_chars:
+                continue
+            if len(item.alternatives[0]) > max_morphs:
+                continue
+            yield item
+
     def map_categories(data, from_cat, to_cat):
         for item in data:
             yield IntermediaryFormat(
@@ -989,6 +1009,10 @@ def reformat_main(args):
 
     data = readers[args.infiletype](args.input)
     data = _generator_progress(data)
+    if args.filter_junk:
+        data = filter_junk(data,
+                           args.filter_max_chars,
+                           args.filter_max_morphs)
     for mapping in args.map_categories:
         (from_cat, to_cat) = mapping.split(',')
         data = map_categories(data, from_cat, to_cat)

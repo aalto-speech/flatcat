@@ -4,8 +4,8 @@ Morfessor 2.0 FlatCat variant.
 """
 from __future__ import unicode_literals
 
-# FIXME: decide on a public api
-#__all__ =
+__all__ = ['FlatcatModel', 'FlatcatLexiconEncoding', 'FlatcatEncoding',
+           'FlatcatAnnotatedCorpusEncoding']
 
 __author__ = 'Stig-Arne Gronroos'
 __author_email__ = "morfessor@cis.hut.fi"

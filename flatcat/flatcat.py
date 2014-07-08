@@ -46,6 +46,11 @@ SortedAnalysis = collections.namedtuple('SortedAnalysis',
 Annotation = collections.namedtuple('Annotation',
                                     ['alternatives', 'current', 'i_unannot'])
 
+CONS_SEP_WARNING = """
+#################### WARNING ####################
+The input does not seem to be segmented.
+Are you using the correct construction separator?"""
+
 
 class FlatcatModel(object):
     """Morfessor FlatCat model class."""
@@ -191,6 +196,7 @@ class FlatcatModel(object):
         assert isinstance(freqthreshold, (int, float))
         i = len(self.segmentations)
         corpus_was_untagged = self._corpus_untagged
+        consecutive_unsegmented = 0
         for row in segmentations:
             count, analysis = row
             if count < freqthreshold:
@@ -199,6 +205,13 @@ class FlatcatModel(object):
                 count = count_modifier(count)
             if len(analysis) == 0:
                 continue
+            if consecutive_unsegmented is not None:
+                if len(analysis) == 1:
+                    consecutive_unsegmented += 1
+                    if consecutive_unsegmented == 100:
+                        _logger.warning(CONS_SEP_WARNING)
+                else:
+                    consecutive_unsegmented = None
             if isinstance(analysis[0], CategorizedMorph):
                 self._intern_word(analysis)
                 if (not self._corpus_untagged and

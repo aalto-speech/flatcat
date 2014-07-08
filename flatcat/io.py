@@ -170,7 +170,9 @@ class FlatcatIO(morfessor.MorfessorIO):
                         yield (False, 1, compound, self._split_atoms(compound))
 
     def write_lexicon_file(self, file_name, lexicon):
-        """Write to a Lexicon file all constructions and their emission counts"""
+        """Write to a Lexicon file all constructions
+        and their emission counts.
+        """
         _logger.info("Saving model lexicon to '%s'..." % file_name)
         with self._open_text_file_write(file_name) as file_obj:
             for (construction, counts) in lexicon:

@@ -14,7 +14,8 @@ if not PY3:     # my version of matplotlib doesn't support python 3
         import numpy as np
         NO_PLOTTING = False
     except ImportError:
-        _logger.info('Unable to import matplotlib.pyplot or numpy: plotting disabled')
+        _logger.info(
+            'Unable to import matplotlib.pyplot or numpy: plotting disabled')
 
 from morfessor import evaluation
 from .exception import UnsupportedConfigurationError, ArgumentException
@@ -100,7 +101,7 @@ class IterationStatistics(object):
         self.corpus_ths = {
             'len_th': TimeHistogram(
                 ('STM', 'other', 'longest', 'non-longest'),
-                bins=range(1,25),
+                bins=range(1, 25),
                 outliers=False),
             'rppl_th': TimeHistogram(
                 ('PRE', 'other', 'first', 'non-first'),
@@ -111,7 +112,7 @@ class IterationStatistics(object):
         self.gold_ths = {
             'len_th': TimeHistogram(
                 ('STM', 'other', 'longest', 'non-longest'),
-                bins=range(1,25),
+                bins=range(1, 25),
                 outliers=False),
             'rppl_th': TimeHistogram(
                 ('PRE', 'other', 'first', 'non-first'),
@@ -499,7 +500,10 @@ class IterationStatisticsPlotter(object):
         arr = np.array(th.data[group]).transpose()
         if arr.size == 0:
             return
-        plt.imshow(arr, origin='lower', interpolation='nearest', cmap=plt.cm.gray)
+        plt.imshow(arr,
+                   origin='lower',
+                   interpolation='nearest',
+                   cmap=plt.cm.gray)
         if yticks:
             if len(th.bins) > 48:
                 step = 3

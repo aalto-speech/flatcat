@@ -301,7 +301,7 @@ def add_training_arguments(argument_groups):
 
     # Options for controlling training iteration sequence
     add_arg = argument_groups.get('training iteration sequence options')
-    add_arg('--max-epochs', dest='max_epochs', type=int, default=7,
+    add_arg('--max-epochs', dest='max_epochs', type=int, default=4,
             metavar='<int>',
             help='Maximum number of epochs. (default %(default)s).')
     add_arg('--max-iterations-first', dest='max_iterations_first',

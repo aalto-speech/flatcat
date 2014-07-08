@@ -19,7 +19,6 @@ import sys
 
 from morfessor import baseline
 from . import utils
-from . import optimization
 from .categorizationscheme import MorphUsageProperties, WORD_BOUNDARY
 from .categorizationscheme import ByCategory, get_categories, CategorizedMorph
 from .categorizationscheme import DEFAULT_CATEGORY

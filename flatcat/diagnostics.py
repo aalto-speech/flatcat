@@ -64,7 +64,6 @@ class TimeHistogram(object):
             last_bin = max(last_bin, values[i])
         self.bins = [last_bin * ((1.0 + i) / float(self._num_bins))
                      for i in range(self._num_bins)]
-        self._buffer = None
 
     def _bin(self, value):
         for (i, edge) in enumerate(self.bins):

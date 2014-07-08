@@ -79,10 +79,9 @@ NON_MORPHEME_PENALTY = 50
 
 
 class HeuristicPostprocessor(object):
-    def __init__(self, operations=None, max_join_stem_len=4):
+    def __init__(self, max_join_stem_len=4):
         self.temporaries = set()
         self.max_join_stem_len = max_join_stem_len
-        self.operations = []
 
     def remove_nonmorphemes(self, analysis, model):
         """Remove nonmorphemes from the analysis by joining or retagging

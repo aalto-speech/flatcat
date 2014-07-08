@@ -1113,7 +1113,7 @@ class FlatcatModel(object):
             unsorted = self._morph_usage.seen_morphs()
         else:
             unsorted = set()
-            for (count, segmentation) in self._training_focus_filter():
+            for (_, segmentation) in self._training_focus_filter():
                 for morph in self.detag_word(segmentation):
                     unsorted.add(morph)
         iteration_morphs = sorted(unsorted, key=len)
@@ -1362,7 +1362,6 @@ class FlatcatModel(object):
         overwrite = {}
         for (word, annotation) in self.annotations.items():
             alternatives = annotation.alternatives
-            old_active = annotation.current
             current_unannot = self.segmentations[annotation.i_unannot].analysis
 
             if not self._annotations_tagged:
@@ -1375,8 +1374,6 @@ class FlatcatModel(object):
 
             changes_unannot.update(current_unannot, -1,
                                     corpus_index=annotation.i_unannot)
-            #if old_active is not None:
-            #    changes_annot.update(old_active, -1)
             changes_unannot.update(new_active, 1,
                                    corpus_index=annotation.i_unannot)
             changes_annot.update(new_active, 1)

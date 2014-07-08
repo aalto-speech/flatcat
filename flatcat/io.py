@@ -1,11 +1,7 @@
 from __future__ import unicode_literals
 
-import bz2
 import collections
-import codecs
 import datetime
-import gzip
-import locale
 import logging
 import re
 import sys
@@ -16,12 +12,6 @@ from . import get_version
 from .categorizationscheme import get_categories, CategorizedMorph
 from .exception import InvalidCategoryError
 from .utils import _generator_progress
-
-try:
-    # In Python2 import cPickle for better performance
-    import cPickle as pickle
-except ImportError:
-    import pickle
 
 PY3 = sys.version_info.major == 3
 
@@ -143,6 +133,7 @@ class FlatcatIO(morfessor.MorfessorIO):
             '{compound}\t{analysis}\n',
             sorted(annotations.items()),
             _annotation_func,
+            analysis_sep=analysis_sep,
             output_tags=output_tags,
             construction_sep=construction_sep)
         _logger.info("Done.")

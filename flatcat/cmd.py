@@ -3,18 +3,15 @@ from __future__ import unicode_literals
 import collections
 import logging
 import math
-import random
-import os.path
 import sys
 import time
-import string
 
 from . import get_version, _logger, flatcat
 from . import categorizationscheme
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
 from .io import FlatcatIO
-from .utils import _generator_progress, LOGPROB_ZERO, memlog
+from .utils import _generator_progress, memlog
 
 PY3 = sys.version_info.major == 3
 

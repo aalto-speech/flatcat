@@ -18,7 +18,7 @@ if not PY3:     # my version of matplotlib doesn't support python 3
             'Unable to import matplotlib.pyplot or numpy: plotting disabled')
 
 from morfessor import evaluation
-from .exception import UnsupportedConfigurationError, ArgumentException
+from .exception import UnsupportedConfigurationError
 
 
 class TimeHistogram(object):
@@ -197,7 +197,6 @@ class IterationStatistics(object):
 
         if self.t_prev is not None:
             self.durations.append(t_cur - self.t_prev)
-        current_lengths = collections.Counter()
 
         self.t_prev = t_cur
 

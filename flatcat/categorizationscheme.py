@@ -681,9 +681,8 @@ class MaximumLikelihoodMorphUsage(object):
     @staticmethod
     def _normalize(counts):
         total = sum(counts)
-        if total == 0:
-            assert False    # FIXME
-        return ByCategory((float(x) / sum for x in counts))
+        assert total != 0
+        return ByCategory(*(float(x) / total for x in counts))
 
     @staticmethod
     def context_type(prev_morph, next_morph, prev_cat, next_cat):

@@ -61,10 +61,32 @@ class FlatcatModel(object):
     def __init__(self, morph_usage, forcesplit=None, nosplit=None,
                  corpusweight=1.0, use_skips=False, ml_emissions_epoch=-1):
         """
-        FIXME
+        Morfessor FlatCat model class.
+
         Arguments:
             morph_usage -- A MorphUsageProperties object describing how
                            the usage of a morph affects the category.
+            forcesplit -- Force segmentations around the characters
+                          in the given list. The same value should be
+                          used in Morfessor Baseline or other initialization,
+                          to guarantee results.
+            nosplit -- Prevent splitting between character pairs matching
+                       this regular expression.  The same value should be
+                       used in Morfessor Baseline or other initialization,
+                       to guarantee results.
+            corpusweight -- Multiplicative weight for the
+                            (unannotated) corpus cost.
+            use_skips -- Randomly skip frequently occurring constructions
+                         to speed up online training. Has no effect on
+                         batch training.
+            ml_emissions_epoch -- The number of epochs of resegmentation
+                                  using Maximum Likelihood estimation
+                                  for emission probabilities,
+                                  instead of using the morph property
+                                  based probability. These are performed
+                                  after the normal training.
+                                  Default -1 means do not switch over
+                                  to ML estimation.
         """
 
         self._morph_usage = morph_usage
@@ -465,7 +487,7 @@ class FlatcatModel(object):
             add_annotation_entry = True
 
         if segments[0].category is None:
-            # FIXME: problem if new morphs are introduced
+            # FIXME: problem if new morphs are introduced?
             new_analysis = self.viterbi_tag(segments, forbid_zzz=True)
         else:
             new_analysis = segments
@@ -2219,7 +2241,8 @@ class FlatcatEncoding(baseline.CorpusEncoding):
         """
         categories = get_categories(wb=True)
         t_cost = 0.0
-        # FIXME: this can be optimized when getting rid of the assertions
+        # FIXME: this can be optimized using the same running tally
+        # as logtokensum, when getting rid of the assertions
         # except if implementing hierarchy: then the incoming == outgoing
         # assumption doesn't necessarily hold anymore
         sum_transitions_from = collections.Counter()

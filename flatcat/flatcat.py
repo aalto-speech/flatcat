@@ -1633,7 +1633,6 @@ class FlatcatModel(object):
                     self._epoch_number, self._operation_number,
                     self.training_operations[self._operation_number],
                     max_iterations))
-            utils.memlog('see above')
             self._convergence_of_cost(
                 lambda: self._operation_loop(operation()),
                 update_func=update_func,

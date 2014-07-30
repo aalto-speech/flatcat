@@ -7,7 +7,6 @@ import math
 import random
 import sys
 import types
-import resource     # FIXME remove this dependency?
 
 
 _logger = logging.getLogger(__name__)
@@ -169,17 +168,6 @@ def _nt_zeros(constructor, zero=0):
     without needing to know the number of fields."""
     zeros = [zero] * len(constructor._fields)
     return constructor(*zeros)
-
-
-def memlog(location):
-    """Logs memory usage of the whole program,
-    as reported by the operating system.
-    The method of counting may differ: freeing blocks is in no
-    way guaranteed to lower this number.
-    Useful for rough estimations of how much memory to reserve.
-    """
-    _logger.info('Mem usage at "{}": {}'.format(location,
-        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
 
 
 def weighted_sample(data, num_samples):

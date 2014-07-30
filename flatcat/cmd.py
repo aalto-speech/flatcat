@@ -11,7 +11,7 @@ from . import categorizationscheme
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
 from .io import FlatcatIO
-from .utils import _generator_progress, memlog
+from .utils import _generator_progress
 
 PY3 = sys.version_info.major == 3
 
@@ -719,13 +719,10 @@ def flatcat_main(args):
     if args.savepicklefile is not None:
         _logger.info("Saving binary model...")
         model.toggle_callbacks(None)
-        memlog('Before pickle')
         model.pre_save()
         io.write_binary_model_file(args.savepicklefile, model)
-        memlog('After pickle')
         if len(args.testfiles) > 0:
             model.post_load()
-            memlog('After postload')
         _logger.info("Done.")
 
     # Segment test data

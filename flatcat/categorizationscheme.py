@@ -336,7 +336,6 @@ class MorphUsageProperties(object):
                         conserving_memory = True
 
             self._compress_contexts()
-            utils.memlog('after compress')
 
             if not conserving_memory:
                 break

@@ -56,7 +56,8 @@ class FlatcatModel(object):
 
     word_boundary = WORD_BOUNDARY
 
-    DEFAULT_TRAIN_OPS = ['split', 'join', 'shift', 'resegment']
+    # 'shift' is no longer included as 3rd op by default
+    DEFAULT_TRAIN_OPS = ['split', 'join', 'resegment']
 
     def __init__(self, morph_usage, forcesplit=None, nosplit=None,
                  corpusweight=1.0, use_skips=False, ml_emissions_epoch=-1):
@@ -360,11 +361,20 @@ class FlatcatModel(object):
                     cost, post_update_cost))
                 cost = post_update_cost
 
-            converged = ((not wl_force_another) and
-                        (not u_force_another) and
-                        (-cost_diff <= limit))
+            conv_str = ''
+            if limit is None:
+                converged = False
+                conv_str = 'fixed number of epochs'
+            else:
+                converged = -cost_diff <= limit
+                if converged:
+                    conv_str = 'converged'
+            if wl_force_another or u_force_another:
+                converged = False
+                conv_str = 'additional epoch forced'
+
             self._display_cost(cost_diff, limit, 'epoch',
-                            epoch, self._max_epochs, converged)
+                            epoch, self._max_epochs, conv_str)
             if converged:
                 _logger.info('{:24s} Cost: {}'.format(
                     'final epoch.', cost))
@@ -1532,17 +1542,28 @@ class FlatcatModel(object):
             cost = self.get_cost()
             cost_diff = cost - previous_cost
             limit = self._cost_convergence_limit(min_cost_gain)
-            converged = (not force_another) and -cost_diff <= limit
+            conv_str = ''
+            if limit is None:
+                converged = False
+                conv_str = 'fixed number of iterations'
+            else:
+                converged = -cost_diff <= limit
+                if converged:
+                    conv_str = 'converged'
+            if force_another:
+                converged = False
+                conv_str = 'additional iteration forced'
+
             self._display_cost(cost_diff, limit, 'iteration',
-                           iteration, max_iterations, converged)
+                           iteration, max_iterations, conv_str)
             if converged:
                 _logger.info('{:24s} Cost: {}'.format(
-                    'final iteration (converged).', cost))
+                    'final iteration ({}).', cost, conv_str))
                 return
             previous_cost = cost
         if not converged:
             _logger.info('{:24s} Cost: {}'.format(
-                'final iteration (not converged).', cost))
+                'final iteration (max iterations reached).', cost))
 
     def _convergence_of_analysis(self, train_func, resegment_func,
                                 min_difference_proportion=0,
@@ -1859,20 +1880,20 @@ class FlatcatModel(object):
         return operation
 
     def _display_cost(self, cost_diff, limit, iteration_name,
-                      iteration, max_iterations, converged):
+                      iteration, max_iterations, conv_str):
         msg = ('Cost difference {:' +
                     self._cost_field_fmt(cost_diff) + 'f} ' +
                 '(limit {}) ' +
                 'in {:9s} {:2d}/{:<2d} {}')
-        if converged:
-            conv = '(Converged)'
-        else:
-            conv = ''
+        if len(conv_str) > 0:
+            conv_str = '({})'.format(conv_str)
         _logger.info(msg.format(cost_diff, limit,
                                 iteration_name, iteration + 1,
-                                max_iterations, conv))
+                                max_iterations, conv_str))
 
     def _cost_convergence_limit(self, min_cost_gain=0.005):
+        if min_cost_gain is None:
+            return None
         return min_cost_gain * self._corpus_coding.boundaries
 
     def _training_params(self, param_name):

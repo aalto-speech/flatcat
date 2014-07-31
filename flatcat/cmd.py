@@ -303,7 +303,7 @@ def add_training_arguments(argument_groups):
     add_arg = argument_groups.get('training iteration sequence options')
     add_arg('--max-epochs', dest='max_epochs', type=int, default=4,
             metavar='<int>',
-            help='Maximum number of epochs. (default %(default)s).')
+            help='The number of training epochs. (default %(default)s).')
     add_arg('--max-iterations-first', dest='max_iterations_first',
             type=int, default=1, metavar='<int>',
             help='Maximum number of iterations of each operation in '
@@ -317,12 +317,13 @@ def add_training_arguments(argument_groups):
     add_arg('--max-resegment-iterations', dest='max_resegment_iterations',
             type=int, default=2, metavar='<int>',
             help='Maximum number of iterations of resegmentation in '
-                 'all epochs. Resegmentation is the heaviest operation. '
-                 '(default %(default)s).')
+                 'all epochs. (default %(default)s).')
     add_arg('--min-epoch-cost-gain', dest='min_epoch_cost_gain', type=float,
-            default=0.005, metavar='<float>',
+            default=None, metavar='<float>',
             help='Stop training if cost reduction between epochs '
                  'is below this limit * #boundaries. '
+                 'In semi-supervised training the cost is not monotonous '
+                 'between epochs, so this limit is meaningless. '
                  '(default %(default)s).')
     add_arg('--min-iteration-cost-gain', dest='min_iteration_cost_gain',
             type=float, default=0.0025, metavar='<float>',
@@ -331,8 +332,8 @@ def add_training_arguments(argument_groups):
                  '(default %(default)s).')
     add_arg('--min-difference-proportion', dest='min_diff_prop', type=float,
             default=0.005, metavar='<float>',
-            help='Stop training if proportion of words with changed '
-                 'segmentation or category tags is below this limit. '
+            help='Stop HMM initialization when the proportion of '
+                 'words with changed category tags is below this limit. '
                  '(default %(default)s).')
     add_arg('--training-operations', dest='training_operations', type=str,
             default=','.join(flatcat.FlatcatModel.DEFAULT_TRAIN_OPS),

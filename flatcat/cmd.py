@@ -49,6 +49,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 
 class ArgumentGroups(object):
+    """Helper class for modular sharing of arguments."""
     def __init__(self, parser):
         self.parser = parser
         self._groups = {}

@@ -79,6 +79,12 @@ NON_MORPHEME_PENALTY = 50
 
 
 class HeuristicPostprocessor(object):
+    """Heuristic post-processing to remove non-morphemes from the
+    final segmentation. Unlike in Morfessor Cat-ML,
+    this is not necessary during training for controlling model
+    complexity, but only as a post-processing step to ensure
+    meaningful categories.
+    """
     def __init__(self, max_join_stem_len=4):
         self.temporaries = set()
         self.max_join_stem_len = max_join_stem_len
@@ -116,6 +122,7 @@ class HeuristicPostprocessor(object):
         return analysis
 
     def _join_sequences(self, analysis, forcesplit):
+        """Joins consecutive non-morphemes"""
         prev = None
         out = []
         for m in analysis:
@@ -134,13 +141,15 @@ class HeuristicPostprocessor(object):
         return out
 
     def _long_to_stem(self, analysis, min_len):
-        #In-place
+        """Converts long non-morphemes into stems. In-place operation."""
         for m in analysis:
             if m.category == 'ZZZ' and len(m.morph) >= min_len:
                 m.category = 'STM'
 
     def _tail_suffixes(self, analysis):
-        #In-place
+        """Converts trailing non-morphemes into suffixes.
+        In-place operation.
+        """
         for (i, m) in enumerate(analysis):
             if i == 0:
                 continue
@@ -150,6 +159,7 @@ class HeuristicPostprocessor(object):
                     m.category = 'SUF'
 
     def _force_join(self, analysis, forcesplit):
+        """Joins non-morphemes with previous or next morph"""
         prev = None
         out = []
         if len(analysis) < 2:
@@ -175,6 +185,7 @@ class HeuristicPostprocessor(object):
         return out
 
     def _join_at(self, analysis, i):
+        """Helper function for joins"""
         tag = analysis[i].category
         if analysis[i + 1].category != 'ZZZ':
             tag = analysis[i + 1].category
@@ -817,6 +828,9 @@ class Marginalizer(object):
 
 
 def map_category(analysis, from_cat, to_cat):
+    """Replaces all occurrences of the category from_cat with
+    to_cat, in the given analysis.
+    """
     out = []
     for cmorph in analysis:
         if cmorph.category == from_cat:

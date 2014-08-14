@@ -20,10 +20,10 @@ Simple usage example (load a Baseline model, perform FlatCat training
 """
     keep_options = ['initfile', 'extendfiles', 'saveanalysisfile',
                     'saveannotsfile', 'savepicklefile', 'loadparamsfile',
-                    'saveparamsfile', 'trainmode',
+                    'saveparamsfile', 'lexfile', 'trainmode',
                     'encoding', 'cseparator', 'consseparator',
                     'analysisseparator', 'catseparator',
-                    'ppl_threshold', 'ppl_slope',
+                    'dampening', 'ppl_threshold', 'ppl_slope',
                     'length_threshold', 'length_slope', 'type_ppl',
                     'min_ppl_length', 'forcesplit', 'nosplit',
                     'skips', 'freqthreshold', 'max_shift_distance',
@@ -33,7 +33,8 @@ Simple usage example (load a Baseline model, perform FlatCat training
                     'min_iteration_cost_gain', 'min_diff_prop',
                     'training_operations', 'epochinterval',
                     'annofiles', 'corpusweight', 'annotationweight',
-                    'stats_file', 'statsannotfile',
+                    'stats_file', 'statsannotfile', 'log_file'
+                    'ml_emissions_epoch',
                     'verbose', 'progress', 'help', 'version']
 
     for action_group in parser._action_groups:

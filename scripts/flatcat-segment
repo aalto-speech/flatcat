@@ -25,7 +25,8 @@ Simple usage example (load a saved model and use it to segment test corpus):
                     'filter_len', 'ppl_threshold', 'ppl_slope',
                     'length_threshold', 'length_slope', 'type_ppl',
                     'min_ppl_length', 'forcesplit', 'nosplit',
-                    'annofiles', 'verbose', 'progress', 'help', 'version']
+                    'annofiles', 'log_file',
+                    'verbose', 'progress', 'help', 'version']
     override_defaults = {'trainmode': 'none'}
 
     for action_group in parser._action_groups:

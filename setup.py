@@ -10,7 +10,7 @@ main_py = open('flatcat/__init__.py').read()
 metadata = dict(re.findall("__([a-z]+)__ = '([^']+)'", main_py))
 
 requires = [
-    #    'progressbar',
+        'morfessor',
 ]
 
 setup(name='Morfessor FlatCat',

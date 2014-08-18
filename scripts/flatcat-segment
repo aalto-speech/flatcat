@@ -14,8 +14,8 @@ def main(argv):
     parser.epilog = """
 Simple usage example (load a saved model and use it to segment test corpus):
 
-  %(prog)s analysis.gz -L parameters.txt -o test_corpus.segmented \\
-        test_corpus.txt
+  %(prog)s analysis.gz -L parameters.txt --remove-nonmorphemes \\
+        -o test_corpus.segmented test_corpus.txt
 
 """
     keep_options = ['initfile', 'loadparamsfile', 'outfile', 'encoding',

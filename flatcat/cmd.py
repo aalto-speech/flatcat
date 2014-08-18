@@ -76,8 +76,8 @@ Command-line arguments:
 Simple usage examples (training and testing):
 
   %(prog)s baseline_segmentation.txt -p 10 -s analysis.gz -S parameters.txt
-  %(prog)s analysis.gz -L parameters.txt -m none -T test_corpus.txt \\
-        -o test_corpus.segmented
+  %(prog)s analysis.gz -L parameters.txt -m none --remove-nonmorphemes \\
+        -T test_corpus.txt -o test_corpus.segmented
 
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,

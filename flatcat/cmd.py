@@ -64,7 +64,7 @@ class ArgumentGroups(object):
 def get_flatcat_argparser():
     import argparse
     parser = argparse.ArgumentParser(
-        prog='flatcat.py',
+        prog='flatcat',
         description="""
 Morfessor FlatCat {version}
 

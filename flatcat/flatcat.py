@@ -1558,7 +1558,8 @@ class FlatcatModel(object):
                            iteration, max_iterations, conv_str)
             if converged:
                 _logger.info('{:24s} Cost: {}'.format(
-                    'final iteration ({}).', cost, conv_str))
+                    'final iteration ({}).'.format(conv_str),
+                    cost))
                 return
             previous_cost = cost
         if not converged:

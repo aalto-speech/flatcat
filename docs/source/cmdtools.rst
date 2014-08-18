@@ -24,7 +24,7 @@ positional argument ``<init file>``
     If the file name ends in ``.pickled``, it is treated as a saved
     binary FlatCat model.
 ``-L <file>, --load-parameters <file>``
-    load hyper-parameters from the speicified file.
+    load hyper-parameters from the specified file.
     Alternatively the hyper-parameters can be given on the command line.
     A binary model stores the hyper-parameter values used in training,
     so you do not need to load or specify them separately.
@@ -74,7 +74,10 @@ Training model options
 
 
 ``-d <type>, --dampening <type>``
-    Method for changing the compound counts in the input data. Options:
+    Method for changing the compound counts in the input data.
+    Note, that if the counts in the intialization file are already dampened
+    (e.g. by Morfessor Baseline), you should not specify dampening again.
+    Options:
 
     none
         Do not alter the counts of compounds (token based training)
@@ -128,8 +131,7 @@ batch train the model using a perplexity threshold of 10,
 save the model as an analysis file analysis.gz and a hyper-parameter file parameters.txt,
 and segment the test.txt set: ::
 
-    flatcat baseline_segmentation.txt -p 10 -s analysis.gz -S parameters.txt -T test.txt
-    --remove-nonmorphemes -o test.segmentation
+    flatcat baseline_segmentation.txt -p 10 -s analysis.gz -S parameters.txt -T test.txt --remove-nonmorphemes -o test.segmentation
 
 flatcat-train
 ---------------
@@ -155,8 +157,7 @@ Train a Morfessor FlatCat model from a Morfessor Baseline segmentation in ISO_88
 writing the log to logfile,
 and saving the model as a binary file model.pickled: ::
 
-    flatcat-train baseline_segmentation.txt --encoding=ISO_8859-15 -p 10 
-    --logfile=log.log --save-binary-model model.pickled
+    flatcat-train baseline_segmentation.txt --encoding=ISO_8859-15 -p 10 --logfile=log.log --save-binary-model model.pickled
 
 flatcat-segment
 -----------------
@@ -186,8 +187,7 @@ Examples
 Loading a model from analysis.gz, hyper-parameters from parameters.txt
 and segmenting the file test_corpus.txt: ::
 
-    flatcat-segment analysis.gz -L parameters.txt --remove-nonmorphemes 
-    -o test_corpus.segmented test_corpus.txt
+    flatcat-segment analysis.gz -L parameters.txt --remove-nonmorphemes -o test_corpus.segmented test_corpus.txt
 
 flatcat-diagnostics
 -------------------
@@ -202,8 +202,7 @@ Examples
 Collect statistics during training,
 using development set devset.segmentation: ::
     
-    flatcat-train baseline_segmentation.txt -p 10 --save-binary-model model.pickled
-    --statsfile stats.pickled --stats-annotations devset.segmentation
+    flatcat-train baseline_segmentation.txt -p 10 --save-binary-model model.pickled --statsfile stats.pickled --stats-annotations devset.segmentation
 
 Plot the statistics: ::
 
@@ -230,9 +229,9 @@ Data format command line options
     ``{logprob}`` = log-probability of the analysis,
     Valid escape sequences are ``\n`` (newline) and ``\t`` (tabular).
 ``--output-format-separator <str>``
-    construction separator for analysis in --output file (default: ' ').
+    construction separator for analysis in ``--output`` file (default: ' ').
 ``--output-newlines``
-    for each newline in input, print newline in --output file (default: 'False').
+    for each newline in input, print newline in ``--output`` file (default: 'False').
 
 ..  and ``{clogprob}`` = log-probability of the compound.
 

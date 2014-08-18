@@ -206,6 +206,12 @@ Plot the statistics: ::
 
 .. _data-format-options:
 
+flatcat-reformat
+----------------
+
+A reformatting tool which makes format conversion operations on category tagged data
+a bit more convenient. Work in progress.
+
 Data format command line options
 --------------------------------
 

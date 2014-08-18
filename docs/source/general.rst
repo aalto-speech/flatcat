@@ -11,7 +11,7 @@ Publications
 
 The Morfessor FlatCat method is presented in the paper [Gronroos2014a]_.
 The paper is available for download from
-http://www.coling-2014.org/accepted-papers/506.php
+http://www.aclweb.org/anthology/C/C14/C14-1111.pdf
 
 The Morfessor FlatCat method is described in detail in the Master's Thesis [Gronroos2014b]_.
 
@@ -32,7 +32,8 @@ Morfessor algorithm was published in [Creutz2002]_ and the semi-supervised
 extension in [Kohonen2010]_. See [TechRep]_ for further information on the
 relevant publications.
 
-.. [Gronroos2014a] Grönroos, S.-A. and Virpioja, S. (Forthcoming). Morfessor FlatCat: An HMM-based method for unsupervised and semi-supervised learning of morphology. In Proceedings of the 25th International Conference on Computational Linguistics.
+.. [Gronroos2014a] Grönroos, S.-A. and Virpioja, S. (2014). Morfessor FlatCat: An HMM-based method for unsupervised and semi-supervised learning of morphology. In Proceedings of the 25th International Conference on Computational Linguistics.  Pages 1177--1185, Dublin, Ireland, August 2014, Association for Computational Linguistics.
+
 
 .. [Gronroos2014b] Grönroos, S.-A. (2014). Semi-supervised induction of a concatenative morphology with simple morphotactics: A model in the Morfessor family. Master's thesis, Aalto University, Helsinki.
 

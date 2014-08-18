@@ -36,7 +36,7 @@ setup(name='Morfessor FlatCat',
                'scripts/flatcat-reformat'
                ],
       install_requires=requires,
-      extras_require={
-          'docs': [l.strip() for l in open('docs/build_requirements.txt')]
-      }
+      #extras_require={
+      #    'docs': [l.strip() for l in open('docs/build_requirements.txt')]
+      #}
       )

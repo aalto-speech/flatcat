@@ -61,17 +61,13 @@ Training model options
         for segmenting new data
     batch
         Loads an existing model (which is already initialized with training
-        data) and run :ref:`batch-training`
+        data) and run
         Can be used to retrain an already trained model, after extending it
         with more data.
     online
-        Create a new model, read and train the model concurrently as described
-        in :ref:`online-training`
+        Initialize a model, and then extend it in an on-line fashion.
     online+batch
-        First read and train the model concurrently as described in
-        :ref:`online-training` and after that retrain the model using
-        :ref:`batch-training`
-
+        Initialization and online training followed by batch training.
 
 ``-d <type>, --dampening <type>``
     Method for changing the compound counts in the input data.

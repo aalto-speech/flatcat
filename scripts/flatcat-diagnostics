@@ -7,7 +7,10 @@ from flatcat.exception import ArgumentException
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 2 or sys.argv[1] == '--help':
+        print('Usage: {} statsfile [separate]'.format(sys.argv[0]))
+        print('\tstatsfile: picked stats object')
+        print('\tseparate: plot separate instead of stacked figures')
         raise ArgumentException(
             'Expects filename of picked stats object as argument')
     if len(sys.argv) == 3:

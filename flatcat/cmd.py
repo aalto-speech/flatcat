@@ -108,8 +108,9 @@ def add_model_io_arguments(argument_groups):
     add_arg('--extend', dest='extendfiles', default=[],
             action='append', metavar='<file>',
             help='Extend the model using the segmentation from a file. '
-                 'The supported formats are the same as for --initialize, '
-                 'except thet pickled binary models are not supported. '
+                 'The supported formats are the same as for the '
+                 'initialization positional argument, '
+                 'except that pickled binary models are not supported. '
                  'Untagged segmentations will be tagged with the current '
                  'model.')
     add_arg('-T', '--testdata', dest='testfiles', action='append',
@@ -129,7 +130,7 @@ def add_model_io_arguments(argument_groups):
     add_arg('--save-binary-model', dest='savepicklefile',
             default=None, metavar='<file>',
             help='Save a binary FlatCat model with pickle. '
-                 'Use of a filename ending in ".pickled" is recommended '
+                 'Use of a filename ending in ".pickled" is recommended. '
                  'This format is suceptible to bit-rot, '
                  'and is not recommended for long-time storage.')
     add_arg('-x', '--lexicon', dest="lexfile", default=None, metavar='<file>',

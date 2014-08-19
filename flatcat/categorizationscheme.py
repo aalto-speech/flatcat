@@ -251,17 +251,17 @@ class MorphUsageProperties(object):
         """Initialize the model parameters describing morph usage.
 
         Arguments:
-            ppl_threshold -- threshold value for sigmoid used to calculate
+            ppl_threshold :  threshold value for sigmoid used to calculate
                             probabilities from left and right perplexities.
-            ppl_slope -- Slope value for sigmoid used to calculate
+            ppl_slope :  Slope value for sigmoid used to calculate
                          probabilities from left and right perplexities.
-            length_threshold -- threshold value for sigmoid used to calculate
+            length_threshold :  threshold value for sigmoid used to calculate
                                probabilities from length of morph.
-            length_slope -- Slope value for sigmoid used to calculate
+            length_slope :  Slope value for sigmoid used to calculate
                             probabilities from length of morph.
-            use_word_tokens -- If true, perplexity is based on word tokens.
+            use_word_tokens :  If true, perplexity is based on word tokens.
                                If false, perplexity is based on word types.
-            min_perplexity_length -- Morphs shorter than this length are
+            min_perplexity_length :  Morphs shorter than this length are
                                      ignored when calculating perplexity.
         """
 
@@ -407,7 +407,7 @@ class MorphUsageProperties(object):
         from the contexts in which the morphs occur.
 
         Arguments:
-            morph -- A string representation of the morph type.
+            morph :  A string representation of the morph type.
         """
         if morph not in self._condprob_cache:
             context = self._contexts[morph]
@@ -480,10 +480,10 @@ class MorphUsageProperties(object):
         """Estimates context features for new unseen morphs.
 
         Arguments:
-            old_morphs -- A sequence of morphs being replaced. The existing
+            old_morphs :  A sequence of morphs being replaced. The existing
                           context of these morphs can be used in the
                           estimation.
-            new_morphs -- A sequence of morphs that replaces the old ones.
+            new_morphs :  A sequence of morphs that replaces the old ones.
                           Any previously unseen morphs in this sequence
                           will get context features estimated from their
                           surface form and/or from the contexts of the
@@ -664,7 +664,7 @@ class MaximumLikelihoodMorphUsage(object):
         from the contexts in which the morphs occur.
 
         Arguments:
-            morph -- A string representation of the morph type.
+            morph :  A string representation of the morph type.
         """
         counts = self._corpus_coding.get_emission_counts(morph)
         return self._normalize(counts)
@@ -768,7 +768,7 @@ class CategorizedMorph(object):
 def get_categories(wb=False):
     """The category tags supported by this model.
     Argumments:
-        wb -- If True, the word boundary will be included. Default: False.
+        wb :  If True, the word boundary will be included. Default: False.
     """
     categories = list(ByCategory._fields)
     if wb:

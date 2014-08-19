@@ -52,7 +52,33 @@ Are you using the correct construction separator?"""
 
 
 class FlatcatModel(object):
-    """Morfessor FlatCat model class."""
+    """Morfessor FlatCat model class.
+
+    Arguments:
+        morph_usage :  A MorphUsageProperties object describing how
+                        the usage of a morph affects the category.
+        forcesplit :  Force segmentations around the characters
+                        in the given list. The same value should be
+                        used in Morfessor Baseline or other initialization,
+                        to guarantee results.
+        nosplit :  Prevent splitting between character pairs matching
+                    this regular expression.  The same value should be
+                    used in Morfessor Baseline or other initialization,
+                    to guarantee results.
+        corpusweight :  Multiplicative weight for the
+                        (unannotated) corpus cost.
+        use_skips :  Randomly skip frequently occurring constructions
+                        to speed up online training. Has no effect on
+                        batch training.
+        ml_emissions_epoch :  The number of epochs of resegmentation
+                                using Maximum Likelihood estimation
+                                for emission probabilities,
+                                instead of using the morph property
+                                based probability. These are performed
+                                after the normal training.
+                                Default -1 means do not switch over
+                                to ML estimation.
+        """
 
     word_boundary = WORD_BOUNDARY
 
@@ -61,35 +87,6 @@ class FlatcatModel(object):
 
     def __init__(self, morph_usage, forcesplit=None, nosplit=None,
                  corpusweight=1.0, use_skips=False, ml_emissions_epoch=-1):
-        """
-        Morfessor FlatCat model class.
-
-        Arguments:
-            morph_usage -- A MorphUsageProperties object describing how
-                           the usage of a morph affects the category.
-            forcesplit -- Force segmentations around the characters
-                          in the given list. The same value should be
-                          used in Morfessor Baseline or other initialization,
-                          to guarantee results.
-            nosplit -- Prevent splitting between character pairs matching
-                       this regular expression.  The same value should be
-                       used in Morfessor Baseline or other initialization,
-                       to guarantee results.
-            corpusweight -- Multiplicative weight for the
-                            (unannotated) corpus cost.
-            use_skips -- Randomly skip frequently occurring constructions
-                         to speed up online training. Has no effect on
-                         batch training.
-            ml_emissions_epoch -- The number of epochs of resegmentation
-                                  using Maximum Likelihood estimation
-                                  for emission probabilities,
-                                  instead of using the morph property
-                                  based probability. These are performed
-                                  after the normal training.
-                                  Default -1 means do not switch over
-                                  to ML estimation.
-        """
-
         self._morph_usage = morph_usage
 
         self._corpus_untagged = False
@@ -201,15 +198,15 @@ class FlatcatModel(object):
         calling initialize_hmm.
 
         Arguments:
-            segmentations -- Segmentations of format:
+            segmentations :  Segmentations of format:
                              (count, (morph1, morph2, ...))
                              where the morphs can be either strings
                              or CategorizedMorphs.
-            freqthreshold -- discard words that occur less than
+            freqthreshold :  discard words that occur less than
                              given times in the corpus (default 1).
-            count_modifier -- function for adjusting the counts of each
+            count_modifier :  function for adjusting the counts of each
                               word.
-            extend -- True if the segmented but untagged data to be added
+            extend :  True if the segmented but untagged data to be added
                       should immediately be tagged with the current model.
                       The model must be initialized before this.
                       Alternatively the model must be re-initialized from
@@ -322,7 +319,29 @@ class FlatcatModel(object):
                     max_resegment_iterations=1,
                     max_shift_distance=2,
                     min_shift_remainder=2):
-        """Perform batch training."""
+        """Perform batch training.
+
+        Arguments:
+            min_iteration_cost_gain :  Do not repeat iteration if the gain
+                                       in cost was less than this proportion.
+                                       No effect if max_iterations is 1.
+                                       Set to None to disable.
+            min_epoch_cost_gain :  Stop before max_epochs, if the gain
+                                   in cost of the previous epoch was less
+                                   than this proportion.
+                                   Set to None to disable.
+            max_epochs :  Maximum number of training epochs.
+            max_iterations_first :  Number of iterations of each operator,
+                                    in the first epoch.
+            max_iterations :  Number of iterations of each operator, in
+                              later epochs.
+            max_resegment_iterations :  Number of resegment iterations
+                                        in any epoch.
+            max_shift_distance :  Limit on the distance (in characters)
+                                  that the shift operation can move a boundary.
+            min_shift_remainder :  Limit on the shortest morph allowed to be
+                                   produced by the shift operation.
+        """
         self._min_iteration_cost_gain = min_iteration_cost_gain
         self._min_epoch_cost_gain = min_epoch_cost_gain
         self._max_epochs = max_epochs
@@ -591,13 +610,13 @@ class FlatcatModel(object):
         Can be used to segment unseen words.
 
         Arguments:
-            segments -- A word (or a list of morphs which will be
+            segments :  A word (or a list of morphs which will be
                         concatenated into a word) to resegment and tag.
-            strict_annot -- If the word occurs in the annotated corpus,
+            strict_annot :  If the word occurs in the annotated corpus,
                             only consider the segmentations in the annotation.
         Returns:
-            best_analysis, -- The resegmented, retagged word
-            best_cost      -- The cost of the returned solution
+            best_analysis, :  The resegmented, retagged word
+            best_cost      :  The cost of the returned solution
         """
 
         if isinstance(segments, basestring):
@@ -730,12 +749,12 @@ class FlatcatModel(object):
         """Tag a pre-segmented word using the learned model.
 
         Arguments:
-            segments -- A list of morphs to tag.
+            segments :  A list of morphs to tag.
                         Raises KeyError if morph is not present in the
                         training data.
                         For segmenting and tagging new words,
                         use viterbi_analyze(word).
-            forbid_zzz -- If True, no morph can be tagged as a
+            forbid_zzz :  If True, no morph can be tagged as a
                           non-morpheme.
         """
 
@@ -989,7 +1008,7 @@ class FlatcatModel(object):
         from baseline: this method is more versatile.
 
         Arguments:
-            choices -- a sequence of AnalysisAlternative(analysis, penalty)
+            choices :  a sequence of AnalysisAlternative(analysis, penalty)
                        namedtuples.
                        The analysis must be a sequence of CategorizedMorphs,
                        (segmented and tagged).
@@ -998,9 +1017,9 @@ class FlatcatModel(object):
         Returns:
             A sorted (by cost, ascending) list of
             SortedAnalysis(cost, analysis, index, breakdown) namedtuples.
-                cost -- the contribution of this analysis to the corpus cost.
-                analysis -- as in input.
-                breakdown -- A CostBreakdown object, for diagnostics
+                cost :  the contribution of this analysis to the corpus cost.
+                analysis :  as in input.
+                breakdown :  A CostBreakdown object, for diagnostics
         """
         out = []
         for (i, choice) in enumerate(choices):
@@ -1096,7 +1115,7 @@ class FlatcatModel(object):
         context-sensitive bimorphs. Don't call this directly.
 
         Arguments:
-            result_func -- A function that takes the prefix an suffix
+            result_func :  A function that takes the prefix an suffix
                            as arguments, and returns all the proposed results
                            as tuples of CategorizedMorphs.
         """
@@ -1456,8 +1475,8 @@ class FlatcatModel(object):
         ChangeCounts object (e.g. calculated in Transformation).
 
         Arguments:
-            change_counts -- A ChangeCounts object
-            multiplier -- +1 to apply the change, -1 to revert it.
+            change_counts :  A ChangeCounts object
+            multiplier :  +1 to apply the change, -1 to revert it.
         """
         for cmorph in change_counts.emissions:
             self._corpus_coding.update_emission_count(
@@ -1500,17 +1519,17 @@ class FlatcatModel(object):
         the morphs already stored in the lexicon.
 
         Arguments:
-            train_func -- A method of FlatcatModel which causes some part of
+            train_func :  A method of FlatcatModel which causes some part of
                           the model to be trained.
-            update_func -- Updates to the model between iterations,
+            update_func :  Updates to the model between iterations,
                            that should not be considered in the convergence
                            analysis. However, if the return value is
                            True, at least one more iteration is forced unless
                            the maximum limit has been reached.
-            min_cost_gain -- Stop iterating if cost reduction between
+            min_cost_gain :  Stop iterating if cost reduction between
                              iterations is below this limit * #boundaries.
                              Default 0.005.
-            max_iterations -- Maximum number of iterations. Default 5.
+            max_iterations :  Maximum number of iterations. Default 5.
         """
 
         previous_cost = self.get_cost()
@@ -1587,19 +1606,19 @@ class FlatcatModel(object):
         Neither train_func nor resegment_func may require any arguments.
 
         Arguments:
-            train_func -- A method of FlatcatModel which causes some aspect
+            train_func :  A method of FlatcatModel which causes some aspect
                           of the model to be trained.
-            resegment_func -- A method of FlatcatModel that resegments or
+            resegment_func :  A method of FlatcatModel that resegments or
                               retags the segmentations, to produce the
                               results to compare. Should return the number
                               of changed words.
-            min_difference_proportion -- Maximum proportion of words with
+            min_difference_proportion :  Maximum proportion of words with
                                          changed segmentation or category
                                          tags in the final iteration.
                                          Default 0.
-            min_cost_gain -- Stop iterating if cost reduction between
+            min_cost_gain :  Stop iterating if cost reduction between
                                    iterations is below this limit.
-            max_iterations -- Maximum number of iterations. Default 15.
+            max_iterations :  Maximum number of iterations. Default 15.
         """
 
         previous_cost = self.get_cost()
@@ -1709,17 +1728,17 @@ class FlatcatModel(object):
         ensure that the rules and results detokenize to the same string.
 
         Arguments:
-            transformation_generator -- a generator yielding
+            transformation_generator :  a generator yielding
                 (transform_group, targets, changed_morphs, temporaries)
                 tuples, where
-                    transform_group -- a list of Transform objects.
-                    targets -- a set with an initial guess of indices of
+                    transform_group :  a list of Transform objects.
+                    targets :  a set with an initial guess of indices of
                                matching words in the corpus. Can contain false
                                positives, but should not omit positive
                                indices (they will be missed).
-                    changed_morphs -- the morphs participating
+                    changed_morphs :  the morphs participating
                                       in the operation.
-                    temporaries -- a set of new morphs with estimated
+                    temporaries :  a set of new morphs with estimated
                                    contexts.
         """
 
@@ -1930,8 +1949,8 @@ class FlatcatModel(object):
         are several matches in some word(s).
 
         Arguments:
-            rule -- A TransformationRule describing the criteria for a match.
-            targets -- A set of indices to limit the search to, or None to
+            rule :  A TransformationRule describing the criteria for a match.
+            targets :  A set of indices to limit the search to, or None to
                        search all segmentations. Default: full search.
         """
 
@@ -1973,7 +1992,7 @@ class FlatcatModel(object):
     def get_categories(wb=False):
         """The category tags supported by this model.
         Argumments:
-            wb -- If True, the word boundary will be included. Default: False.
+            wb :  If True, the word boundary will be included. Default: False.
         """
         return get_categories(wb)
 
@@ -2002,6 +2021,10 @@ class FlatcatModel(object):
 class FlatcatLexiconEncoding(baseline.LexiconEncoding):
     """Extends LexiconEncoding to include the coding costs of the
     encoding cost of morph usage (context) features.
+
+    Arguments:
+        morph_usage :  A MorphUsageProperties object,
+                       or something that quacks like it.
     """
 
     def __init__(self, morph_usage):
@@ -2107,11 +2130,11 @@ class FlatcatEncoding(baseline.CorpusEncoding):
         OBSERVE! Clearing the cache is left to the caller.
 
         Arguments:
-            prev_cat -- The name (not index) of the category
+            prev_cat :  The name (not index) of the category
                         transitioned from.
-            next_cat -- The name (not index) of the category
+            next_cat :  The name (not index) of the category
                         transitioned to.
-            diff_count -- The change in the number of transitions.
+            diff_count :  The change in the number of transitions.
         """
 
         # Assertion disabled due to performance hit
@@ -2173,9 +2196,9 @@ class FlatcatEncoding(baseline.CorpusEncoding):
         Updates logcondprobsum.
 
         Arguments:
-            category -- name of category from which emission occurs.
-            morph -- string representation of the morph.
-            diff_count -- the change in the number of occurences.
+            category :  name of category from which emission occurs.
+            morph :  string representation of the morph.
+            diff_count :  the change in the number of occurences.
         """
         if diff_count == 0:
             return
@@ -2201,8 +2224,8 @@ class FlatcatEncoding(baseline.CorpusEncoding):
         Does not update logcondprobsum.
 
         Arguments:
-            morph -- string representation of the morph.
-            new_counts -- ByCategory object with new counts.
+            morph :  string representation of the morph.
+            new_counts :  ByCategory object with new counts.
         """
 
         old_total = sum(self._emission_counts[morph])
@@ -2457,10 +2480,10 @@ class ChangeCounts(object):
         """Updates the counts to add or remove the effects of an analysis.
 
         Arguments:
-            analysis -- A tuple of CategorizedMorphs.
-            count -- The occurence count of the analyzed word.
+            analysis :  A tuple of CategorizedMorphs.
+            count :  The occurence count of the analyzed word.
                      A negative count removes the effects of the analysis.
-            corpus_index -- If not None, the mapping between the morphs
+            corpus_index :  If not None, the mapping between the morphs
                             and the indices of words in the corpus that they
                             occur in will be updated. corpus_index is then
                             the index of the current occurence being updated.
@@ -2582,9 +2605,9 @@ class Transformation(object):
         tagging with the given model.
 
         Arguments:
-            word -- A WordAnalysis object.
-            model -- The current model to use for tagging.
-            corpus_index -- Index of the word in the corpus, or None if
+            word :  A WordAnalysis object.
+            model :  The current model to use for tagging.
+            corpus_index :  Index of the word in the corpus, or None if
                             the change is temporary and morph to word
                             backlinks don't need to be updated.
         """

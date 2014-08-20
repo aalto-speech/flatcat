@@ -1030,7 +1030,7 @@ class FlatcatModel(object):
                        for this choice. Use 0 to disable.
         Returns:
             A sorted (by cost, ascending) list of
-            SortedAnalysis(cost, analysis, index, breakdown) namedtuples.
+            SortedAnalysis(cost, analysis, index, breakdown) namedtuples. ::
                 cost :  the contribution of this analysis to the corpus cost.
                 analysis :  as in input.
                 breakdown :  A CostBreakdown object, for diagnostics
@@ -2005,7 +2005,8 @@ class FlatcatModel(object):
     @staticmethod
     def get_categories(wb=False):
         """The category tags supported by this model.
-        Argumments:
+
+        Arguments:
             wb :  If True, the word boundary will be included. Default: False.
         """
         return get_categories(wb)

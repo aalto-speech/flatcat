@@ -1,9 +1,9 @@
-Python library interface to Morfessor
-=====================================
+Python library interface to Morfessor FlatCat
+=============================================
 
-Morfessor 2.0 contains a library interface in order to be integrated in other
+Morfessor FlatCat 1.0 contains a library interface in order to be integrated in other
 python applications. The public members are documented below and should remain
-relatively the same between Morfessor versions. Private members are documented
+relatively the same between Morfessor FlatCat versions. Private members are documented
 in the code and can change anytime in releases.
 
 The classes are documented below.
@@ -28,13 +28,13 @@ Segmenting new data using an existing model
 -------------------------------------------
 ::
 
-    import morfessor
+    import flatcat
 
-    io = morfessor.MorfessorIO()
+    io = flatcat.FlatcatIO()
 
-    model = io.read_binary_model_file('model.bin')
+    model = io.read_binary_model_file('model.pickled')
 
-    words = ['words', 'segmenting', 'morfessor', 'unsupervised']
+    words = ['words', 'segmenting', 'morfessor', 'categories', 'semisupervised']
 
     for word in words:
         print(model.viterbi_segment(word))

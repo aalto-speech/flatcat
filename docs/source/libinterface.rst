@@ -13,7 +13,7 @@ IO class
 .. automodule:: flatcat.io
    :members:
 
-.. _baseline-model-label:
+.. _flatcat-model-label:
 
 Model classes
 -------------

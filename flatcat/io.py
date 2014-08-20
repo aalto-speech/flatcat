@@ -241,6 +241,37 @@ class FlatcatIO(morfessor.MorfessorIO):
                                 num_nonmorphemes=num_nonmorphemes,
                                 num_letters=num_letters))
 
+    # FIXME: these are copied here from development baseline
+    # FIXME: remove when the public version catches up
+
+    def write_parameter_file(self, file_name, params):
+        """Write learned or estimated parameters to a file"""
+        with self._open_text_file_write(file_name) as file_obj:
+            d = datetime.datetime.now().replace(microsecond=0)
+            file_obj.write(
+                '# Parameters for Morfessor {}, {}\n'.format(
+                    get_version(), d))
+            for (key, val) in params.items():
+                file_obj.write('{}:\t{}\n'.format(key, val))
+
+    def read_parameter_file(self, file_name):
+        """Read learned or estimated parameters from a file"""
+        params = {}
+        line_re = re.compile(r'^(.*)\s*:\s*(.*)$')
+        for line in self._read_text_file(file_name):
+            m = line_re.match(line.rstrip())
+            if m:
+                key = m.group(1)
+                val = m.group(2)
+                try:
+                    val = float(val)
+                except ValueError:
+                    pass
+                params[key] = val
+        return params
+
+    # FIXME: end of copy
+
     def _read_annotation(self, line, construction_sep, analysis_sep):
         if analysis_sep is not None:
             analyses = line.split(analysis_sep)

@@ -9,8 +9,8 @@ you need to specify it on the command line, e.g. ::
     
     --encoding=ISO_8859-15
 
-The word counts in the output are smaller than I expected
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The word counts in the output are smaller than expected
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If the counts in the input data are already dampened,
 you should not specify a dampening to FlatCat. ::

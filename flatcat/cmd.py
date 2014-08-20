@@ -575,14 +575,6 @@ def flatcat_main(args):
             count_modifier=dampfunc,
             freqthreshold=args.freqthreshold)
 
-        # Load the hyperparamters
-        model.training_operations = training_ops
-        if args.loadparamsfile is not None:
-            _logger.info('Loading hyperparameters from {}'.format(
-                args.loadparamsfile))
-            model.set_params(
-                io.read_parameter_file(args.loadparamsfile))
-
     # Add annotated data
     for f in args.annofiles:
         annotations = io.read_annotations_file(f)
@@ -590,6 +582,13 @@ def flatcat_main(args):
                               args.annotationweight)
 
     if not init_is_pickle:
+        # Load the hyperparamters
+        model.training_operations = training_ops
+        if args.loadparamsfile is not None:
+            _logger.info('Loading hyperparameters from {}'.format(
+                args.loadparamsfile))
+            model.set_params(
+                io.read_parameter_file(args.loadparamsfile))
         # Initialize the model
         must_train = model.initialize_hmm(
             min_difference_proportion=args.min_diff_prop)

@@ -21,6 +21,7 @@ Contents:
    filetypes
    cmdtools
    libinterface
+   faq
 
 
 Indices and tables

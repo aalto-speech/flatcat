@@ -24,8 +24,33 @@ Model classes
 Code Examples for using library interface
 =========================================
 
+Initialize a semi-supervised model from a given segmentation and annotations
+----------------------------------------------------------------------------
+::
+    
+    import flatcat
+
+    io = flatcat.FlatcatIO()
+
+    morph_usage = flatcat.categorizationscheme.MorphUsageProperties()
+
+    model = flatcat.FlatcatModel(morph_usage, corpusweight=1.0)
+
+    model.add_corpus_data(io.read_segmentation_file('segmentation.txt'))
+
+    model.add_annotations(io.read_annotations_file('annotations.txt'),
+                          annotatedcorpusweight=1.0)
+
+    model.initialize_hmm()
+
+The model is now ready to be trained.
+
+
 Segmenting new data using an existing model
 -------------------------------------------
+
+First printing only the segmentations, followed by the analysis with morph categories.
+
 ::
 
     import flatcat
@@ -39,49 +64,6 @@ Segmenting new data using an existing model
     for word in words:
         print(model.viterbi_segment(word))
 
-
-Testing type vs token models
-----------------------------
-::
-
-    import morfessor
-
-    io = morfessor.MorfessorIO()
-
-    train_data = list(io.read_corpus_file('training_data'))
-
-    model_types = morfessor.BaselineModel()
-    model_logtokens = morfessor.BaselineModel()
-    model_tokens = morfessor.BaselineModel()
-
-    model_types.load_data(train_data, count_modifier=lambda x: 1)
-    def log_func(x):
-        return int(round(math.log(x + 1, 2)))
-    model_logtokens.load_data(train_data, count_modifier=log_func)
-    model_tokens.load_data(train_data)
-
-    models = [model_types, model_logtokens, model_tokens]
-
-    for model in models:
-        model.train_batch()
-
-    goldstd_data = io.read_annotations_file('gold_std')
-    ev = morfessor.MorfessorEvaluation(goldstd_data)
-    results = [ev.evaluate_model(m) for m in models]
-
-    wsr = morfessor.WilcoxonSignedRank()
-    r = wsr.significance_test(results)
-    WilcoxonSignedRank.print_table(r)
-
-The equivalent of this on the command line would be: ::
-
-    morfessor-train -s model_types -d ones training_data
-    morfessor-train -s model_logtokens -d log training_data
-    morfessor-train -s model_tokens training_data
-
-    morfessor-evaluate gold_std morfessor-train morfessor-train morfessor-train
-
-
-Testing different amounts of supervision data
----------------------------------------------
+    for word in words:
+        print(model.viterbi_analyze(word))
 

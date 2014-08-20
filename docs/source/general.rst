@@ -2,8 +2,10 @@ General
 =======
 
 Morfessor FlatCat is a method for learning of morphological segmentation of natural language.
-FlatCat uses a Hidden Markov Model with the states ``{prefix, stem, suffix, non-morpheme}``
+FlatCat uses a Hidden Markov Model with the states (morph categories) ``{prefix, stem, suffix, non-morpheme}``
 for modeling the word internal ordering of morphs.
+The non-morpheme category (marked ZZZ) is intended to catch segments
+that are not proper morphs because they are fragments of a larger morph.
 FlatCat can be trained in an unsupervised or semi-supervised fashion.
 
 Publications

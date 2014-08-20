@@ -985,6 +985,7 @@ class FlatcatModel(object):
         derived data structures.
         Must call post_load on loaded model if this method is used.
         """
+        # FIXME: refactor with pickle __getstate__/__setstate__
         # These will be restored
         self.morph_backlinks.clear()
         self._interned_morphs.clear()

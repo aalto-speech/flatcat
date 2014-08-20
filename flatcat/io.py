@@ -37,7 +37,9 @@ class FlatcatIO(morfessor.MorfessorIO):
                  analysis_separator=',',
                  category_separator='/',
                  strict=True):
-        super(FlatcatIO, self).__init__(
+        # FIXME: temporary fix for old-style class in released baseline
+        #super(FlatcatIO, self).__init__(
+        morfessor.MorfessorIO.__init__(self,
             encoding=encoding,
             construction_separator=construction_separator,
             comment_start=comment_start,

@@ -16,9 +16,9 @@ For details, see http://docs.python.org/install/
 Documentation
 -------------
 
-User instructions for Morfessor FlatCat 1.0 will be available in the docs directory
-as Sphinx source files (see http://sphinx-doc.org/), once it is finished. FIXME
-Instructions how to build the documentation can be found in docs/README.
+User instructions for Morfessor FlatCat 1.0 are available in the docs directory
+as Sphinx source files (see http://sphinx-doc.org/). Instructions how
+to build the documentation can be found in docs/README.
 
 The documentation is also available on-line at FIXME
 

@@ -980,23 +980,31 @@ class FlatcatModel(object):
             (self.operation_callbacks, self.iteration_callbacks) = callbacks
         return out
 
-    def pre_save(self):
-        """Call this before pickling to conserve memory by clearing
-        derived data structures.
-        Must call post_load on loaded model if this method is used.
-        """
-        # FIXME: refactor with pickle __getstate__/__setstate__
-        # These will be restored
-        self.morph_backlinks.clear()
-        self._interned_morphs.clear()
-        self._morph_usage.clear()
-        # These are merely cleared
-        self._skipcounter.clear()
+    def __getstate__(self):
+        # clear caches of owned objects
         self._corpus_coding.clear_transition_cache()
         self._corpus_coding.clear_emission_cache()
+        self._morph_usage.clear()   # this needs to be restored
+        
+        # These will be restored
+        out = self.__dict__.copy()
+        del out['morph_backlinks']
+        del out['_interned_morphs']
+        del out['_skipcounter']
+        
+        # restores cleared _morph_usage
+        self.reestimate_probabilities()
 
-    def post_load(self):
-        """Recalculates derived datastructures cleared by pre_save."""
+        return out
+
+    def __setstate__(self, d):
+        self.__dict__ = d
+        # recreate deleted fields
+        self.morph_backlinks = collections.defaultdict(set)
+        self._interned_morphs = {}
+        self._skipcounter = collections.Counter()
+
+        # restore cleared caches
         self._calculate_morph_backlinks()
         self.reestimate_probabilities()
 

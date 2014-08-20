@@ -553,7 +553,6 @@ def flatcat_main(args):
     if init_is_pickle:
         _logger.info('Initializing from binary model...')
         model = io.read_binary_model_file(args.initfile)
-        model.post_load()
     else:
         _logger.info('Initializing from segmentation...')
         m_usage = categorizationscheme.MorphUsageProperties(
@@ -722,10 +721,7 @@ def flatcat_main(args):
     if args.savepicklefile is not None:
         _logger.info("Saving binary model...")
         model.toggle_callbacks(None)
-        model.pre_save()
         io.write_binary_model_file(args.savepicklefile, model)
-        if len(args.testfiles) > 0:
-            model.post_load()
         _logger.info("Done.")
 
     # Segment test data

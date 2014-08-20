@@ -594,11 +594,6 @@ def flatcat_main(args):
         must_train = model.initialize_hmm(
             min_difference_proportion=args.min_diff_prop)
 
-    if len(args.annofiles) > 0:
-        model.viterbi_tag_corpus()
-        model.reestimate_probabilities()
-        model._update_annotation_choices()
-
     # Extend the model with new unannotated data
     for f in args.extendfiles:
         model.add_corpus_data(io.read_segmentation_file(f),

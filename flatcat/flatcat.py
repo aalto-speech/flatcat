@@ -304,6 +304,11 @@ class FlatcatModel(object):
             self.initialize_baseline(min_difference_proportion)
         self.reestimate_probabilities()
 
+        if self._supervised:
+            self.viterbi_tag_corpus()
+            self.reestimate_probabilities()
+            self._update_annotation_choices()
+
         for callback in self.iteration_callbacks:
             callback(self)
 

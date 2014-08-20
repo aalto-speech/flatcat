@@ -185,6 +185,14 @@ and segmenting the file test_corpus.txt: ::
 
     flatcat-segment analysis.gz -L parameters.txt --remove-nonmorphemes -o test_corpus.segmented test_corpus.txt
 
+Include the categories in the output: ::
+
+    flatcat-segment analysis.gz -L parameters.txt --output-categories -o test_corpus.segmented test_corpus.txt
+
+Use FlatCat as a stemmer by removing prefixes and suffixes: ::
+
+    flatcat-segment analysis.gz -L parameters.txt --filter-categories PRE,SUF -o test_corpus.segmented test_corpus.txt
+
 flatcat-diagnostics
 -------------------
 

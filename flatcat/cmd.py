@@ -64,7 +64,7 @@ class ArgumentGroups(object):
 def get_flatcat_argparser():
     import argparse
     parser = argparse.ArgumentParser(
-        prog='flatcat.py',
+        prog='flatcat',
         description="""
 Morfessor FlatCat {version}
 
@@ -76,8 +76,8 @@ Command-line arguments:
 Simple usage examples (training and testing):
 
   %(prog)s baseline_segmentation.txt -p 10 -s analysis.gz -S parameters.txt
-  %(prog)s analysis.gz -L parameters.txt -m none -T test_corpus.txt \\
-        -o test_corpus.segmented
+  %(prog)s analysis.gz -L parameters.txt -m none --remove-nonmorphemes \\
+        -T test_corpus.txt -o test_corpus.segmented
 
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -108,8 +108,9 @@ def add_model_io_arguments(argument_groups):
     add_arg('--extend', dest='extendfiles', default=[],
             action='append', metavar='<file>',
             help='Extend the model using the segmentation from a file. '
-                 'The supported formats are the same as for --initialize, '
-                 'except thet pickled binary models are not supported. '
+                 'The supported formats are the same as for the '
+                 'initialization positional argument, '
+                 'except that pickled binary models are not supported. '
                  'Untagged segmentations will be tagged with the current '
                  'model.')
     add_arg('-T', '--testdata', dest='testfiles', action='append',
@@ -129,7 +130,7 @@ def add_model_io_arguments(argument_groups):
     add_arg('--save-binary-model', dest='savepicklefile',
             default=None, metavar='<file>',
             help='Save a binary FlatCat model with pickle. '
-                 'Use of a filename ending in ".pickled" is recommended '
+                 'Use of a filename ending in ".pickled" is recommended. '
                  'This format is suceptible to bit-rot, '
                  'and is not recommended for long-time storage.')
     add_arg('-x', '--lexicon', dest="lexfile", default=None, metavar='<file>',
@@ -552,7 +553,6 @@ def flatcat_main(args):
     if init_is_pickle:
         _logger.info('Initializing from binary model...')
         model = io.read_binary_model_file(args.initfile)
-        model.post_load()
     else:
         _logger.info('Initializing from segmentation...')
         m_usage = categorizationscheme.MorphUsageProperties(
@@ -593,11 +593,6 @@ def flatcat_main(args):
         # Initialize the model
         must_train = model.initialize_hmm(
             min_difference_proportion=args.min_diff_prop)
-
-    if len(args.annofiles) > 0:
-        model.viterbi_tag_corpus()
-        model.reestimate_probabilities()
-        model._update_annotation_choices()
 
     # Extend the model with new unannotated data
     for f in args.extendfiles:
@@ -721,10 +716,7 @@ def flatcat_main(args):
     if args.savepicklefile is not None:
         _logger.info("Saving binary model...")
         model.toggle_callbacks(None)
-        model.pre_save()
         io.write_binary_model_file(args.savepicklefile, model)
-        if len(args.testfiles) > 0:
-            model.post_load()
         _logger.info("Done.")
 
     # Segment test data

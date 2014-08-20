@@ -10,7 +10,7 @@ __all__ = ['MorfessorException', 'ArgumentException', 'FlatcatIO',
            'FlatcatModel', 'flatcat_main', 'get_flatcat_argparser',
            'MorphUsageProperties', 'HeuristicPostprocessor']
 
-__version__ = '1.0.0'
+__version__ = '1.0.1'
 __author__ = 'Stig-Arne Gronroos'
 __author_email__ = "morfessor@cis.hut.fi"
 

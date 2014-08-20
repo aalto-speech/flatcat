@@ -20,10 +20,11 @@ User instructions for Morfessor FlatCat 1.0 are available in the docs directory
 as Sphinx source files (see http://sphinx-doc.org/). Instructions how
 to build the documentation can be found in docs/README.
 
-The documentation is also available on-line at FIXME
+The documentation is also available on-line at http://flatcat.readthedocs.org/
 
-Details of the implemented algorithms and methods and a set of
-experiments are described in FIXME
+Details of the implemented algorithm and method and a set of
+experiments are described in the paper
+Grönroos, S.-A. and Virpioja, S. (2014). Morfessor FlatCat: An HMM-based method for unsupervised and semi-supervised learning of morphology. In Proceedings of the 25th International Conference on Computational Linguistics. Pages 1177--1185, Dublin, Ireland, August 2014, Association for Computational Linguistics.
 
 
 Contact

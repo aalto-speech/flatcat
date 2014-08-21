@@ -20,7 +20,7 @@ User instructions for Morfessor FlatCat 1.0 are available in the docs directory
 as Sphinx source files (see http://sphinx-doc.org/). Instructions how
 to build the documentation can be found in docs/README.
 
-The documentation is also available on-line at http://flatcat.readthedocs.org/
+The documentation is also available on-line at http://morfessor-flatcat.readthedocs.org/
 
 Details of the implemented algorithm and method and a set of
 experiments are described in the paper

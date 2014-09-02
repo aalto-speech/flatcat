@@ -232,7 +232,7 @@ def add_training_arguments(argument_groups):
             help='Training mode ("none", "batch", '
                  '"online", or "online+batch"; default "%(default)s")')
     add_arg('-p', '--perplexity-threshold', dest='ppl_threshold', type=float,
-            default=100., metavar='<float>',
+            default=None, metavar='<float>',
             help='Threshold value for sigmoid used to calculate '
                  'probabilities from left and right perplexities. '
                  '(default %(default)s).')
@@ -547,6 +547,16 @@ def flatcat_main(args):
                    compound_separator=args.cseparator,
                    analysis_separator=args.analysisseparator,
                    category_separator=args.catseparator)
+
+    if ((not init_is_pickle) and
+            args.ppl_threshold is None and
+            args.loadparamsfile is None):
+        raise ArgumentException(
+            'Perplexity threshold must be specified, '
+            'either on command line or in hyper-parameter file. '
+            'If you do not know what value to use, try something '
+            'between 10 (small corpus / low morphological complexity) '
+            'and 400 (large corpus, high complexity)')
 
     # Load exisiting model or create a new one
     must_train = False

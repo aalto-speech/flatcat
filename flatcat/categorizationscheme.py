@@ -265,13 +265,18 @@ class MorphUsageProperties(object):
                                      ignored when calculating perplexity.
         """
 
-        self._ppl_threshold = float(ppl_threshold)
+        if ppl_threshold is None:
+            self._ppl_threshold = None
+        else:
+            self._ppl_threshold = float(ppl_threshold)
         self._length_threshold = float(length_threshold)
         self._length_slope = float(length_slope)
         self.use_word_tokens = bool(use_word_tokens)
         self._min_perplexity_length = int(min_perplexity_length)
         if ppl_slope is not None:
             self._ppl_slope = float(ppl_slope)
+        elif self._ppl_threshold is None:
+            self._ppl_slope = None
         else:
             self._ppl_slope = 10.0 / self._ppl_threshold
 
@@ -327,6 +332,8 @@ class MorphUsageProperties(object):
     def calculate_usage_features(self, seg_func):
         """Calculate the usage features of morphs in the corpus."""
         self.clear()
+        msg = 'Must set perplexity threshold'
+        assert self._ppl_threshold is not None, msg
         while True:
             # If risk of running out of memory, perform calculations in
             # multiple loops over the data

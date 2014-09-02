@@ -2061,19 +2061,22 @@ class FlatcatModel(AbstractSegmenter):
             annotatedcorpusweight = self._annot_coding.weight
         return FlatcatSegmenter(
             self._morph_usage,
-            self.corpusweight,
-            self.num_compounds(),
-            self.num_constructions(),
+            self._lexicon_coding,
+            self._corpus_coding,
+            self.num_compounds,
+            self.num_constructions,
             self.annotations,
             annotatedcorpusweight)
 
 
 class FlatcatSegmenter(AbstractSegmenter):
-    def __init__(self, morph_usage, corpusweight,
+    def __init__(self, morph_usage, lexicon_coding, corpus_coding,
                  num_compounds, num_constructions,
                  annotations=None, annotatedcorpusweight=None):
         super(FlatcatSegmenter, self).__init__(morph_usage,
-                                               corpusweight=corpusweight)
+                                               corpusweight=1.0)
+        self._lexicon_coding = lexicon_coding
+        self._corpus_coding = corpus_coding
         self._segment_only = True
 
         self.annotations = None

@@ -133,6 +133,11 @@ def add_model_io_arguments(argument_groups):
                  'Use of a filename ending in ".pickled" is recommended. '
                  'This format is suceptible to bit-rot, '
                  'and is not recommended for long-time storage.')
+    add_arg('--save-reduced', dest="savereduced", default=None,
+            metavar='<file>',
+            help="save final model to file in reduced form (pickled model "
+                 "object). A model in reduced form can only be used for "
+                 "segmentation of new words.")
     add_arg('-x', '--lexicon', dest="lexfile", default=None, metavar='<file>',
             help='Output final lexicon with emission counts to given file')
     add_arg('-o', '--output', dest='outfile', default='-', metavar='<file>',
@@ -767,6 +772,10 @@ def flatcat_main(args):
     # Save statistics
     if args.stats_file is not None:
         io.write_binary_file(args.stats_file, stats)
+
+    if args.savereduced is not None:
+        reduced = model.make_segmenter()
+        io.write_binary_file(args.savereduced, reduced)
 
 
 def add_reformatting_arguments(argument_groups):

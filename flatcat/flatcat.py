@@ -255,15 +255,22 @@ class FlatcatModel(object):
         """Adds data to the annotated corpus."""
         self._supervised = True
         self._annotations_tagged = True
+        word_backlinks = {
+            ''.join(self.detag_word(seg.analysis)): i
+            for (i, seg) in enumerate(self.segmentations)}
         for (word, alternatives) in annotations.items():
             if alternatives[0][0].category is None:
                 self._annotations_tagged = False
-            # The word is also added to the unannotated corpus,
-            # to ensure that the needed morphs are available
-            i_unannot = len(self.segmentations)
-            self.segmentations.append(
-                WordAnalysis(1, alternatives[0]))
+            if word in word_backlinks:
+                i_unannot = word_backlinks[word]
+            else:
+                # The word is also added to the unannotated corpus,
+                # to ensure that the needed morphs are available
+                i_unannot = len(self.segmentations)
+                self.segmentations.append(
+                    WordAnalysis(1, alternatives[0]))
             self.annotations[word] = Annotation(alternatives, None, i_unannot)
+        del word_backlinks
         self._calculate_morph_backlinks()
         self._annot_coding = FlatcatAnnotatedCorpusEncoding(
                                 self._corpus_coding,

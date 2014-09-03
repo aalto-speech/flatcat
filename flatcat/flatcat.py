@@ -89,6 +89,7 @@ class FlatcatModel(object):
                  corpusweight=1.0, use_skips=False, ml_emissions_epoch=-1):
         self._morph_usage = morph_usage
 
+        self._initialized = False
         self._corpus_untagged = False
 
         # The analyzed (segmented and tagged) corpus
@@ -253,6 +254,8 @@ class FlatcatModel(object):
 
     def add_annotations(self, annotations, annotatedcorpusweight=None):
         """Adds data to the annotated corpus."""
+        if not self._initialized and not self._corpus_untagged:
+            self.reestimate_probabilities()
         self._supervised = True
         self._annotations_tagged = True
         word_backlinks = {
@@ -276,7 +279,10 @@ class FlatcatModel(object):
                                 self._corpus_coding,
                                 weight=annotatedcorpusweight)
         self._annot_coding.boundaries = len(self.annotations)
-        if not self._annotations_tagged:
+        if not self._corpus_untagged and not self._annotations_tagged:
+            self.viterbi_tag_corpus()
+            self.reestimate_probabilities()
+        elif not self._annotations_tagged:
             self._corpus_untagged = True
 
     def initialize_baseline(self, min_difference_proportion=0.005):
@@ -306,6 +312,9 @@ class FlatcatModel(object):
         changing the segmentation, using Viterbi EM.
         """
 
+        if self._initialized:
+            self.reestimate_probabilities()
+            return False
         must_train = self._corpus_untagged
         if self._corpus_untagged:
             self.initialize_baseline(min_difference_proportion)
@@ -906,6 +915,7 @@ class FlatcatModel(object):
         self._calculate_emission_counts()
         if self._supervised:
             self._annot_coding.reset_contributions()
+        self._initialized = True
 
     def map_segmentations(self, func):
         """Apply a mapping to the analysis part of segmentations.

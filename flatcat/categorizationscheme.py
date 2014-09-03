@@ -246,7 +246,7 @@ class MorphUsageProperties(object):
     _valid_transitions = None
 
     def __init__(self, ppl_threshold=100, ppl_slope=None, length_threshold=3,
-                 length_slope=2, use_word_tokens=True,
+                 length_slope=2, type_perplexity=False,
                  min_perplexity_length=4):
         """Initialize the model parameters describing morph usage.
 
@@ -259,8 +259,8 @@ class MorphUsageProperties(object):
                                probabilities from length of morph.
             length_slope :  Slope value for sigmoid used to calculate
                             probabilities from length of morph.
-            use_word_tokens :  If true, perplexity is based on word tokens.
-                               If false, perplexity is based on word types.
+            type_perplexity :  If true, perplexity is based on word types,
+                               If false, perplexity is based on word tokens.
             min_perplexity_length :  Morphs shorter than this length are
                                      ignored when calculating perplexity.
         """
@@ -271,7 +271,7 @@ class MorphUsageProperties(object):
             self._ppl_threshold = float(ppl_threshold)
         self._length_threshold = float(length_threshold)
         self._length_slope = float(length_slope)
-        self.use_word_tokens = bool(use_word_tokens)
+        self.type_perplexity = bool(type_perplexity)
         self._min_perplexity_length = int(min_perplexity_length)
         if ppl_slope is not None:
             self._ppl_slope = float(ppl_slope)
@@ -297,7 +297,7 @@ class MorphUsageProperties(object):
             'perplexity-slope': self._ppl_slope,
             'length-threshold': self._length_threshold,
             'length-slope': self._length_slope,
-            'type-perplexity': not self.use_word_tokens,
+            'type-perplexity': self.type_perplexity,
             'min-perplexity-length': self._min_perplexity_length}
         return params
 
@@ -322,7 +322,7 @@ class MorphUsageProperties(object):
         if 'type-perplexity' in params:
             _logger.info('Setting type-perplexity to {}'.format(
                 params['type-perplexity']))
-            self.use_word_tokens = (params['type-perplexity'] == 'False')
+            self.type_perplexity = bool(params['type-perplexity'])
         if 'min-perplexity-length' in params:
             _logger.info('Setting min-perplexity-length to {}'.format(
                 params['min-perplexity-length']))
@@ -340,7 +340,7 @@ class MorphUsageProperties(object):
             conserving_memory = False
             for rcount, segments in seg_func():
 
-                if self.use_word_tokens:
+                if not self.type_perplexity:
                     pcount = rcount
                 else:
                     # pcount used for perplexity, rcount is real count

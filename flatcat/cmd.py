@@ -570,7 +570,7 @@ def flatcat_main(args):
             ppl_slope=args.ppl_slope,
             length_threshold=args.length_threshold,
             length_slope=args.length_slope,
-            use_word_tokens=not args.type_ppl,
+            type_perplexity=args.type_ppl,
             min_perplexity_length=args.min_ppl_length)
         model = flatcat.FlatcatModel(
             m_usage,

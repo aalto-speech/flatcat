@@ -6,9 +6,11 @@ Morfessor file types
 Morfessor FlatCat 1.0 style text model
 --------------------------------------
 
-The standard format for Morfessor FlatCat 1.0 is a compressed plain-text analysis
-of the corpus (model.segmentation.gz) and a separate hyper-parameter file
-(parameters.txt). This format ensures that the model is human-readable for inspection,
+The recommended format for long-term storage of Morfessor FlatCat 1.0 models is
+as a compressed plain-text analysis of the corpus (model.segmentation.gz) and a separate hyper-parameter file
+(parameters.txt). In semi-supervised training the annotated corpus is not included in these files,
+so the annotation file must be stored alongside the analyzed corpus.
+The plain-text format ensures that the model is human-readable for inspection,
 and that later versions of Morfessor FlatCat are able to load the model.
 
 Model file

@@ -1,6 +1,7 @@
 from __future__ import unicode_literals
 
 import collections
+import locale
 import logging
 import math
 import sys
@@ -46,6 +47,11 @@ LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 """
+
+# Decodes commandline input in locale
+_preferred_encoding = locale.getpreferredencoding()
+def _locale_decoder(s):
+    return unicode(s.decode(_preferred_encoding))
 
 
 class ArgumentGroups(object):
@@ -737,9 +743,9 @@ def flatcat_main(args):
         csep = args.outputconseparator
         tsep = args.outputtagseparator
         if not PY3:
-            outformat = unicode(outformat)
-            csep = unicode(csep)
-            tsep = unicode(tsep)
+            outformat = _locale_decoder(outformat)
+            csep = _locale_decoder(csep)
+            tsep = _locale_decoder(tsep)
         outformat = outformat.replace(r"\n", "\n")
         outformat = outformat.replace(r"\t", "\t")
 
@@ -975,7 +981,7 @@ def reformat_main(args):
 
     outformat = args.outputformat
     if not PY3:
-        outformat = unicode(outformat)
+        outformat = _locale_decoder(outformat)
     outformat = outformat.replace(r"\n", "\n")
     outformat = outformat.replace(r"\t", "\t")
 

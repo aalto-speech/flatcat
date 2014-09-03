@@ -48,9 +48,11 @@ ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 """
 
-# Decodes commandline input in locale
 _preferred_encoding = locale.getpreferredencoding()
+
+
 def _locale_decoder(s):
+    """ Decodes commandline input in locale """
     return unicode(s.decode(_preferred_encoding))
 
 

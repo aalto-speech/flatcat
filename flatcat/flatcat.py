@@ -1007,13 +1007,13 @@ class FlatcatModel(object):
         self._corpus_coding.clear_transition_cache()
         self._corpus_coding.clear_emission_cache()
         self._morph_usage.clear()   # this needs to be restored
-        
+
         # These will be restored
         out = self.__dict__.copy()
         del out['morph_backlinks']
         del out['_interned_morphs']
         del out['_skipcounter']
-        
+
         # restores cleared _morph_usage
         self.reestimate_probabilities()
 

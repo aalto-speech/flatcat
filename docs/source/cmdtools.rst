@@ -1,6 +1,8 @@
 Command line tools
 ==================
 
+.. _command-line-tools:
+
 The installation process installs 5 scripts in the appropriate PATH.
 
 flatcat

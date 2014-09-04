@@ -24,7 +24,7 @@ from .categorizationscheme import ByCategory, get_categories, CategorizedMorph
 from .categorizationscheme import DEFAULT_CATEGORY
 from .categorizationscheme import MaximumLikelihoodMorphUsage
 from .exception import InvalidOperationError
-from .utils import LOGPROB_ZERO, zlog
+from .utils import LOGPROB_ZERO, zlog, _is_string
 
 PY3 = sys.version_info.major == 3
 
@@ -640,7 +640,7 @@ class FlatcatModel(object):
             best_cost      :  The cost of the returned solution
         """
 
-        if isinstance(segments, basestring):
+        if _is_string(segments):
             word = segments
         else:
             # Throw away old category information, if any
@@ -1082,7 +1082,7 @@ class FlatcatModel(object):
 
         if len(segmentations) == 0:
             return
-        if all(isinstance(s, basestring) for s in segmentations):
+        if all(_is_string(s) for s in segmentations):
             segmentations = [segmentations]
         if retag:
             assert isinstance(retag, bool)
@@ -1135,7 +1135,7 @@ class FlatcatModel(object):
             else:
                 word = line
                 count = 1
-            if isinstance(word, basestring):
+            if _is_string(word):
                 word = (word,)
             yield WordAnalysis(count, self.viterbi_analyze(word)[0])
 

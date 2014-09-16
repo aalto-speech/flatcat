@@ -315,6 +315,7 @@ class FlatcatModel(object):
         if self._initialized:
             self.reestimate_probabilities()
             return False
+        ForceSplitter(self).enforce()
         must_train = self._corpus_untagged
         if self._corpus_untagged:
             self.initialize_baseline(min_difference_proportion)
@@ -2728,6 +2729,60 @@ class CostBreakdown(object):
     def penalty(self, cost):
         self.cost += cost
         self.components.append('penalty: {}'.format(cost))
+
+
+class ForceSplitter(object):
+    def __init__(self, model):
+        self.model = model
+        self.must_reestimate = False
+
+    def enforce(self):
+        self.must_reestimate = False
+        if self.model.forcesplit:
+            self.model.segmentations = list(self.model.map_segmentations(
+                self._forcesplit))
+        if self.model.nosplit_re:
+            self.model.segmentations = list(self.model.map_segmentations(
+                self._nosplit))
+        if self.must_reestimate:
+            self.model.reestimate_probabilities()
+            self.model._calculate_morph_backlinks()
+
+    def _forcesplit(self, analysis):
+        out = []
+        for cmorph in analysis:
+            if len(cmorph) == 1:
+                out.append(cmorph)
+                continue
+            j = 0
+            for i in range(1, len(cmorph)):
+                if cmorph[i] in self.model.forcesplit:
+                    if len(cmorph[j:i]) > 0:
+                        out.append(self._part(cmorph, j, i))
+                    out.append(self._part(cmorph, i, i + 1))
+                    j = i + 1
+            if j < len(cmorph):
+                out.append(self._part(cmorph, j, len(cmorph)))
+        return out
+
+    def _nosplit(self, analysis):
+        out = []
+        prev = None
+        for cmorph in analysis:
+            if prev is None:
+                prev = cmorph
+                continue
+            if self.model.nosplit_re.match(prev[-1:] + cmorph[0]):
+                prev = CategorizedMorph(prev.morph + cmorph.morph,
+                                        DEFAULT_CATEGORY)
+            else:
+                out.append(prev)
+                prev = cmorph
+        out.append(prev)
+        return out
+
+    def _part(self, cmorph, j, i):
+        return CategorizedMorph(cmorph[j:i], cmorph.category)
 
 
 def _log_catprobs(probs):

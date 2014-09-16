@@ -771,6 +771,9 @@ class CategorizedMorph(object):
     def __len__(self):
         return len(self.morph)
 
+    def __getitem__(self, i):
+        return self.morph[i]
+
 
 def get_categories(wb=False):
     """The category tags supported by this model.

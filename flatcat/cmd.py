@@ -750,6 +750,7 @@ def flatcat_main(args):
             tsep = _locale_decoder(tsep)
         outformat = outformat.replace(r"\n", "\n")
         outformat = outformat.replace(r"\t", "\t")
+        keywords = [x[1] for x in string.Formatter().parse(outformat)]
 
         if len(args.filter_categories) > 0:
             filter_tags = [x.upper()
@@ -767,7 +768,11 @@ def flatcat_main(args):
             if heuristic is not None:
                 constructions = heuristic.remove_nonmorphemes(
                                     constructions, model)
-            return (count, compound, [constructions], logp)
+            if 'clogprob' in keywords:
+                clogp = model.forward_logprob(atoms)
+            else:
+                clogp = 0
+            return (count, compound, [constructions], logp, clogp)
 
         io.write_formatted_file(
             args.outfile,
@@ -943,7 +948,7 @@ def reformat_main(args):
                  for analysis in item.alternatives])
 
     def custom_conversion(item):
-        return (item.count, item.compound, item.alternatives, 0)
+        return (item.count, item.compound, item.alternatives, 0, 0)
 
     def separate_analyses(data):
         for item in data:

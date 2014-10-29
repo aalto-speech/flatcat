@@ -126,7 +126,11 @@ class FlatcatIO(morfessor.MorfessorIO):
 
         def _annotation_func(item):
             (compound, annotation) = item
-            return (1, compound, annotation.alternatives, 0, 0)
+            try:
+                alts = annotation.alternatives
+            except AttributeError:
+                alts = annotation
+            return (1, compound, alts, 0, 0)
 
         self.write_formatted_file(
             file_name,

@@ -621,8 +621,10 @@ class FlatcatModel(object):
         assert i_word is not None
         return i_word
 
-    def viterbi_segment(self, segments):
-        """Compatible with Morfessor Baseline."""
+    def viterbi_segment(self, segments, addcount=None, maxlen=None):
+        """Compatibility with Morfessor Baseline.
+        
+        Note that the addcount and maxlen arguments are silently ignored"""
         # FIXME: both this and baseline should hide the logp
         analysis, logp = self.viterbi_analyze(segments)
         return (self.detag_word(analysis), logp)

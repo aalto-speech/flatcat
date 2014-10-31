@@ -4,6 +4,7 @@ import collections
 import locale
 import logging
 import math
+import string
 import sys
 import time
 

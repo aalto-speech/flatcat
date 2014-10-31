@@ -313,6 +313,9 @@ class MorphUsageProperties(object):
             _logger.info('Setting perplexity-threshold to {}'.format(
                 params['perplexity-threshold']))
             self._ppl_threshold = (float(params['perplexity-threshold']))
+        if 'pre-perplexity-threshold' in params:
+            _logger.info('Setting pre-perplexity-threshold to {}'.format(
+                params['pre-perplexity-threshold']))
             self._pre_ppl_threshold = (float(params['pre-perplexity-threshold']))
         if 'perplexity-slope' in params:
             _logger.info('Setting perplexity-slope to {}'.format(

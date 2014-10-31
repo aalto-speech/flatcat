@@ -244,6 +244,11 @@ def add_training_arguments(argument_groups):
             help='Threshold value for sigmoid used to calculate '
                  'probabilities from left and right perplexities. '
                  '(default %(default)s).')
+    add_arg('--prefix-perplexity-threshold', dest='pre_ppl_threshold', type=float,
+            default=None, metavar='<float>',
+            help='Separate perplexity threshold for prefixes. '
+                 '(default is to use --perplexity-threshold for '
+                 'both prefixes and suffixes).')
     add_arg('--perplexity-slope', dest='ppl_slope', type=float, default=None,
             metavar='<float>',
             help='Slope value for sigmoid used to calculate '
@@ -579,7 +584,8 @@ def flatcat_main(args):
             length_threshold=args.length_threshold,
             length_slope=args.length_slope,
             type_perplexity=args.type_ppl,
-            min_perplexity_length=args.min_ppl_length)
+            min_perplexity_length=args.min_ppl_length,
+            pre_ppl_threshold=args.pre_ppl_threshold)
         model = flatcat.FlatcatModel(
             m_usage,
             forcesplit=args.forcesplit,

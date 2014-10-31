@@ -247,7 +247,7 @@ class MorphUsageProperties(object):
 
     def __init__(self, ppl_threshold=100, ppl_slope=None, length_threshold=3,
                  length_slope=2, type_perplexity=False,
-                 min_perplexity_length=4):
+                 min_perplexity_length=4, pre_ppl_threshold=None):
         """Initialize the model parameters describing morph usage.
 
         Arguments:
@@ -263,12 +263,17 @@ class MorphUsageProperties(object):
                                If false, perplexity is based on word tokens.
             min_perplexity_length :  Morphs shorter than this length are
                                      ignored when calculating perplexity.
+            pre_ppl_threshold: Separte ppl thresh for prefixes.
         """
 
         if ppl_threshold is None:
             self._ppl_threshold = None
         else:
             self._ppl_threshold = float(ppl_threshold)
+        if pre_ppl_threshold is None:
+            self._pre_ppl_threshold = self._ppl_threshold
+        else:
+            self._pre_ppl_threshold = float(pre_ppl_threshold)
         self._length_threshold = float(length_threshold)
         self._length_slope = float(length_slope)
         self.type_perplexity = bool(type_perplexity)
@@ -294,6 +299,7 @@ class MorphUsageProperties(object):
         """Returns a dict of hyperparameters."""
         params = {
             'perplexity-threshold': self._ppl_threshold,
+            'pre-perplexity-threshold': self._pre_ppl_threshold,
             'perplexity-slope': self._ppl_slope,
             'length-threshold': self._length_threshold,
             'length-slope': self._length_slope,
@@ -307,6 +313,7 @@ class MorphUsageProperties(object):
             _logger.info('Setting perplexity-threshold to {}'.format(
                 params['perplexity-threshold']))
             self._ppl_threshold = (float(params['perplexity-threshold']))
+            self._pre_ppl_threshold = (float(params['pre-perplexity-threshold']))
         if 'perplexity-slope' in params:
             _logger.info('Setting perplexity-slope to {}'.format(
                 params['perplexity-slope']))
@@ -334,6 +341,8 @@ class MorphUsageProperties(object):
         self.clear()
         msg = 'Must set perplexity threshold'
         assert self._ppl_threshold is not None, msg
+        if self._pre_ppl_threshold is None:
+            self._pre_ppl_threshold = self._ppl_threshold
         while True:
             # If risk of running out of memory, perform calculations in
             # multiple loops over the data
@@ -419,7 +428,7 @@ class MorphUsageProperties(object):
         if morph not in self._condprob_cache:
             context = self._contexts[morph]
 
-            prelike = sigmoid(context.right_perplexity, self._ppl_threshold,
+            prelike = sigmoid(context.right_perplexity, self._pre_ppl_threshold,
                             self._ppl_slope)
             suflike = sigmoid(context.left_perplexity, self._ppl_threshold,
                             self._ppl_slope)

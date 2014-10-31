@@ -280,10 +280,13 @@ class MorphUsageProperties(object):
         self._min_perplexity_length = int(min_perplexity_length)
         if ppl_slope is not None:
             self._ppl_slope = float(ppl_slope)
+            self._pre_ppl_slope = self._ppl_slope
         elif self._ppl_threshold is None:
             self._ppl_slope = None
+            self._pre_ppl_slope = self._ppl_slope
         else:
             self._ppl_slope = 10.0 / self._ppl_threshold
+            self._pre_ppl_slope = 10.0 / self._pre_ppl_threshold
 
         # Counts of different contexts in which a morph occurs
         self._contexts = utils.Sparse(default=MorphContext(0, 1.0, 1.0))
@@ -432,7 +435,7 @@ class MorphUsageProperties(object):
             context = self._contexts[morph]
 
             prelike = sigmoid(context.right_perplexity, self._pre_ppl_threshold,
-                            self._ppl_slope)
+                            self._pre_ppl_slope)
             suflike = sigmoid(context.left_perplexity, self._ppl_threshold,
                             self._ppl_slope)
             stmlike = sigmoid(len(morph), self._length_threshold,

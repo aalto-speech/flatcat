@@ -21,7 +21,7 @@ from morfessor import baseline
 from . import utils
 from .categorizationscheme import MorphUsageProperties, WORD_BOUNDARY
 from .categorizationscheme import ByCategory, get_categories, CategorizedMorph
-from .categorizationscheme import DEFAULT_CATEGORY
+from .categorizationscheme import DEFAULT_CATEGORY, HeuristicPostprocessor
 from .categorizationscheme import MaximumLikelihoodMorphUsage
 from .exception import InvalidOperationError
 from .utils import LOGPROB_ZERO, zlog, _is_string
@@ -623,10 +623,14 @@ class FlatcatModel(object):
 
     def viterbi_segment(self, segments, addcount=None, maxlen=None):
         """Compatibility with Morfessor Baseline.
+        Heuristics are applied to remove nonmorphemes.
         
-        Note that the addcount and maxlen arguments are silently ignored"""
+        Note that the addcount and maxlen arguments are silently ignored.
+        """
         # FIXME: both this and baseline should hide the logp
         analysis, logp = self.viterbi_analyze(segments)
+        analysis = HeuristicPostprocessor().remove_nonmorphemes(
+            analysis, self)
         return (self.detag_word(analysis), logp)
 
     def viterbi_analyze(self, segments, strict_annot=True):

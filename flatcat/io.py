@@ -283,5 +283,8 @@ def _make_morph_formatter(category_sep, output_tags):
                                     cmorph.category)
     else:
         def output_morph(cmorph):
-            return cmorph.morph
+            try:
+                return cmorph.morph
+            except AttributeError:
+                return cmorph
     return output_morph

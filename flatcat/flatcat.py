@@ -451,6 +451,7 @@ class FlatcatModel(AbstractSegmenter):
                                            corpusweight=corpusweight,
                                            nosplit=nosplit)
 
+        self._initialized = False
         self._corpus_untagged = False
         self._segment_only = False
 
@@ -657,6 +658,10 @@ class FlatcatModel(AbstractSegmenter):
         changing the segmentation, using Viterbi EM.
         """
 
+        if self._initialized:
+            self.reestimate_probabilities()
+            return False
+        ForceSplitter(self).enforce()
         must_train = self._corpus_untagged
         if self._corpus_untagged:
             self.initialize_baseline(min_difference_proportion)

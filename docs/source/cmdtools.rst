@@ -1,6 +1,8 @@
 Command line tools
 ==================
 
+.. _command-line-tools:
+
 The installation process installs 5 scripts in the appropriate PATH.
 
 flatcat
@@ -69,6 +71,35 @@ Training model options
     online+batch
         Initialization and online training followed by batch training.
 
+``--max-epochs <int>``
+    Hard maximum of epochs in training
+``--online-epochint <int>``
+    Epoch interval for online training (default 10000)
+
+``-f <list>, --forcesplit <list>``
+    A list of atoms that would always cause the compound to be split. By
+    default only hyphens (``-``) would force a split. Note the notation of the
+    argument list. To have no force split characters, use as an empty string as
+    argument (``-f ""``). To split, for example, both hyphen (``-``) and
+    apostrophe (``'``) use ``-f "-'"``
+``--nosplit-re <regexp>``
+    If the expression matches the two surrounding
+    characters, do not allow splitting (default None)
+
+``-p <float>, --perplexity-threshold <float>``
+    Threshold value for sigmoid used to calculate
+    class conditional probabilities for prefixes and suffixes,
+    from left and right perplexities.
+    There is no default value, to make forgotten hyperparameters more explicit,
+    so you must specify a value either on the command line or in a hyper-parameter file. 
+    If you do not know what value to use, try something 
+    between 10 (small corpus / low morphological complexity) 
+    and 400 (large corpus, high complexity).
+
+``--skips``
+    Use random skips for frequently seen compounds to
+    speed up oneline training. Has no effect on batch training.
+
 ``-d <type>, --dampening <type>``
     Method for changing the compound counts in the input data.
     Note, that if the counts in the intialization file are already dampened
@@ -83,27 +114,9 @@ Training model options
     ones
         Treat all compounds as if they only occured once (type based training)
 
-``-f <list>, --forcesplit <list>``
-    A list of atoms that would always cause the compound to be split. By
-    default only hyphens (``-``) would force a split. Note the notation of the
-    argument list. To have no force split characters, use as an empty string as
-    argument (``-f ""``). To split, for example, both hyphen (``-``) and
-    apostrophe (``'``) use ``-f "-'"``
-``--nosplit-re <regexp>``
-    If the expression matches the two surrounding
-    characters, do not allow splitting (default None)
-
-``--skips``
-    Use random skips for frequently seen compounds to
-    speed up oneline training. Has no effect on batch training.
-
 ``--batch-minfreq <int>``
     Compound frequency threshold for batch training
     (default 1)
-``--max-epochs <int>``
-    Hard maximum of epochs in training
-``--online-epochint <int>``
-    Epoch interval for online training (default 10000)
 
 
 Saving model
@@ -153,7 +166,7 @@ Train a Morfessor FlatCat model from a Morfessor Baseline segmentation in ISO_88
 writing the log to logfile,
 and saving the model as a binary file model.pickled: ::
 
-    flatcat-train baseline_segmentation.txt --encoding=ISO_8859-15 -p 10 --logfile=log.log --save-binary-model model.pickled
+    flatcat-train baseline_segmentation.txt --encoding=ISO_8859-15 --perplexity-threshold 10 --logfile=log.log --save-binary-model model.pickled
 
 flatcat-segment
 -----------------
@@ -206,7 +219,7 @@ Examples
 Collect statistics during training,
 using development set devset.segmentation: ::
     
-    flatcat-train baseline_segmentation.txt -p 10 --save-binary-model model.pickled --statsfile stats.pickled --stats-annotations devset.segmentation
+    flatcat-train baseline_segmentation.txt --perplexity-threshold 100 --save-binary-model model.pickled --statsfile stats.pickled --stats-annotations devset.segmentation
 
 Plot the statistics: ::
 

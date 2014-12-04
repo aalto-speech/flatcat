@@ -1,8 +1,10 @@
 from __future__ import unicode_literals
 
 import collections
+import locale
 import logging
 import math
+import string
 import sys
 import time
 
@@ -46,6 +48,13 @@ LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 """
+
+_preferred_encoding = locale.getpreferredencoding()
+
+
+def _locale_decoder(s):
+    """ Decodes commandline input in locale """
+    return unicode(s.decode(_preferred_encoding))
 
 
 class ArgumentGroups(object):
@@ -237,10 +246,15 @@ def add_training_arguments(argument_groups):
             help='Training mode ("none", "batch", '
                  '"online", or "online+batch"; default "%(default)s")')
     add_arg('-p', '--perplexity-threshold', dest='ppl_threshold', type=float,
-            default=100., metavar='<float>',
+            default=None, metavar='<float>',
             help='Threshold value for sigmoid used to calculate '
                  'probabilities from left and right perplexities. '
                  '(default %(default)s).')
+    add_arg('--prefix-perplexity-threshold', dest='pre_ppl_threshold', type=float,
+            default=None, metavar='<float>',
+            help='Separate perplexity threshold for prefixes. '
+                 '(default is to use --perplexity-threshold for '
+                 'both prefixes and suffixes).')
     add_arg('--perplexity-slope', dest='ppl_slope', type=float, default=None,
             metavar='<float>',
             help='Slope value for sigmoid used to calculate '
@@ -553,6 +567,16 @@ def flatcat_main(args):
                    analysis_separator=args.analysisseparator,
                    category_separator=args.catseparator)
 
+    if ((not init_is_pickle) and
+            args.ppl_threshold is None and
+            args.loadparamsfile is None):
+        raise ArgumentException(
+            'Perplexity threshold must be specified, '
+            'either on command line or in hyper-parameter file. '
+            'If you do not know what value to use, try something '
+            'between 10 (small corpus / low morphological complexity) '
+            'and 400 (large corpus, high complexity)')
+
     # Load exisiting model or create a new one
     must_train = False
     if init_is_pickle:
@@ -565,8 +589,9 @@ def flatcat_main(args):
             ppl_slope=args.ppl_slope,
             length_threshold=args.length_threshold,
             length_slope=args.length_slope,
-            use_word_tokens=not args.type_ppl,
-            min_perplexity_length=args.min_ppl_length)
+            type_perplexity=args.type_ppl,
+            min_perplexity_length=args.min_ppl_length,
+            pre_ppl_threshold=args.pre_ppl_threshold)
         model = flatcat.FlatcatModel(
             m_usage,
             forcesplit=args.forcesplit,
@@ -580,6 +605,15 @@ def flatcat_main(args):
             count_modifier=dampfunc,
             freqthreshold=args.freqthreshold)
 
+    # Load the hyperparamters
+    if not init_is_pickle:
+        model.training_operations = training_ops
+        if args.loadparamsfile is not None:
+            _logger.info('Loading hyperparameters from {}'.format(
+                args.loadparamsfile))
+            model.set_params(
+                io.read_parameter_file(args.loadparamsfile))
+
     # Add annotated data
     for f in args.annofiles:
         annotations = io.read_annotations_file(f)
@@ -587,13 +621,6 @@ def flatcat_main(args):
                               args.annotationweight)
 
     if not init_is_pickle:
-        # Load the hyperparamters
-        model.training_operations = training_ops
-        if args.loadparamsfile is not None:
-            _logger.info('Loading hyperparameters from {}'.format(
-                args.loadparamsfile))
-            model.set_params(
-                io.read_parameter_file(args.loadparamsfile))
         # Initialize the model
         must_train = model.initialize_hmm(
             min_difference_proportion=args.min_diff_prop)
@@ -730,11 +757,12 @@ def flatcat_main(args):
         csep = args.outputconseparator
         tsep = args.outputtagseparator
         if not PY3:
-            outformat = unicode(outformat)
-            csep = unicode(csep)
-            tsep = unicode(tsep)
+            outformat = _locale_decoder(outformat)
+            csep = _locale_decoder(csep)
+            tsep = _locale_decoder(tsep)
         outformat = outformat.replace(r"\n", "\n")
         outformat = outformat.replace(r"\t", "\t")
+        keywords = [x[1] for x in string.Formatter().parse(outformat)]
 
         if len(args.filter_categories) > 0:
             filter_tags = [x.upper()
@@ -752,7 +780,11 @@ def flatcat_main(args):
             if heuristic is not None:
                 constructions = heuristic.remove_nonmorphemes(
                                     constructions, model)
-            return (count, compound, [constructions], logp)
+            if 'clogprob' in keywords:
+                clogp = model.forward_logprob(atoms)
+            else:
+                clogp = 0
+            return (count, compound, [constructions], logp, clogp)
 
         io.write_formatted_file(
             args.outfile,
@@ -932,7 +964,7 @@ def reformat_main(args):
                  for analysis in item.alternatives])
 
     def custom_conversion(item):
-        return (item.count, item.compound, item.alternatives, 0)
+        return (item.count, item.compound, item.alternatives, 0, 0)
 
     def separate_analyses(data):
         for item in data:
@@ -972,7 +1004,7 @@ def reformat_main(args):
 
     outformat = args.outputformat
     if not PY3:
-        outformat = unicode(outformat)
+        outformat = _locale_decoder(outformat)
     outformat = outformat.replace(r"\n", "\n")
     outformat = outformat.replace(r"\t", "\t")
 

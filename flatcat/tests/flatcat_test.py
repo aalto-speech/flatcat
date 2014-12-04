@@ -60,7 +60,7 @@ def _load_flatcat(baseline_seg, init='full'):
         m_usage = flatcat.MorphUsageProperties(ppl_threshold=10, ppl_slope=1,
                                               length_threshold=3,
                                               length_slope=2,
-                                              use_word_tokens=False)
+                                              type_perplexity=True)
         model = flatcat.FlatcatModel(m_usage)
         model.add_corpus_data(baseline_seg)
         if init == 'no_emissions':

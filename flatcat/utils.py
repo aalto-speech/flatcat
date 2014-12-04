@@ -122,7 +122,7 @@ class Sparse(dict):
 
     def __setitem__(self, key, value):
         # attribute check is necessary for unpickling
-        if '_default' in self and value == self._default:
+        if '_default' in self.__dict__ and value == self._default:
             if key in self:
                 del self[key]
         else:
@@ -215,3 +215,10 @@ def _generator_progress(generator):
         sys.stderr.write('\n')
 
     return _progress_wrapper(generator)
+
+
+def _is_string(obj):
+    try:
+        return isinstance(obj, basestring)
+    except NameError:
+        return isinstance(obj, str)

@@ -126,7 +126,11 @@ class FlatcatIO(morfessor.MorfessorIO):
 
         def _annotation_func(item):
             (compound, annotation) = item
-            return (1, compound, annotation.alternatives, 0)
+            try:
+                alts = annotation.alternatives
+            except AttributeError:
+                alts = annotation
+            return (1, compound, alts, 0, 0)
 
         self.write_formatted_file(
             file_name,
@@ -207,7 +211,7 @@ class FlatcatIO(morfessor.MorfessorIO):
                     if output_newlines:
                         fobj.write("\n")
                     continue
-                (count, compound, alternatives, logp) = data_func(item)
+                (count, compound, alternatives, logp, clogp) = data_func(item)
 
                 analysis = []
                 if len(alternatives) == 1:
@@ -235,6 +239,7 @@ class FlatcatIO(morfessor.MorfessorIO):
                                 compound=compound,
                                 count=count,
                                 logprob=logp,
+                                clogprob=clogp,
                                 num_morphs=num_morphs,
                                 num_nonmorphemes=num_nonmorphemes,
                                 num_letters=num_letters))
@@ -278,5 +283,8 @@ def _make_morph_formatter(category_sep, output_tags):
                                     cmorph.category)
     else:
         def output_morph(cmorph):
-            return cmorph.morph
+            try:
+                return cmorph.morph
+            except AttributeError:
+                return cmorph
     return output_morph

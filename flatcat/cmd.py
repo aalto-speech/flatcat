@@ -4,6 +4,7 @@ import collections
 import locale
 import logging
 import math
+import string
 import sys
 import time
 
@@ -244,6 +245,11 @@ def add_training_arguments(argument_groups):
             help='Threshold value for sigmoid used to calculate '
                  'probabilities from left and right perplexities. '
                  '(default %(default)s).')
+    add_arg('--prefix-perplexity-threshold', dest='pre_ppl_threshold', type=float,
+            default=None, metavar='<float>',
+            help='Separate perplexity threshold for prefixes. '
+                 '(default is to use --perplexity-threshold for '
+                 'both prefixes and suffixes).')
     add_arg('--perplexity-slope', dest='ppl_slope', type=float, default=None,
             metavar='<float>',
             help='Slope value for sigmoid used to calculate '
@@ -579,7 +585,8 @@ def flatcat_main(args):
             length_threshold=args.length_threshold,
             length_slope=args.length_slope,
             type_perplexity=args.type_ppl,
-            min_perplexity_length=args.min_ppl_length)
+            min_perplexity_length=args.min_ppl_length,
+            pre_ppl_threshold=args.pre_ppl_threshold)
         model = flatcat.FlatcatModel(
             m_usage,
             forcesplit=args.forcesplit,
@@ -750,6 +757,7 @@ def flatcat_main(args):
             tsep = _locale_decoder(tsep)
         outformat = outformat.replace(r"\n", "\n")
         outformat = outformat.replace(r"\t", "\t")
+        keywords = [x[1] for x in string.Formatter().parse(outformat)]
 
         if len(args.filter_categories) > 0:
             filter_tags = [x.upper()
@@ -767,7 +775,11 @@ def flatcat_main(args):
             if heuristic is not None:
                 constructions = heuristic.remove_nonmorphemes(
                                     constructions, model)
-            return (count, compound, [constructions], logp)
+            if 'clogprob' in keywords:
+                clogp = model.forward_logprob(atoms)
+            else:
+                clogp = 0
+            return (count, compound, [constructions], logp, clogp)
 
         io.write_formatted_file(
             args.outfile,
@@ -943,7 +955,7 @@ def reformat_main(args):
                  for analysis in item.alternatives])
 
     def custom_conversion(item):
-        return (item.count, item.compound, item.alternatives, 0)
+        return (item.count, item.compound, item.alternatives, 0, 0)
 
     def separate_analyses(data):
         for item in data:

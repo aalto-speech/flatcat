@@ -21,7 +21,7 @@ from morfessor import baseline
 from . import utils
 from .categorizationscheme import MorphUsageProperties, WORD_BOUNDARY
 from .categorizationscheme import ByCategory, get_categories, CategorizedMorph
-from .categorizationscheme import DEFAULT_CATEGORY
+from .categorizationscheme import DEFAULT_CATEGORY, HeuristicPostprocessor
 from .categorizationscheme import MaximumLikelihoodMorphUsage
 from .exception import InvalidOperationError
 from .utils import LOGPROB_ZERO, zlog, _is_string
@@ -621,10 +621,16 @@ class FlatcatModel(object):
         assert i_word is not None
         return i_word
 
-    def viterbi_segment(self, segments):
-        """Compatible with Morfessor Baseline."""
+    def viterbi_segment(self, segments, addcount=None, maxlen=None):
+        """Compatibility with Morfessor Baseline.
+        Heuristics are applied to remove nonmorphemes.
+        
+        Note that the addcount and maxlen arguments are silently ignored.
+        """
         # FIXME: both this and baseline should hide the logp
         analysis, logp = self.viterbi_analyze(segments)
+        analysis = HeuristicPostprocessor().remove_nonmorphemes(
+            analysis, self)
         return (self.detag_word(analysis), logp)
 
     def viterbi_analyze(self, segments, strict_annot=True):
@@ -893,6 +899,100 @@ class FlatcatModel(object):
                 num_changed_words += 1
         self._corpus_untagged = False
         return num_changed_words
+
+    def forward_logprob(self, word):
+        """Find log-probability of a word using the forward algorithm.
+
+        Returns:
+            cost      : (negative) log-probability of the word.
+        """
+
+        # To make sure that internally impossible states are penalized
+        # even more than impossible states caused by zero parameters.
+        extrazero = LOGPROB_ZERO ** 2
+
+        # This function uses internally indices of categories,
+        # instead of names and the word boundary object,
+        # to remove the need to look them up constantly.
+        categories = get_categories(wb=True)
+        categories_nowb = [i for (i, c) in enumerate(categories)
+                           if c != WORD_BOUNDARY]
+        wb = categories.index(WORD_BOUNDARY)
+
+        # Grid consisting of
+        # the accumulated cost ending in each possible state.
+        # The grid is 3-dimensional:
+        # grid [POSITION_IN_WORD]
+        #      [MORPHLEN_OF_MORPH_ENDING_AT_POSITION - 1]
+        #      [TAGINDEX_OF_MORPH_ENDING_AT_POSITION]
+        # Initialized to pseudo-zero for all states
+        zeros = [extrazero] * len(categories)
+        grid = [[zeros]]
+        # Except probability one that first state is a word boundary
+        grid[0][0][wb] = 0
+
+        # Temporaries
+        # Cumulative costs for each category at current time step
+        cost = None
+        psum = 0.0
+
+        for pos in range(1, len(word) + 1):
+            grid.append([])
+            for next_len in range(1, pos + 1):
+                grid[pos].append(list(zeros))
+                prev_pos = pos - next_len
+                morph = self._interned_morph(word[prev_pos:pos])
+
+                if (self.nosplit_re and
+                        pos < len(word) and
+                        self.nosplit_re.match(word[(pos - 1):(pos + 1)])):
+                    # Splitting at this point is forbidden
+                    grid[pos][next_len - 1] = zeros
+                    continue
+                if morph not in self._morph_usage:
+                    # The morph corresponding to this substring has not
+                    # been encountered: zero probability for this solution
+                    grid[pos][next_len - 1] = zeros
+                    continue
+
+                for next_cat in categories_nowb:
+                    psum = 0.0
+                    if prev_pos == 0:
+                        # First morph in word
+                        cost = self._corpus_coding.transit_emit_cost(
+                            WORD_BOUNDARY, categories[next_cat], morph)
+                        psum += math.exp(-cost)
+                    # implicit else: for-loop will be empty if prev_pos == 0
+                    for prev_cat in categories_nowb:
+                        t_e_cost = self._corpus_coding.transit_emit_cost(
+                                        categories[prev_cat],
+                                        categories[next_cat],
+                                        morph)
+                        for prev_len in range(1, prev_pos + 1):
+                            cost = (t_e_cost +
+                                grid[prev_pos][prev_len - 1][prev_cat])
+                            psum += math.exp(-cost)
+                    if psum > 0:
+                        cost = -math.log(psum)
+                    else:
+                        cost = LOGPROB_ZERO
+                    grid[pos][next_len - 1][next_cat] = cost
+
+        # Last transition must be to word boundary
+        psum = 0.0
+        for prev_len in range(1, len(word) + 1):
+            for prev_cat in categories_nowb:
+                cost = (grid[-1][prev_len - 1][prev_cat] +
+                        self._corpus_coding.log_transitionprob(
+                            categories[prev_cat],
+                            WORD_BOUNDARY))
+                psum += math.exp(-cost)
+        if psum > 0:
+            cost = -math.log(psum)
+        else:
+            cost = LOGPROB_ZERO
+
+        return cost
 
     ### Secondary public methods
     #

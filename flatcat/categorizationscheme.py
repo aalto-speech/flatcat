@@ -247,7 +247,7 @@ class MorphUsageProperties(object):
 
     def __init__(self, ppl_threshold=100, ppl_slope=None, length_threshold=3,
                  length_slope=2, type_perplexity=False,
-                 min_perplexity_length=4):
+                 min_perplexity_length=4, pre_ppl_threshold=None):
         """Initialize the model parameters describing morph usage.
 
         Arguments:
@@ -263,22 +263,30 @@ class MorphUsageProperties(object):
                                If false, perplexity is based on word tokens.
             min_perplexity_length :  Morphs shorter than this length are
                                      ignored when calculating perplexity.
+            pre_ppl_threshold: Separte ppl thresh for prefixes.
         """
 
         if ppl_threshold is None:
             self._ppl_threshold = None
         else:
             self._ppl_threshold = float(ppl_threshold)
+        if pre_ppl_threshold is None:
+            self._pre_ppl_threshold = self._ppl_threshold
+        else:
+            self._pre_ppl_threshold = float(pre_ppl_threshold)
         self._length_threshold = float(length_threshold)
         self._length_slope = float(length_slope)
         self.type_perplexity = bool(type_perplexity)
         self._min_perplexity_length = int(min_perplexity_length)
         if ppl_slope is not None:
             self._ppl_slope = float(ppl_slope)
+            self._pre_ppl_slope = self._ppl_slope
         elif self._ppl_threshold is None:
             self._ppl_slope = None
+            self._pre_ppl_slope = self._ppl_slope
         else:
             self._ppl_slope = 10.0 / self._ppl_threshold
+            self._pre_ppl_slope = 10.0 / self._pre_ppl_threshold
 
         # Counts of different contexts in which a morph occurs
         self._contexts = utils.Sparse(default=MorphContext(0, 1.0, 1.0))
@@ -294,7 +302,9 @@ class MorphUsageProperties(object):
         """Returns a dict of hyperparameters."""
         params = {
             'perplexity-threshold': self._ppl_threshold,
+            'pre-perplexity-threshold': self._pre_ppl_threshold,
             'perplexity-slope': self._ppl_slope,
+            'pre-perplexity-slope': self._pre_ppl_slope,
             'length-threshold': self._length_threshold,
             'length-slope': self._length_slope,
             'type-perplexity': self.type_perplexity,
@@ -307,10 +317,18 @@ class MorphUsageProperties(object):
             _logger.info('Setting perplexity-threshold to {}'.format(
                 params['perplexity-threshold']))
             self._ppl_threshold = (float(params['perplexity-threshold']))
+        if 'pre-perplexity-threshold' in params:
+            _logger.info('Setting pre-perplexity-threshold to {}'.format(
+                params['pre-perplexity-threshold']))
+            self._pre_ppl_threshold = (float(params['pre-perplexity-threshold']))
         if 'perplexity-slope' in params:
             _logger.info('Setting perplexity-slope to {}'.format(
                 params['perplexity-slope']))
             self._ppl_slope = (float(params['perplexity-slope']))
+        if 'pre-perplexity-slope' in params:
+            _logger.info('Setting pre-perplexity-slope to {}'.format(
+                params['perplexity-slope']))
+            self._pre_ppl_slope = (float(params['pre-perplexity-slope']))
         if 'length-threshold' in params:
             _logger.info('Setting length-threshold to {}'.format(
                 params['length-threshold']))
@@ -334,6 +352,8 @@ class MorphUsageProperties(object):
         self.clear()
         msg = 'Must set perplexity threshold'
         assert self._ppl_threshold is not None, msg
+        if self._pre_ppl_threshold is None:
+            self._pre_ppl_threshold = self._ppl_threshold
         while True:
             # If risk of running out of memory, perform calculations in
             # multiple loops over the data
@@ -419,8 +439,8 @@ class MorphUsageProperties(object):
         if morph not in self._condprob_cache:
             context = self._contexts[morph]
 
-            prelike = sigmoid(context.right_perplexity, self._ppl_threshold,
-                            self._ppl_slope)
+            prelike = sigmoid(context.right_perplexity, self._pre_ppl_threshold,
+                            self._pre_ppl_slope)
             suflike = sigmoid(context.left_perplexity, self._ppl_threshold,
                             self._ppl_slope)
             stmlike = sigmoid(len(morph), self._length_threshold,

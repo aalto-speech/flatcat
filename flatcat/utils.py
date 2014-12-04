@@ -122,7 +122,7 @@ class Sparse(dict):
 
     def __setitem__(self, key, value):
         # attribute check is necessary for unpickling
-        if '_default' in self and value == self._default:
+        if '_default' in self.__dict__ and value == self._default:
             if key in self:
                 del self[key]
         else:

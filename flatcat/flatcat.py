@@ -56,11 +56,6 @@ class AbstractSegmenter(object):
         # Morph usage properties
         self._morph_usage = morph_usage
 
-        # Morph occurence backlinks
-        # A dict of sets. Keys are morphs, set contents are indices to
-        # self.segmentations for words in which the morph occurs
-        self.morph_backlinks = collections.defaultdict(set)
-
         # Cost variables
         self._lexicon_coding = FlatcatLexiconEncoding(morph_usage)
         # Flatcat encoding also stores the HMM parameters
@@ -457,6 +452,11 @@ class FlatcatModel(AbstractSegmenter):
 
         # The analyzed (segmented and tagged) corpus
         self.segmentations = []
+
+        # Morph occurence backlinks
+        # A dict of sets. Keys are morphs, set contents are indices to
+        # self.segmentations for words in which the morph occurs
+        self.morph_backlinks = collections.defaultdict(set)
 
         # Cache for custom interning system
         self._interned_morphs = {}

@@ -18,7 +18,7 @@ import re
 import sys
 
 from morfessor import baseline
-from . import utils
+from . import utils, reduced
 from .categorizationscheme import MorphUsageProperties, WORD_BOUNDARY
 from .categorizationscheme import ByCategory, get_categories, CategorizedMorph
 from .categorizationscheme import DEFAULT_CATEGORY, HeuristicPostprocessor
@@ -324,11 +324,6 @@ class AbstractSegmenter(object):
             cost += self._annot_coding.get_cost()
         assert cost >= 0
         return cost
-
-    def get_lexicon(self):
-        """Returns morphs in lexicon, with emission counts"""
-        for morph in sorted(self._morph_usage.seen_morphs()):
-            yield (morph, self._corpus_coding.get_emission_counts(morph))
 
     def rank_analyses(self, choices):
         """Choose the best analysis of a set of choices.
@@ -2480,7 +2475,7 @@ class FlatcatModel(AbstractSegmenter):
         annotatedcorpusweight = None
         if self._annot_coding is not None:
             annotatedcorpusweight = self._annot_coding.weight
-        return FlatcatSegmenter(
+        return reduced.FlatcatSegmenter(
             self._morph_usage,
             self._lexicon_coding,
             self._corpus_coding,
@@ -2488,43 +2483,6 @@ class FlatcatModel(AbstractSegmenter):
             self.num_constructions,
             self.annotations,
             annotatedcorpusweight)
-
-
-class FlatcatSegmenter(AbstractSegmenter):
-    def __init__(self, morph_usage, lexicon_coding, corpus_coding,
-                 num_compounds, num_constructions,
-                 annotations=None, annotatedcorpusweight=None):
-        super(FlatcatSegmenter, self).__init__(morph_usage,
-                                               corpusweight=1.0)
-        self._lexicon_coding = lexicon_coding
-        self._corpus_coding = corpus_coding
-        self._segment_only = True
-
-        self.annotations = None
-        if annotations is not None:
-            self._supervised = True
-            self.annotations = annotations
-            self._annotations_tagged = True
-            for (word, annot) in annotations.items():
-                if annot.alternatives[0][0].category is None:
-                    self._annotations_tagged = False
-            self._annot_coding = FlatcatAnnotatedCorpusEncoding(
-                                    self._corpus_coding,
-                                    weight=annotatedcorpusweight)
-            self._annot_coding.boundaries = len(self.annotations)
-        self._num_compounds = num_compounds
-        self._num_constructions = num_constructions
-
-    @property
-    def num_compounds(self):
-        """Compound (word) types"""
-        return self._num_compounds
-
-    @property
-    def num_constructions(self):
-        """Construction (morph) types"""
-        return self._num_constructions
-    
 
 
 class FlatcatLexiconEncoding(baseline.LexiconEncoding):

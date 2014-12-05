@@ -62,6 +62,8 @@ class ReducedEncoding(object):
     def __init__(self, corpus_encoding):
         # Transition and emission logprobs,
         # The reduced model only stores these
+        # FIXME: not working (copied as is, not guaranteed to be filled)
+        # FIXME: also, the format results in a huge number of keys
         self._log_transitionprob_cache = dict(
             corpus_encoding._log_transitionprob_cache)
         self._log_emissionprob_cache = dict(

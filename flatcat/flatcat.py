@@ -316,15 +316,6 @@ class AbstractSegmenter(object):
                 morph, categories[backtrace.backpointer]))
         return tuple(result)
 
-    def get_cost(self):
-        """Return current model encoding cost."""
-        cost = self._corpus_coding.get_cost() + self._lexicon_coding.get_cost()
-        assert cost >= 0
-        if self._supervised:
-            cost += self._annot_coding.get_cost()
-        assert cost >= 0
-        return cost
-
     def rank_analyses(self, choices):
         """Choose the best analysis of a set of choices.
 
@@ -2476,9 +2467,7 @@ class FlatcatModel(AbstractSegmenter):
         if self._annot_coding is not None:
             annotatedcorpusweight = self._annot_coding.weight
         return reduced.FlatcatSegmenter(
-            self._morph_usage,
-            self._lexicon_coding,
-            self._corpus_coding,
+            reduced.ReducedEncoding(self._corpus_coding),
             self.num_compounds,
             self.num_constructions,
             self.annotations,

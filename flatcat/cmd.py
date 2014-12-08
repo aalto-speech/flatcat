@@ -8,7 +8,7 @@ import string
 import sys
 import time
 
-from . import get_version, _logger, flatcat
+from . import get_version, _logger, flatcat, reduced
 from . import categorizationscheme
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
@@ -806,8 +806,8 @@ def flatcat_main(args):
         io.write_binary_file(args.stats_file, stats)
 
     if args.savereduced is not None:
-        reduced = model.make_segmenter()
-        io.write_binary_file(args.savereduced, reduced)
+        reduced_model = reduced.FlatcatSegmenter(model)
+        io.write_binary_file(args.savereduced, reduced_model)
 
 
 def add_reformatting_arguments(argument_groups):

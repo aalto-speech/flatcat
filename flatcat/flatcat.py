@@ -18,7 +18,7 @@ import re
 import sys
 
 from morfessor import baseline
-from . import utils, reduced
+from . import utils
 from .categorizationscheme import MorphUsageProperties, WORD_BOUNDARY
 from .categorizationscheme import ByCategory, get_categories, CategorizedMorph
 from .categorizationscheme import DEFAULT_CATEGORY, HeuristicPostprocessor
@@ -52,21 +52,17 @@ Are you using the correct construction separator?"""
 
 
 class AbstractSegmenter(object):
-    def __init__(self, morph_usage, corpusweight=1.0, nosplit=None):
-        # Morph usage properties
-        self._morph_usage = morph_usage
-
-        # Cost variables
-        self._lexicon_coding = FlatcatLexiconEncoding(morph_usage)
-        # Flatcat encoding also stores the HMM parameters
-        self._corpus_coding = FlatcatEncoding(morph_usage,
-                                              self._lexicon_coding,
-                                              weight=corpusweight)
+    def __init__(self, corpus_coding, nosplit=None):
+        self._corpus_coding = corpus_coding
         # Do not allow splitting between a letter pair matching this regex
         if nosplit is None:
             self.nosplit_re = None
-        else:
+        elif _is_string(nosplit):
             self.nosplit_re = re.compile(nosplit, re.UNICODE)
+        else:
+            self.nosplit_re = nosplit
+        self.annotations = None
+        self._annotations_tagged = False
 
     def viterbi_segment(self, segments):
         """Compatible with Morfessor Baseline."""
@@ -153,7 +149,7 @@ class AbstractSegmenter(object):
                     # Splitting at this point is forbidden
                     grid[pos][next_len - 1] = zeros
                     continue
-                if morph not in self._morph_usage:
+                if morph not in self.seen_morphs():
                     # The morph corresponding to this substring has not
                     # been encountered: zero probability for this solution
                     grid[pos][next_len - 1] = zeros
@@ -361,6 +357,9 @@ class AbstractSegmenter(object):
         """Override in subclass"""
         return morph
 
+    def seen_morphs(self):
+        raise AttributeError('Must override seen_morphs')
+
     @staticmethod
     def get_categories(wb=False):
         """The category tags supported by this model.
@@ -428,10 +427,18 @@ class FlatcatModel(AbstractSegmenter):
 
     def __init__(self, morph_usage, forcesplit=None, nosplit=None,
                  corpusweight=1.0, use_skips=False, ml_emissions_epoch=-1):
-        super(FlatcatModel, self).__init__(morph_usage,
-                                           corpusweight=corpusweight,
-                                           nosplit=nosplit)
+        # Morph usage properties
+        self._morph_usage = morph_usage
 
+        # Cost variables
+        self._lexicon_coding = FlatcatLexiconEncoding(morph_usage)
+        # Flatcat encoding also stores the HMM parameters
+        self._corpus_coding = FlatcatEncoding(morph_usage,
+                                              self._lexicon_coding,
+                                              weight=corpusweight)
+
+        super(FlatcatModel, self).__init__(self._corpus_coding,
+                                           nosplit=nosplit)
         self._initialized = False
         self._corpus_untagged = False
         self._segment_only = False
@@ -1381,6 +1388,9 @@ class FlatcatModel(AbstractSegmenter):
 
     def set_corpus_coding_weight(self, weight):
         self._corpus_coding.weight = weight
+
+    def seen_morphs(self):
+        return self._morph_usage.seen_morphs()
 
     def get_lexicon(self):
         """Returns morphs in lexicon, with emission counts"""
@@ -2461,17 +2471,6 @@ class FlatcatModel(AbstractSegmenter):
     def num_constructions(self):
         """Construction (morph) types"""
         return len(self._morph_usage.seen_morphs())
-
-    def make_segmenter(self):
-        annotatedcorpusweight = None
-        if self._annot_coding is not None:
-            annotatedcorpusweight = self._annot_coding.weight
-        return reduced.FlatcatSegmenter(
-            reduced.ReducedEncoding(self._corpus_coding),
-            self.num_compounds,
-            self.num_constructions,
-            self.annotations,
-            annotatedcorpusweight)
 
 
 class FlatcatLexiconEncoding(baseline.LexiconEncoding):

@@ -11,39 +11,37 @@ import random
 import re
 import sys
 
-from . import utils
 from .categorizationscheme import ByCategory, get_categories, CategorizedMorph
 from .categorizationscheme import MorphUsageProperties
-from .flatcat import AbstractSegmenter, FlatcatEncoding
-from .flatcat import FlatcatAnnotatedCorpusEncoding
+from .flatcat import AbstractSegmenter, FlatcatAnnotatedCorpusEncoding
 from .utils import LOGPROB_ZERO, zlog
 
 _logger = logging.getLogger(__name__)
 
 class FlatcatSegmenter(AbstractSegmenter):
-    def __init__(self, morph_usage, lexicon_coding, corpus_coding,
-                 num_compounds, num_constructions,
-                 annotations=None, annotatedcorpusweight=None):
-        super(FlatcatSegmenter, self).__init__(morph_usage,
-                                               corpusweight=1.0)
-        self._lexicon_coding = lexicon_coding
-        self._corpus_coding = corpus_coding
+    def __init__(self, model):
+        self._lexicon_coding = model._lexicon_coding
+        self._corpus_coding = ReducedEncoding(
+            model._corpus_coding, model._morph_usage)
+        super(FlatcatSegmenter, self).__init__(self._corpus_coding,
+                                               model.nosplit_re)
         self._segment_only = True
 
-        self.annotations = None
-        if annotations is not None:
+        if model.annotations is None:
+            self.annotations = None
+        else:
             self._supervised = True
-            self.annotations = annotations
+            self.annotations = self.annotations
             self._annotations_tagged = True
-            for (word, annot) in annotations.items():
+            for (word, annot) in self.annotations.items():
                 if annot.alternatives[0][0].category is None:
                     self._annotations_tagged = False
-            self._annot_coding = FlatcatAnnotatedCorpusEncoding(
-                                    self._corpus_coding,
-                                    weight=annotatedcorpusweight)
-            self._annot_coding.boundaries = len(self.annotations)
-        self._num_compounds = num_compounds
-        self._num_constructions = num_constructions
+            self._annot_coding = model._annot_coding
+        self._num_compounds = model.num_compounds
+        self._num_constructions = model.num_constructions
+
+    def seen_morphs(self):
+        return self._corpus_coding._log_emissionprob_cache.keys()
 
     @property
     def num_compounds(self):
@@ -59,20 +57,36 @@ class FlatcatSegmenter(AbstractSegmenter):
 class ReducedEncoding(object):
     """Reduced variant of FlatcatEncoding """
 
-    def __init__(self, corpus_encoding):
+    def __init__(self, corpus_encoding, morph_usage):
         # Transition and emission logprobs,
         # The reduced model only stores these
-        # FIXME: not working (copied as is, not guaranteed to be filled)
-        # FIXME: also, the format results in a huge number of keys
-        self._log_transitionprob_cache = dict(
-            corpus_encoding._log_transitionprob_cache)
-        self._log_emissionprob_cache = dict(
-            corpus_encoding._log_emissionprob_cache)
+        self._log_transitionprob_cache = self._populate_transitions(
+            corpus_encoding)
+        self._log_emissionprob_cache = self._populate_emissions(
+            corpus_encoding, morph_usage)
 
         self.cost = corpus_encoding.get_cost()
         self.boundaries = corpus_encoding.boundaries
 
     # Transition count methods
+
+    def _populate_transitions(self, corpus_encoding):
+        out = {}
+        categories = get_categories(wb=True)
+        for prev_cat in categories:
+            for next_cat in categories:
+                out[(prev_cat, next_cat)] = (
+                    corpus_encoding.log_transitionprob(prev_cat, next_cat))
+        return out
+
+    def _populate_emissions(self, corpus_encoding, morph_usage):
+        out = {}
+        categories = get_categories(wb=False)
+        for morph in morph_usage.seen_morphs():
+            out[morph] = ByCategory(
+                *[corpus_encoding.log_emissionprob(cat)
+                  for cat in categories])
+        return out
 
     def log_transitionprob(self, prev_cat, next_cat):
         """-Log of transition probability P(next_cat|prev_cat)"""
@@ -81,8 +95,8 @@ class ReducedEncoding(object):
 
     def log_emissionprob(self, category, morph, extrazero=False):
         """-Log of posterior emission probability P(morph|category)"""
-        pair = (category, morph)
-        tmp = self._log_emissionprob_cache[pair]
+        categories = get_categories(wb=False)
+        tmp = self._log_emissionprob_cache[morph][categories.index(category)]
         if extrazero and tmp >= LOGPROB_ZERO:
             return tmp ** 2
         return tmp

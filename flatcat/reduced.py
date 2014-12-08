@@ -31,7 +31,7 @@ class FlatcatSegmenter(AbstractSegmenter):
             self.annotations = None
         else:
             self._supervised = True
-            self.annotations = self.annotations
+            self.annotations = model.annotations
             self._annotations_tagged = True
             for (word, annot) in self.annotations.items():
                 if annot.alternatives[0][0].category is None:
@@ -84,7 +84,7 @@ class ReducedEncoding(object):
         categories = get_categories(wb=False)
         for morph in morph_usage.seen_morphs():
             out[morph] = ByCategory(
-                *[corpus_encoding.log_emissionprob(cat)
+                *[corpus_encoding.log_emissionprob(cat, morph)
                   for cat in categories])
         return out
 

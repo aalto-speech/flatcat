@@ -2625,25 +2625,32 @@ class FlatcatEncoding(baseline.CorpusEncoding):
     def log_emissionprob(self, category, morph, extrazero=False):
         """-Log of posterior emission probability P(morph|category)"""
         pair = (category, morph)
-        if pair not in self._log_emissionprob_cache:
+        if pair in self._log_emissionprob_cache:
+            value = self._log_emissionprob_cache[pair]
+        else:
             cat_index = get_categories().index(category)
             count = self._morph_usage.count(morph)
             # Not equal to what you get by:
             # zlog(self._emission_counts[morph][cat_index]) +
             if self._cat_tagcount[category] == 0 or count == 0:
-                self._log_emissionprob_cache[pair] = LOGPROB_ZERO
+                value = LOGPROB_ZERO
             else:
-                self._log_emissionprob_cache[pair] = (
+                value = (
                     zlog(count) +
                     zlog(self._morph_usage.condprobs(morph)[cat_index]) -
                     zlog(self._morph_usage.category_token_count[cat_index]))
+            if len(self._log_emissionprob_cache) > 50000:
+                # Dont let the cache grow too big
+                self._log_emissionprob_cache.clear()
+            if count >= 5:
+                self._log_emissionprob_cache[pair] = value
         # Assertion disabled due to performance hit
         #msg = 'emission {} -> {} has probability > 1'.format(category, morph)
         #assert self._log_emissionprob_cache[pair] >= 0, msg
-        tmp = self._log_emissionprob_cache[pair]
-        if extrazero and tmp >= LOGPROB_ZERO:
-            return tmp ** 2
-        return tmp
+            
+        if extrazero and value >= LOGPROB_ZERO:
+            return value ** 2
+        return value
 
     def update_emission_count(self, category, morph, diff_count):
         """Updates the number of observed emissions of a single morph from a

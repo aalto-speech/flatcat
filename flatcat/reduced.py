@@ -85,6 +85,7 @@ class ReducedEncoding(object):
             out[morph] = ByCategory(
                 *[corpus_encoding.log_emissionprob(cat, morph)
                   for cat in categories])
+            corpus_encoding.clear_emission_cache()
         return out
 
     def log_transitionprob(self, prev_cat, next_cat):

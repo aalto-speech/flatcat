@@ -20,7 +20,6 @@ _logger = logging.getLogger(__name__)
 
 class FlatcatSegmenter(AbstractSegmenter):
     def __init__(self, model):
-        self._lexicon_coding = model._lexicon_coding
         self._corpus_coding = ReducedEncoding(
             model._corpus_coding, model._morph_usage)
         super(FlatcatSegmenter, self).__init__(self._corpus_coding,

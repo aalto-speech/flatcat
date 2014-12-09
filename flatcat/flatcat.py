@@ -2559,6 +2559,8 @@ class FlatcatEncoding(baseline.CorpusEncoding):
         # How frequent must a morph be to count as frequent
         self._persistence_limit = 3
         self._cache_size = 75000
+        # Needed very often, reducing function calls
+        self._categories = get_categories()
 
         self.logcondprobsum = 0.0
 
@@ -2628,7 +2630,7 @@ class FlatcatEncoding(baseline.CorpusEncoding):
 
     def log_emissionprob(self, category, morph, extrazero=False):
         """-Log of posterior emission probability P(morph|category)"""
-        cat_index = get_categories().index(category)
+        cat_index = self._categories.index(category)
         value = self._emission_helper(morph)[cat_index]
         # Assertion disabled due to performance hit
         #msg = 'emission {} -> {} has probability > 1'.format(category, morph)
@@ -2644,18 +2646,18 @@ class FlatcatEncoding(baseline.CorpusEncoding):
             return self._log_emissionprob_cache[morph]
         count = self._morph_usage.count(morph)
         zlcount = zlog(count)
+        zlctc = self._morph_usage.zlog_category_token_count()
         condprobs = self._morph_usage.condprobs(morph)
         tmp = []
-        for (cat_index, cat) in enumerate(get_categories()):
+        for (cat_index, cat) in enumerate(self._categories):
             # Not equal to what you get by:
             # zlog(self._emission_counts[morph][cat_index]) +
             if self._cat_tagcount[cat] == 0 or count == 0:
                 value = LOGPROB_ZERO
             else:
-                value = (
-                    zlcount +
-                    zlog(condprobs[cat_index]) -
-                    zlog(self._morph_usage.category_token_count[cat_index]))    # FIXME cache
+                value = (zlcount +
+                         zlog(condprobs[cat_index]) -
+                         zlctc[cat_index])
             tmp.append(value)
         tmp = ByCategory(*tmp)
         if count >= self._persistence_limit:
@@ -2684,7 +2686,7 @@ class FlatcatEncoding(baseline.CorpusEncoding):
         if diff_count == 0:
             return
         assert category is not None
-        cat_index = get_categories().index(category)
+        cat_index = self._categories.index(category)
         old_count = self._emission_counts[morph][cat_index]
         new_count = old_count + diff_count
         logcondprob = -zlog(self._morph_usage.condprobs(morph)[cat_index])

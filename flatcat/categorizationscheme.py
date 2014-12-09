@@ -297,6 +297,7 @@ class MorphUsageProperties(object):
         # Cache for memoized feature-based conditional class probabilities
         self._condprob_cache = collections.defaultdict(float)
         self._marginalizer = None
+        self._zlctc = None
 
     def get_params(self):
         """Returns a dict of hyperparameters."""
@@ -386,6 +387,7 @@ class MorphUsageProperties(object):
         self._context_builders.clear()
         self._condprob_cache.clear()
         self._marginalizer = None
+        self._zlctc = None
 
     def _add_to_context(self, morph, pcount, rcount, i, segments):
         """Collect information about the contexts in which the morph occurs"""
@@ -488,6 +490,12 @@ class MorphUsageProperties(object):
         See marginal_class_probs for the normalized version.
         """
         return self._get_marginalizer().category_token_count
+
+    def zlog_category_token_count(self):
+        if self._zlctc is None:
+            self._zlctc = ByCategory(
+                *[utils.zlog(x) for x in self.category_token_count])
+        return self._zlctc
 
     def _get_marginalizer(self):
         if self._marginalizer is None:

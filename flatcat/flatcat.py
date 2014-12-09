@@ -2698,8 +2698,9 @@ class FlatcatEncoding(baseline.CorpusEncoding):
             **{category: new_count})
         self._set_emission_counts(morph, new_counts)
 
-        # invalidate cache
-        self._log_emissionprob_cache.clear()
+        # cached probabilities no longer valid
+        self.clear_emission_cache()
+
 
     def _set_emission_counts(self, morph, new_counts):
         """Set the number of emissions of a morph from all categories
@@ -2724,8 +2725,8 @@ class FlatcatEncoding(baseline.CorpusEncoding):
                 self.logtokensum += new_total * math.log(new_total)
             self.tokens += new_total
 
-        # invalidate cache
-        self._log_emissionprob_cache.clear()
+        # cached probabilities no longer valid
+        self.clear_emission_cache()
 
     def clear_emission_counts(self):
         """Resets emission counts and costs.
@@ -2734,11 +2735,13 @@ class FlatcatEncoding(baseline.CorpusEncoding):
         self.logtokensum = 0.0
         self.logcondprobsum = 0.0
         self._emission_counts.clear()
+        self._persistent_log_emissionprob_cache.clear()
         self._log_emissionprob_cache.clear()
 
     def clear_emission_cache(self):
         """Clears the cache for emission probability values.
         Use if an incremental change invalidates cached values."""
+        self._persistent_log_emissionprob_cache.clear()
         self._log_emissionprob_cache.clear()
 
     def clear_transition_cache(self):

@@ -963,7 +963,7 @@ class FlatcatModel(AbstractSegmenter):
     def viterbi_segment(self, segments, addcount=None, maxlen=None):
         """Compatibility with Morfessor Baseline.
         Heuristics are applied to remove nonmorphemes.
-        
+
         Note that the addcount and maxlen arguments are silently ignored.
         """
         # FIXME: both this and baseline should hide the logp
@@ -2647,7 +2647,7 @@ class FlatcatEncoding(baseline.CorpusEncoding):
         # Assertion disabled due to performance hit
         #msg = 'emission {} -> {} has probability > 1'.format(category, morph)
         #assert self._log_emissionprob_cache[pair] >= 0, msg
-            
+
         if extrazero and value >= LOGPROB_ZERO:
             return value ** 2
         return value

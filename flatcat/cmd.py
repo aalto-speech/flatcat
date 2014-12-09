@@ -250,8 +250,8 @@ def add_training_arguments(argument_groups):
             help='Threshold value for sigmoid used to calculate '
                  'probabilities from left and right perplexities. '
                  '(default %(default)s).')
-    add_arg('--prefix-perplexity-threshold', dest='pre_ppl_threshold', type=float,
-            default=None, metavar='<float>',
+    add_arg('--prefix-perplexity-threshold', dest='pre_ppl_threshold',
+            type=float, default=None, metavar='<float>',
             help='Separate perplexity threshold for prefixes. '
                  '(default is to use --perplexity-threshold for '
                  'both prefixes and suffixes).')

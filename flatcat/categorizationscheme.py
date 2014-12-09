@@ -320,7 +320,8 @@ class MorphUsageProperties(object):
         if 'pre-perplexity-threshold' in params:
             _logger.info('Setting pre-perplexity-threshold to {}'.format(
                 params['pre-perplexity-threshold']))
-            self._pre_ppl_threshold = (float(params['pre-perplexity-threshold']))
+            self._pre_ppl_threshold = (float(
+                params['pre-perplexity-threshold']))
         if 'perplexity-slope' in params:
             _logger.info('Setting perplexity-slope to {}'.format(
                 params['perplexity-slope']))
@@ -439,12 +440,15 @@ class MorphUsageProperties(object):
         if morph not in self._condprob_cache:
             context = self._contexts[morph]
 
-            prelike = sigmoid(context.right_perplexity, self._pre_ppl_threshold,
-                            self._pre_ppl_slope)
-            suflike = sigmoid(context.left_perplexity, self._ppl_threshold,
-                            self._ppl_slope)
-            stmlike = sigmoid(len(morph), self._length_threshold,
-                            self._length_slope)
+            prelike = sigmoid(context.right_perplexity,
+                              self._pre_ppl_threshold,
+                              self._pre_ppl_slope)
+            suflike = sigmoid(context.left_perplexity,
+                              self._ppl_threshold,
+                              self._ppl_slope)
+            stmlike = sigmoid(len(morph),
+                              self._length_threshold,
+                              self._length_slope)
 
             p_nonmorpheme = (1. - prelike) * (1. - suflike) * (1. - stmlike)
             # assert 0 <= p_nonmorpheme <= 1

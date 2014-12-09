@@ -18,6 +18,7 @@ from .utils import LOGPROB_ZERO, zlog
 
 _logger = logging.getLogger(__name__)
 
+
 class FlatcatSegmenter(AbstractSegmenter):
     def __init__(self, model):
         self._corpus_coding = ReducedEncoding(

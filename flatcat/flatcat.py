@@ -2555,6 +2555,10 @@ class FlatcatEncoding(baseline.CorpusEncoding):
         # to avoid wasting effort recalculating.
         self._log_transitionprob_cache = dict()
         self._log_emissionprob_cache = dict()
+        self._persistent_log_emissionprob_cache = dict()
+        # How frequent must a morph be to count as frequent
+        self._persistence_limit = 3
+        self._cache_size = 75000
 
         self.logcondprobsum = 0.0
 
@@ -2624,33 +2628,48 @@ class FlatcatEncoding(baseline.CorpusEncoding):
 
     def log_emissionprob(self, category, morph, extrazero=False):
         """-Log of posterior emission probability P(morph|category)"""
-        pair = (category, morph)
-        if pair in self._log_emissionprob_cache:
-            value = self._log_emissionprob_cache[pair]
-        else:
-            cat_index = get_categories().index(category)
-            count = self._morph_usage.count(morph)
-            # Not equal to what you get by:
-            # zlog(self._emission_counts[morph][cat_index]) +
-            if self._cat_tagcount[category] == 0 or count == 0:
-                value = LOGPROB_ZERO
-            else:
-                value = (
-                    zlog(count) +
-                    zlog(self._morph_usage.condprobs(morph)[cat_index]) -
-                    zlog(self._morph_usage.category_token_count[cat_index]))
-            if len(self._log_emissionprob_cache) > 50000:
-                # Dont let the cache grow too big
-                self._log_emissionprob_cache.clear()
-            if count >= 5:
-                self._log_emissionprob_cache[pair] = value
+        cat_index = get_categories().index(category)
+        value = self._emission_helper(morph)[cat_index]
         # Assertion disabled due to performance hit
         #msg = 'emission {} -> {} has probability > 1'.format(category, morph)
-        #assert self._log_emissionprob_cache[pair] >= 0, msg
-
+        #assert value >= 0, msg
         if extrazero and value >= LOGPROB_ZERO:
             return value ** 2
         return value
+
+    def _emission_helper(self, morph):
+        if morph in self._persistent_log_emissionprob_cache:
+            return self._persistent_log_emissionprob_cache[morph]
+        if morph in self._log_emissionprob_cache:
+            return self._log_emissionprob_cache[morph]
+        count = self._morph_usage.count(morph)
+        zlcount = zlog(count)
+        condprobs = self._morph_usage.condprobs(morph)
+        tmp = []
+        for (cat_index, cat) in enumerate(get_categories()):
+            # Not equal to what you get by:
+            # zlog(self._emission_counts[morph][cat_index]) +
+            if self._cat_tagcount[cat] == 0 or count == 0:
+                value = LOGPROB_ZERO
+            else:
+                value = (
+                    zlcount +
+                    zlog(condprobs[cat_index]) -
+                    zlog(self._morph_usage.category_token_count[cat_index]))    # FIXME cache
+            tmp.append(value)
+        tmp = ByCategory(*tmp)
+        if count >= self._persistence_limit:
+            if len(self._persistent_log_emissionprob_cache) > self._cache_size:
+                # Dont let the cache grow too big
+                self._persistent_log_emissionprob_cache.clear()
+                self._persistence_limit += 1
+            self._persistent_log_emissionprob_cache[morph] = tmp
+            return tmp
+        if len(self._log_emissionprob_cache) > 10:
+            # Small cache regularly emptied
+            self._log_emissionprob_cache.clear()
+        self._log_emissionprob_cache[morph] = tmp
+        return tmp
 
     def update_emission_count(self, category, morph, diff_count):
         """Updates the number of observed emissions of a single morph from a

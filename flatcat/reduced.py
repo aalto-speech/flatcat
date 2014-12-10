@@ -40,8 +40,8 @@ class FlatcatSegmenter(AbstractSegmenter):
         self._num_compounds = model.num_compounds
         self._num_constructions = model.num_constructions
 
-    def seen_morphs(self):
-        return self._corpus_coding._log_emissionprob_cache.keys()
+    def __contains__(self, morph):
+        return morph in self._corpus_coding._log_emissionprob_cache
 
     @property
     def num_compounds(self):

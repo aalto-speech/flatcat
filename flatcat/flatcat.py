@@ -149,7 +149,7 @@ class AbstractSegmenter(object):
                     # Splitting at this point is forbidden
                     grid[pos][next_len - 1] = zeros
                     continue
-                if morph not in self.seen_morphs():
+                if morph not in self:
                     # The morph corresponding to this substring has not
                     # been encountered: zero probability for this solution
                     grid[pos][next_len - 1] = zeros
@@ -357,8 +357,8 @@ class AbstractSegmenter(object):
         """Override in subclass"""
         return morph
 
-    def seen_morphs(self):
-        raise AttributeError('Must override seen_morphs')
+    def __contains__(self, morph):
+        raise AttributeError('Must override __contains__')
 
     @staticmethod
     def get_categories(wb=False):
@@ -1388,9 +1388,6 @@ class FlatcatModel(AbstractSegmenter):
 
     def set_corpus_coding_weight(self, weight):
         self._corpus_coding.weight = weight
-
-    def seen_morphs(self):
-        return self._morph_usage.seen_morphs()
 
     def get_lexicon(self):
         """Returns morphs in lexicon, with emission counts"""
@@ -2461,6 +2458,9 @@ class FlatcatModel(AbstractSegmenter):
             self._cost_field_width = current
         return '{}.{}'.format(self._cost_field_width,
                               self._cost_field_precision)
+
+    def __contains__(self, morph):
+        return morph in self._morph_usage
 
     @property
     def num_compounds(self):

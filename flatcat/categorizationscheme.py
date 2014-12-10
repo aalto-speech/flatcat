@@ -503,6 +503,7 @@ class MorphUsageProperties(object):
             for morph in self.seen_morphs():
                 self._marginalizer.add(self.count(morph),
                                        self.condprobs(morph))
+            self._zlctc = None
         return self._marginalizer
 
     def feature_cost(self, morph):
@@ -628,6 +629,7 @@ class MorphUsageProperties(object):
         if self._marginalizer is not None and self.count(morph) > 0:
             self._marginalizer.add(self.count(morph),
                                    self.condprobs(morph))
+        self._zlctc = None
 
     @classmethod
     def valid_transitions(cls):

@@ -2701,7 +2701,6 @@ class FlatcatEncoding(baseline.CorpusEncoding):
         # cached probabilities no longer valid
         self.clear_emission_cache()
 
-
     def _set_emission_counts(self, morph, new_counts):
         """Set the number of emissions of a morph from all categories
         simultaneously.

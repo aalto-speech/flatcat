@@ -65,6 +65,7 @@ class ReducedEncoding(object):
         self._log_emissionprob_cache = self._populate_emissions(
             corpus_encoding, morph_usage)
 
+        self.weight = corpus_encoding.weight
         self.cost = corpus_encoding.get_cost()
         self.boundaries = corpus_encoding.boundaries
 

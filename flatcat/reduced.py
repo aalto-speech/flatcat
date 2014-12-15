@@ -39,6 +39,7 @@ class FlatcatSegmenter(AbstractSegmenter):
             self._annot_coding = model._annot_coding
         self._num_compounds = model.num_compounds
         self._num_constructions = model.num_constructions
+        self._all_chars = dict(model._lexicon_coding.atoms)
 
     def __contains__(self, morph):
         return morph in self._corpus_coding._log_emissionprob_cache

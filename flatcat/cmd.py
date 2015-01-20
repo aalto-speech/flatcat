@@ -75,7 +75,7 @@ def get_flatcat_argparser():
     parser = argparse.ArgumentParser(
         prog='flatcat',
         description="""
-Morfessor FlatCat {version}
+Morfessor {version}
 
 {license}
 
@@ -493,7 +493,7 @@ def add_other_arguments(argument_groups):
     add_arg('-h', '--help', action='help',
             help='Show this help message and exit.')
     add_arg('--version', action='version',
-            version='%(prog)s ' + get_version(),
+            version='%(prog)s ' + get_version(numeric=True),
             help='Show version number and exit.')
 
 
@@ -866,7 +866,7 @@ def get_reformat_argparser():
     parser = argparse.ArgumentParser(
         prog='reformat.py',
         description="""
-Morfessor FlatCat {version} reformatting tool
+Morfessor {version} reformatting tool
 
 {license}
 

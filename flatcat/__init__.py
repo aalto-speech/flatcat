@@ -19,8 +19,11 @@ show_progress_bar = True
 _logger = logging.getLogger(__name__)
 
 
-def get_version():
-    return __version__
+def get_version(numeric=False):
+    if numeric:
+        return __version__
+    return 'FlatCat {}'.format(__version__)
+
 
 # The public api imports need to be at the end of the file,
 # so that the package global names are available to the modules

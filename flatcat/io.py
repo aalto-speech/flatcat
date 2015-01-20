@@ -46,6 +46,7 @@ class FlatcatIO(morfessor.MorfessorIO):
         self.analysis_separator = analysis_separator
         self.category_separator = category_separator
         self._strict = strict
+        self._version = get_version()
 
     def write_segmentation_file(self, file_name, segmentations,
                                 construction_sep=None,
@@ -66,7 +67,7 @@ class FlatcatIO(morfessor.MorfessorIO):
         with self._open_text_file_write(file_name) as file_obj:
             d = datetime.datetime.now().replace(microsecond=0)
             file_obj.write(
-                '# Output from Morfessor FlatCat {}{}, {!s}\n'.format(
+                '# Output from Morfessor {}{}, {!s}\n'.format(
                 get_version(), comment_string, d))
             for count, morphs in segmentations:
                 s = construction_sep.join(

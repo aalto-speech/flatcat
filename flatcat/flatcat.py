@@ -1369,6 +1369,9 @@ class FlatcatModel(AbstractSegmenter):
         params.update(self._morph_usage.get_params())
         if self._supervised:
             params['annotationweight'] = self._annot_coding.weight
+        params['forcesplit'] = ''.join(self.forcesplit)
+        if self.nosplit_re:
+            params['nosplit'] = self.nosplit_re.pattern
         return params
 
     def set_params(self, params):
@@ -1381,6 +1384,10 @@ class FlatcatModel(AbstractSegmenter):
             _logger.info('Setting annotation weight to {}'.format(
                 params['annotationweight']))
             self._annot_coding.weight = float(params['annotationweight'])
+        if 'forcesplit' in params:
+            self.forcesplit = [x for x in params['forcesplit']]
+        if 'nosplit' in params:
+            self.nosplit_re = re.compile(params['nosplit'], re.UNICODE)
         self._morph_usage.set_params(params)
 
     def get_corpus_coding_weight(self):

@@ -10,6 +10,9 @@ import bz2
 import codecs
 import gzip
 import locale
+import tarfile
+import StringIO
+from contextlib import contextmanager
 
 import morfessor
 
@@ -344,7 +347,44 @@ class FlatcatIO(morfessor.MorfessorIO):
 
 
 class TarGzModel(object):
-    pass
+    def __init__(self, filename, mode):
+        self.filename = filename
+        if mode == 'w':
+            self.mode = 'w|gz'
+        else:
+            self.mode = 'r|gz'
+        self.tarfobj = None
+
+    def __enter__(self):
+        self.tarfobj = tarfile.open(self.filename, self.mode)
+        return self
+
+    def __exit__(self, type, value, trace):
+        self.tarfobj.close()
+
+    @contextmanager
+    def newmember(self, arcname):
+        assert 'w' in self.mode
+        stringio = StringIO.StringIO()
+
+        yield stringio
+
+        stringio.seek(0)
+        info = tarfile.TarInfo(name=arcname)
+        info.size = len(stringio.buf)
+        self.tarfobj.addfile(tarinfo=info, fileobj=stringio)
+
+    def members(self):
+        assert 'r' in self.mode
+        while True:
+            info = self.tarfobj.next()
+            if info is None:
+                break
+            fobj = self.tarfobj.extractfile(info)
+
+            yield (info.name, fobj)
+
+            fobj.close()
     #
     #### End of stuff belonging in Baseline ####
 

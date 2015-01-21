@@ -6,6 +6,11 @@ import logging
 import re
 import sys
 
+import bz2
+import codecs
+import gzip
+import locale
+
 import morfessor
 
 from . import get_version
@@ -273,6 +278,75 @@ class FlatcatIO(morfessor.MorfessorIO):
         cmorph = CategorizedMorph(morph, category)
         return cmorph
 
+    #### This can be removed once it finds its way to Baseline ####
+    #
+    def _open_text_file_write(self, file_name_or_obj):
+        """Open a file for writing with the appropriate compression/encoding"""
+        if isinstance(file_name_or_obj, basestring):
+            file_name = file_name_or_obj
+            if file_name == '-':
+                file_obj = sys.stdout
+                if PY3:
+                    return file_obj
+            elif file_name.endswith('.gz'):
+                file_obj = gzip.open(file_name, 'wb')
+            elif file_name.endswith('.bz2'):
+                file_obj = bz2.BZ2File(file_name, 'wb')
+            else:
+                file_obj = open(file_name, 'wb')
+        else:
+            file_obj = file_name_or_obj
+
+        if self.encoding is None:
+            # Take encoding from locale if not set so far
+            self.encoding = locale.getpreferredencoding()
+        return codecs.getwriter(self.encoding)(file_obj)
+
+    def _open_text_file_read(self, file_name_or_obj):
+        """Open a file for reading with the appropriate compression/encoding"""
+        if isinstance(file_name_or_obj, basestring):
+            file_name = file_name_or_obj
+            if file_name == '-':
+                if PY3:
+                    return sys.stdin
+                else:
+                    class StdinUnicodeReader:
+                        def __init__(self, encoding):
+                            self.encoding = encoding
+                            if self.encoding is None:
+                                self.encoding = locale.getpreferredencoding()
+
+                        def __iter__(self):
+                            return self
+
+                        def next(self):
+                            l = sys.stdin.readline()
+                            if not l:
+                                raise StopIteration()
+                            return l.decode(self.encoding)
+
+                    return StdinUnicodeReader(self.encoding)
+            else:
+                if file_name.endswith('.gz'):
+                    file_obj = gzip.open(file_name, 'rb')
+                elif file_name.endswith('.bz2'):
+                    file_obj = bz2.BZ2File(file_name, 'rb')
+                else:
+                    file_obj = open(file_name, 'rb')
+        else:
+            file_obj = file_name_or_obj
+
+        if self.encoding is None:
+            # Try to determine encoding if not set so far
+            self.encoding = self._find_encoding(file_name)
+        inp = codecs.getreader(self.encoding)(file_obj)
+        return inp
+
+
+class TarGzModel(object):
+    pass
+    #
+    #### End of stuff belonging in Baseline ####
 
 def _make_morph_formatter(category_sep, output_tags):
     if output_tags:

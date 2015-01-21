@@ -346,6 +346,19 @@ class FlatcatIO(morfessor.MorfessorIO):
         return inp
 
 
+class FakeStringIO(StringIO.StringIO):
+    """Ugly hack to enable reading from StringIO after closing"""
+
+    def close(self):
+        """Silently ignores attempts to close it"""
+        pass
+
+    def realclose(self):
+        """Really close it this time"""
+        # StringIO is oldstyle
+        StringIO.StringIO.close(self)
+
+
 class TarGzModel(object):
     """A wrapper to hide the ugliness of the tarfile API.
 
@@ -380,14 +393,15 @@ class TarGzModel(object):
         """
 
         assert 'w' in self.mode
-        stringio = StringIO.StringIO()
+        stringio = FakeStringIO()
 
         yield stringio
 
         stringio.seek(0)
         info = tarfile.TarInfo(name=arcname)
-        info.size = len(stringio.buf)
+        info.size = stringio.len
         self.tarfobj.addfile(tarinfo=info, fileobj=stringio)
+        stringio.realclose()
 
     def members(self):
         """Generates the (name, contents) pairs for each file in

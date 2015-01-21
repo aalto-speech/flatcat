@@ -347,6 +347,12 @@ class FlatcatIO(morfessor.MorfessorIO):
 
 
 class TarGzModel(object):
+    """A wrapper to hide the ugliness of the tarfile API.
+    
+    Both TarGzModel itself and the method newmember are context managers:
+    Writing a model requires a nested with statement.
+    """
+
     def __init__(self, filename, mode):
         self.filename = filename
         if mode == 'w':
@@ -359,11 +365,20 @@ class TarGzModel(object):
         self.tarfobj = tarfile.open(self.filename, self.mode)
         return self
 
-    def __exit__(self, type, value, trace):
+    def __exit__(self, typ, value, trace):
         self.tarfobj.close()
 
     @contextmanager
     def newmember(self, arcname):
+        """Receive a new member to the .tar.gz archive.
+        A context manager: use a "with" statement.
+
+        Arguments:
+            arcname - the name of the file within the archive.
+        Yields:
+            a file-like object into which the contents can be written.
+        """
+
         assert 'w' in self.mode
         stringio = StringIO.StringIO()
 
@@ -375,6 +390,14 @@ class TarGzModel(object):
         self.tarfobj.addfile(tarinfo=info, fileobj=stringio)
 
     def members(self):
+        """Generates the (name, contents) pairs for each file in
+        the archive.
+        
+        The contents are in the form of file-like objects.
+        The files are generated in the order they are in the archive:
+        the recipient must be able to handle them in an arbitrary order.
+        """
+
         assert 'r' in self.mode
         while True:
             info = self.tarfobj.next()

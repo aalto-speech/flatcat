@@ -12,7 +12,7 @@ from . import get_version, _logger, flatcat, reduced
 from . import categorizationscheme
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
-from .io import FlatcatIO
+from .io import FlatcatIO, TarGzModel
 from .utils import _generator_progress
 
 PY3 = sys.version_info.major == 3
@@ -558,8 +558,14 @@ def flatcat_main(args):
     if (args.initfile is None):
         raise ArgumentException(
             'An initial Baseline or FlatCat model must be given.')
+
     init_is_pickle = (args.initfile.endswith('.pickled') or
-                      args.initfile.endswith('.pickle'))
+                      args.initfile.endswith('.pickle') or
+                      args.initfile.endswith('.bin'))
+
+    init_is_tarball = (args.initfile.endswith('.tar.gz') or
+                       args.initfile.endswith('.tgz'))
+    init_is_complete = (init_is_tarball or init_is_pickle)
 
     io = FlatcatIO(encoding=args.encoding,
                    construction_separator=args.consseparator,
@@ -567,7 +573,7 @@ def flatcat_main(args):
                    analysis_separator=args.analysisseparator,
                    category_separator=args.catseparator)
 
-    if ((not init_is_pickle) and
+    if ((not init_is_complete) and
             args.ppl_threshold is None and
             args.loadparamsfile is None):
         raise ArgumentException(
@@ -583,7 +589,6 @@ def flatcat_main(args):
         _logger.info('Initializing from binary model...')
         model = io.read_binary_model_file(args.initfile)
     else:
-        _logger.info('Initializing from segmentation...')
         m_usage = categorizationscheme.MorphUsageProperties(
             ppl_threshold=args.ppl_threshold,
             ppl_slope=args.ppl_slope,
@@ -599,14 +604,29 @@ def flatcat_main(args):
             corpusweight=args.corpusweight,
             use_skips=args.skips,
             ml_emissions_epoch=args.ml_emissions_epoch)
-        # Add the initial corpus data
-        model.add_corpus_data(
-            io.read_segmentation_file(args.initfile),
-            count_modifier=dampfunc,
-            freqthreshold=args.freqthreshold)
+        if init_is_tarball:
+            _logger.info('Initializing from tarball...')
+            with TarGzModel(args.initfile, 'r') as tarmodel:
+                for (name, fobj) in tarmodel.members():
+                    if name == 'params':
+                        pass
+                    elif name == 'analysis':
+                        pass
+                    elif name == 'annotations':
+                        pass
+                    else:
+                        _logger.warn(
+                            'Unknown model component {}'.format(name))
+        else:
+            _logger.info('Initializing from segmentation...')
+            # Add the initial corpus data
+            model.add_corpus_data(
+                io.read_segmentation_file(args.initfile),
+                count_modifier=dampfunc,
+                freqthreshold=args.freqthreshold)
 
-    # Load the hyperparamters
-    if not init_is_pickle:
+    # Load the hyperparameters
+    if not init_is_complete:
         model.training_operations = training_ops
         if args.loadparamsfile is not None:
             _logger.info('Loading hyperparameters from {}'.format(
@@ -620,7 +640,7 @@ def flatcat_main(args):
         model.add_annotations(annotations,
                               args.annotationweight)
 
-    if not init_is_pickle:
+    if not init_is_complete:
         # Initialize the model
         must_train = model.initialize_hmm(
             min_difference_proportion=args.min_diff_prop)

@@ -130,12 +130,9 @@ def add_model_io_arguments(argument_groups):
 
     # Options for output data files
     add_arg = argument_groups.get('output data files')
-    add_arg('-s', '--save-analysis', dest='saveanalysisfile',
+    add_arg('-s', '--save-tarball', dest='savetarballfile',
             default=None, metavar='<file>',
-            help='Save analysis of the unannotated data. ')
-    add_arg('--save-annotations', dest='saveannotsfile',
-            default=None, metavar='<file>',
-            help='Save the annotated data set.')
+            help='Save model in .tar.gz format. ')
     add_arg('--save-binary-model', dest='savepicklefile',
             default=None, metavar='<file>',
             help='Save a binary FlatCat model with pickle. '
@@ -152,6 +149,14 @@ def add_model_io_arguments(argument_groups):
     add_arg('-o', '--output', dest='outfile', default='-', metavar='<file>',
             help='Output file for test data results (for standard output, '
                  'use "-"; default "%(default)s").')
+    add_arg('--save-analysis', dest='saveanalysisfile',
+            default=None, metavar='<file>',
+            help='Save analysis of the unannotated data. '
+                 '(Deprecated: use of --save-tarball recommended)')
+    add_arg('--save-annotations', dest='saveannotsfile',
+            default=None, metavar='<file>',
+            help='Save the annotated data set. '
+                 '(Deprecated: use of --save-tarball recommended)')
 
     # for the ordering:
     add_arg = argument_groups.get('data format options')
@@ -230,14 +235,16 @@ def add_common_io_arguments(argument_groups):
 def add_training_arguments(argument_groups):
     # Options for input data files
     add_arg = argument_groups.get('input data files')
-    add_arg('-L', '--load-parameters', dest='loadparamsfile', default=None,
+    add_arg('--load-parameters', dest='loadparamsfile', default=None,
             metavar='<file>',
-            help='Load hyperparameters from file.')
+            help='Load hyperparameters from file. '
+                 '(Deprecated: not needed with tarball (or pickle))')
     # Options for output data files
     add_arg = argument_groups.get('output data files')
-    add_arg('-S', '--save-parameters', dest='saveparamsfile', default=None,
+    add_arg('--save-parameters', dest='saveparamsfile', default=None,
             metavar='<file>',
-            help='Save hyperparameters to file.')
+            help='Save hyperparameters to file. '
+                 '(Deprecated: use of --save-tarball recommended)')
     # Options for training and segmentation
     add_arg = argument_groups.get('training and segmentation options')
     add_arg('-m', '--mode', dest='trainmode', default='batch',
@@ -609,14 +616,18 @@ def flatcat_main(args):
             with TarGzModel(args.initfile, 'r') as tarmodel:
                 for (name, fobj) in tarmodel.members():
                     if name == 'params':
-                        pass
+                        # applied at the end
+                        params = io.read_parameter_file(fobj)
                     elif name == 'analysis':
-                        pass
+                        model.add_corpus_data(
+                            io.read_segmentation_file(fobj))
                     elif name == 'annotations':
-                        pass
+                        model.add_annotations(
+                            io.read_annotations_file(fobj))
                     else:
                         _logger.warn(
                             'Unknown model component {}'.format(name))
+                model.set_params(params)
         else:
             _logger.info('Initializing from segmentation...')
             # Add the initial corpus data
@@ -737,20 +748,37 @@ def flatcat_main(args):
         _logger.info('Training time: {:.3f}s'.format(te - ts))
 
     #
+    # Save tarball
+    if args.savetarballfile is not None:
+        _logger.info("Saving model as tarball...")
+        with TarGzModel(args.savetarballfile, 'w') as tarmodel:
+            with tarmodel.newmember('analysis') as member:
+                io.write_segmentation_file(member,
+                                           model.segmentations)
+            if model._supervised:
+                with tarmodel.newmember('annotations') as member:
+                    io.write_annotations_file(
+                        member,
+                        model.annotations,
+                        construction_sep=' ',
+                        output_tags=model._annotations_tagged)
+            with tarmodel.newmember('params') as member:
+                io.write_parameter_file(member,
+                                        model.get_params())
+
+    # Old single-file saving formats (for hysterical raisins)
     # Save hyperparameters
     if args.saveparamsfile is not None:
         _logger.info("Saving hyperparameters...")
         io.write_parameter_file(args.saveparamsfile,
                                 model.get_params())
         _logger.info("Done.")
-
     # Save analysis
     if args.saveanalysisfile is not None:
         _logger.info("Saving model as analysis...")
         io.write_segmentation_file(args.saveanalysisfile,
                                    model.segmentations)
         _logger.info("Done.")
-
     # Save annotations
     if model._supervised and args.saveannotsfile is not None:
         io.write_annotations_file(

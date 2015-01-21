@@ -348,7 +348,7 @@ class FlatcatIO(morfessor.MorfessorIO):
 
 class TarGzModel(object):
     """A wrapper to hide the ugliness of the tarfile API.
-    
+
     Both TarGzModel itself and the method newmember are context managers:
     Writing a model requires a nested with statement.
     """
@@ -392,7 +392,7 @@ class TarGzModel(object):
     def members(self):
         """Generates the (name, contents) pairs for each file in
         the archive.
-        
+
         The contents are in the form of file-like objects.
         The files are generated in the order they are in the archive:
         the recipient must be able to handle them in an arbitrary order.
@@ -410,6 +410,7 @@ class TarGzModel(object):
             fobj.close()
     #
     #### End of stuff belonging in Baseline ####
+
 
 def _make_morph_formatter(category_sep, output_tags):
     if output_tags:

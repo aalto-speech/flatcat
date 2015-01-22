@@ -751,6 +751,9 @@ def flatcat_main(args):
     # Save tarball
     if args.savetarballfile is not None:
         _logger.info("Saving model as tarball...")
+        if '.tar.gz' not in args.savetarballfile:
+            _logger.warn('Tarball model misleadingly named: {}'.format(
+                args.savetarballfile))
         with TarGzModel(args.savetarballfile, 'w') as tarmodel:
             with tarmodel.newmember('analysis') as member:
                 io.write_segmentation_file(member,

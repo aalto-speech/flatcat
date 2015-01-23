@@ -620,10 +620,10 @@ def flatcat_main(args):
             io.read_segmentation_file(args.initfile),
             count_modifier=dampfunc,
             freqthreshold=args.freqthreshold)
+        model.training_operations = training_ops
 
     # Load the hyperparameters
     if not init_is_complete:
-        model.training_operations = training_ops
         if args.loadparamsfile is not None:
             _logger.info('Loading hyperparameters from {}'.format(
                 args.loadparamsfile))
@@ -636,7 +636,7 @@ def flatcat_main(args):
         model.add_annotations(annotations,
                               args.annotationweight)
 
-    if not init_is_pickle:
+    if True: #not init_is_pickle:
         # Initialize the model
         must_train = model.initialize_hmm(
             min_difference_proportion=args.min_diff_prop)
@@ -740,7 +740,6 @@ def flatcat_main(args):
             _logger.warn('Tarball model misleadingly named: {}'.format(
                 args.savetarballfile))
         with TarGzModel(args.savetarballfile, 'w') as tarmodel:
-            # FIXME: loading broken atm: only works if saved in this order
             with tarmodel.newmember('params') as member:
                 io.write_parameter_file(member,
                                         model.get_params())
@@ -774,7 +773,7 @@ def flatcat_main(args):
             args.saveannotsfile,
             model.annotations,
             construction_sep=' ',
-            output_tags=model._annotations_tagged)
+            output_tags=True)
 
     # Save lexicon
     if args.lexfile is not None:

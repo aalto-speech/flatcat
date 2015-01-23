@@ -64,6 +64,9 @@ class AbstractSegmenter(object):
         self.annotations = None
         self._annotations_tagged = None
 
+    def initialize_hmm(self, min_difference_proportion=None):
+        pass
+
     def viterbi_segment(self, segments):
         """Compatible with Morfessor Baseline."""
         # FIXME: both this and baseline should hide the logp
@@ -666,8 +669,6 @@ class FlatcatModel(AbstractSegmenter):
         """
 
         must_train = False
-        if self._initialized:
-            return False
 
         ForceSplitter(self).enforce()
         self.reestimate_probabilities()
@@ -677,11 +678,11 @@ class FlatcatModel(AbstractSegmenter):
             self.initialize_baseline(min_difference_proportion)
 
         if self._corpus_tagging_level == "partial":
-            self.reestimate_probabilities()
             self.viterbi_tag_corpus()
             self.reestimate_probabilities()
-            if self._supervised:
-                self._update_annotation_choices()
+
+        if self._supervised:
+            self._update_annotation_choices()
 
         for callback in self.iteration_callbacks:
             callback(self)
@@ -778,6 +779,7 @@ class FlatcatModel(AbstractSegmenter):
                     'final epoch.', cost))
                 break
             previous_cost = cost
+        self.reestimate_probabilities()
 
     def train_online(self, data, count_modifier=None, epoch_interval=10000,
                      max_epochs=None, result_callback=None):
@@ -1406,6 +1408,7 @@ class FlatcatModel(AbstractSegmenter):
             _logger.info('Setting annotation weight to {}'.format(
                 params['annotationweight']))
             self._annot_coding.weight = float(params['annotationweight'])
+            self._annot_coding.do_update_weight = False
         if 'forcesplit' in params:
             self.forcesplit = [x for x in params['forcesplit']]
         if 'nosplit' in params:

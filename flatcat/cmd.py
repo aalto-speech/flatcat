@@ -616,8 +616,8 @@ def flatcat_main(args):
             with TarGzModel(args.initfile, 'r') as tarmodel:
                 for (name, fobj) in tarmodel.members():
                     if name == 'params':
-                        # applied at the end
-                        params = io.read_parameter_file(fobj)
+                        model.set_params(
+                            io.read_parameter_file(fobj))
                     elif name == 'analysis':
                         model.add_corpus_data(
                             io.read_segmentation_file(fobj))
@@ -627,7 +627,6 @@ def flatcat_main(args):
                     else:
                         _logger.warn(
                             'Unknown model component {}'.format(name))
-                model.set_params(params)
         else:
             _logger.info('Initializing from segmentation...')
             # Add the initial corpus data
@@ -755,6 +754,10 @@ def flatcat_main(args):
             _logger.warn('Tarball model misleadingly named: {}'.format(
                 args.savetarballfile))
         with TarGzModel(args.savetarballfile, 'w') as tarmodel:
+            # FIXME: loading broken atm: only works if saved in this order
+            with tarmodel.newmember('params') as member:
+                io.write_parameter_file(member,
+                                        model.get_params())
             with tarmodel.newmember('analysis') as member:
                 io.write_segmentation_file(member,
                                            model.segmentations)
@@ -765,9 +768,6 @@ def flatcat_main(args):
                         model.annotations,
                         construction_sep=' ',
                         output_tags=model._annotations_tagged)
-            with tarmodel.newmember('params') as member:
-                io.write_parameter_file(member,
-                                        model.get_params())
 
     # Old single-file saving formats (for hysterical raisins)
     # Save hyperparameters

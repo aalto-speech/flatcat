@@ -598,7 +598,6 @@ def flatcat_main(args):
     elif init_is_tarball:
         _logger.info('Initializing from tarball...')
         model = io.read_tarball_model_file(args.initfile)
-        print(model._morph_usage)
     else:
         m_usage = categorizationscheme.MorphUsageProperties(
             ppl_threshold=args.ppl_threshold,
@@ -646,8 +645,7 @@ def flatcat_main(args):
     for f in args.extendfiles:
         model.add_corpus_data(io.read_segmentation_file(f),
                               count_modifier=dampfunc,
-                              freqthreshold=args.freqthreshold,
-                              extend=True)
+                              freqthreshold=args.freqthreshold)
         must_train = True
 
     # Set up statistics logging
@@ -735,6 +733,7 @@ def flatcat_main(args):
 
     #
     # Save tarball
+    # FIXME: move to io
     if args.savetarballfile is not None:
         _logger.info("Saving model as tarball...")
         if '.tar.gz' not in args.savetarballfile:
@@ -754,7 +753,7 @@ def flatcat_main(args):
                         member,
                         model.annotations,
                         construction_sep=' ',
-                        output_tags=model._annotations_tagged)
+                        output_tags=True)
 
     # Old single-file saving formats (for hysterical raisins)
     # Save hyperparameters

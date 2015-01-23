@@ -62,7 +62,7 @@ class AbstractSegmenter(object):
         else:
             self.nosplit_re = nosplit
         self.annotations = None
-        self._annotations_tagged = False
+        self._annotations_tagged = None
 
     def viterbi_segment(self, segments):
         """Compatible with Morfessor Baseline."""
@@ -451,7 +451,8 @@ class FlatcatModel(AbstractSegmenter):
         super(FlatcatModel, self).__init__(self._corpus_coding,
                                            nosplit=nosplit)
         self._initialized = False
-        self._corpus_untagged = None
+        # None (= no corpus), "untagged", "partial", "full"
+        self._corpus_tagging_level = None
         self._segment_only = False
 
         # The analyzed (segmented and tagged) corpus
@@ -519,7 +520,7 @@ class FlatcatModel(AbstractSegmenter):
         self._supervised = False
         self._annot_coding = None
         self.annotations = {}   # word -> Annotation
-        self._annotations_tagged = False
+        self._annotations_tagged = None
 
         # Variables for online learning
         self._online = False
@@ -538,7 +539,7 @@ class FlatcatModel(AbstractSegmenter):
     ### Primary public methods
     #
     def add_corpus_data(self, segmentations, freqthreshold=1,
-                        count_modifier=None, extend=False):
+                        count_modifier=None):
         """Adds the given segmentations (with counts) to the corpus data.
         The new data can be either untagged or tagged.
 
@@ -557,15 +558,9 @@ class FlatcatModel(AbstractSegmenter):
                              given times in the corpus (default 1).
             count_modifier :  function for adjusting the counts of each
                               word.
-            extend :  True if the segmented but untagged data to be added
-                      should immediately be tagged with the current model.
-                      The model must be initialized before this.
-                      Alternatively the model must be re-initialized from
-                      a unigram tag distribution.
         """
         assert isinstance(freqthreshold, (int, float))
         i = len(self.segmentations)
-        corpus_was_untagged = self._corpus_untagged
         consecutive_unsegmented = 0
         for row in segmentations:
             count, analysis = row
@@ -583,31 +578,40 @@ class FlatcatModel(AbstractSegmenter):
                 else:
                     consecutive_unsegmented = None
             if isinstance(analysis[0], CategorizedMorph):
+                is_tagged = all(cmorph.category is not None
+                    for cmorph in analysis)
                 self._intern_word(analysis)
-                if (not self._corpus_untagged and
-                        any(cmorph.category is None
-                            for cmorph in analysis)):
-                    self._corpus_untagged = True
+                if self._corpus_tagging_level is None:
+                    if is_tagged:
+                        self._corpus_tagging_level = "full"
+                    else:
+                        self._corpus_tagging_level = "untagged"
+                        
+                if not is_tagged and self._corpus_tagging_level == "full":
+                    self._corpus_tagging_level = "partial"
+                if is_tagged and self._corpus_tagging_level == "untagged":
+                    self._corpus_tagging_level = "partial"
             else:
-                self._corpus_untagged = True
-                analysis = tuple(self._interned_morph(morph, store=True)
+                analysis = tuple(CategorizedMorph(
+                                    self._interned_morph(morph, store=True),
+                                    None)
                                  for morph in analysis)
+                if self._corpus_tagging_level is None:
+                    self._corpus_tagging_level = "untagged"
+                if self._corpus_tagging_level == "full":
+                    self._corpus_tagging_level = "partial"
             segmentation = WordAnalysis(count, analysis)
             self.segmentations.append(segmentation)
             for morph in self.detag_word(segmentation.analysis):
                 self.morph_backlinks[morph].add(i)
             i += 1
             self._corpus_coding.boundaries += count
-        if extend and not corpus_was_untagged:
-            self.viterbi_tag_corpus()
-            self.reestimate_probabilities()
 
     def add_annotations(self, annotations, annotatedcorpusweight=None):
         """Adds data to the annotated corpus."""
-        if not self._initialized and not self._corpus_untagged:
-            self.reestimate_probabilities()
         self._supervised = True
-        self._annotations_tagged = True
+        if self._annotations_tagged is None:
+            self._annotations_tagged = True
         word_backlinks = {
             ''.join(self.detag_word(seg.analysis)): i
             for (i, seg) in enumerate(self.segmentations)}
@@ -629,16 +633,15 @@ class FlatcatModel(AbstractSegmenter):
                                 self._corpus_coding,
                                 weight=annotatedcorpusweight)
         self._annot_coding.boundaries = len(self.annotations)
-        if not self._corpus_untagged and not self._annotations_tagged:
-            self.viterbi_tag_corpus()
-            self.reestimate_probabilities()
-        elif not self._annotations_tagged:
-            self._corpus_untagged = True
+        if (not self._annotations_tagged and
+                self._corpus_tagging_level == "full"):
+            self._corpus_tagging_level = "partial"
 
     def initialize_baseline(self, min_difference_proportion=0.005):
-        """Initialize the model using a previously added
-        (see add_corpus_data) segmentation produced by a morfessor
-        baseline model.
+        """Initialize emission and transition probabilities without
+        changing the segmentation, using Viterbi EM, from a previously
+        added (see add_corpus_data) segmentation produced by a
+        morfessor baseline model.
         """
 
         self._calculate_usage_features()
@@ -659,22 +662,26 @@ class FlatcatModel(AbstractSegmenter):
 
     def initialize_hmm(self, min_difference_proportion=0.005):
         """Initialize emission and transition probabilities without
-        changing the segmentation, using Viterbi EM.
+        changing the segmentation.
         """
 
+        must_train = False
         if self._initialized:
-            self.reestimate_probabilities()
             return False
+
         ForceSplitter(self).enforce()
-        must_train = self._corpus_untagged
-        if self._corpus_untagged:
-            self.initialize_baseline(min_difference_proportion)
         self.reestimate_probabilities()
 
-        if self._supervised:
+        if self._corpus_tagging_level == "untagged":
+            must_train = True
+            self.initialize_baseline(min_difference_proportion)
+
+        if self._corpus_tagging_level == "partial":
+            self.reestimate_probabilities()
             self.viterbi_tag_corpus()
             self.reestimate_probabilities()
-            self._update_annotation_choices()
+            if self._supervised:
+                self._update_annotation_choices()
 
         for callback in self.iteration_callbacks:
             callback(self)
@@ -725,7 +732,7 @@ class FlatcatModel(AbstractSegmenter):
         self._online = False
 
         msg = 'Must initialize model and tag corpus before training'
-        assert not self._corpus_untagged, msg
+        assert self._corpus_tagging_level == "full", msg
         self._epoch_update(no_increment=True)
         previous_cost = self.get_cost()
         wl_force_another = False
@@ -997,6 +1004,10 @@ class FlatcatModel(AbstractSegmenter):
             best_cost      :  The cost of the returned solution
         """
 
+        msg = 'Must initialize model and tag corpus before segmenting'
+        assert (self._initialized and
+            self._corpus_tagging_level == "full"), msg
+
         if _is_string(segments):
             word = segments
         else:
@@ -1247,7 +1258,7 @@ class FlatcatModel(AbstractSegmenter):
                 self.viterbi_tag(word.analysis))
             if word != self.segmentations[i]:
                 num_changed_words += 1
-        self._corpus_untagged = False
+        self._corpus_tagging_level = "full"
         return num_changed_words
 
     def forward_logprob(self, word):
@@ -1768,7 +1779,7 @@ class FlatcatModel(AbstractSegmenter):
         self._lexicon_coding.clear()
 
         # FIXME: unnecessary to restrict to tagged?
-        if self._corpus_untagged:
+        if self._corpus_tagging_level == "untagged":
             segs = self.segmentations
         else:
             segs = self.filter_untagged(self.segmentations)

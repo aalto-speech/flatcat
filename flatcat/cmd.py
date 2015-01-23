@@ -595,6 +595,10 @@ def flatcat_main(args):
     if init_is_pickle:
         _logger.info('Initializing from binary model...')
         model = io.read_binary_model_file(args.initfile)
+    elif init_is_tarball:
+        _logger.info('Initializing from tarball...')
+        model = io.read_tarball_model_file(args.initfile)
+        print(model._morph_usage)
     else:
         m_usage = categorizationscheme.MorphUsageProperties(
             ppl_threshold=args.ppl_threshold,
@@ -611,29 +615,12 @@ def flatcat_main(args):
             corpusweight=args.corpusweight,
             use_skips=args.skips,
             ml_emissions_epoch=args.ml_emissions_epoch)
-        if init_is_tarball:
-            _logger.info('Initializing from tarball...')
-            with TarGzModel(args.initfile, 'r') as tarmodel:
-                for (name, fobj) in tarmodel.members():
-                    if name == 'params':
-                        model.set_params(
-                            io.read_parameter_file(fobj))
-                    elif name == 'analysis':
-                        model.add_corpus_data(
-                            io.read_segmentation_file(fobj))
-                    elif name == 'annotations':
-                        model.add_annotations(
-                            io.read_annotations_file(fobj))
-                    else:
-                        _logger.warn(
-                            'Unknown model component {}'.format(name))
-        else:
-            _logger.info('Initializing from segmentation...')
-            # Add the initial corpus data
-            model.add_corpus_data(
-                io.read_segmentation_file(args.initfile),
-                count_modifier=dampfunc,
-                freqthreshold=args.freqthreshold)
+        _logger.info('Initializing from segmentation...')
+        # Add the initial corpus data
+        model.add_corpus_data(
+            io.read_segmentation_file(args.initfile),
+            count_modifier=dampfunc,
+            freqthreshold=args.freqthreshold)
 
     # Load the hyperparameters
     if not init_is_complete:
@@ -650,7 +637,7 @@ def flatcat_main(args):
         model.add_annotations(annotations,
                               args.annotationweight)
 
-    if not init_is_complete:
+    if not init_is_pickle:
         # Initialize the model
         must_train = model.initialize_hmm(
             min_difference_proportion=args.min_diff_prop)

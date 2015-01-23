@@ -19,6 +19,7 @@ import morfessor
 from . import get_version
 from .categorizationscheme import get_categories, CategorizedMorph
 from .exception import InvalidCategoryError
+from .flatcat import FlatcatModel
 from .utils import _generator_progress
 
 PY3 = sys.version_info.major == 3
@@ -55,6 +56,26 @@ class FlatcatIO(morfessor.MorfessorIO):
         self.category_separator = category_separator
         self._strict = strict
         self._version = get_version()
+
+    def read_tarball_model_file(self, file_name, model=None):
+        """Read model from a tarball."""
+        if model is None:
+            model = FlatcatModel()
+        with TarGzModel(file_name, 'r') as tarmodel:
+            for (name, fobj) in tarmodel.members():
+                if name == 'params':
+                    model.set_params(
+                        self.read_parameter_file(fobj))
+                elif name == 'analysis':
+                    model.add_corpus_data(
+                        self.read_segmentation_file(fobj))
+                elif name == 'annotations':
+                    model.add_annotations(
+                        self.read_annotations_file(fobj))
+                else:
+                    _logger.warn(
+                        'Unknown model component {}'.format(name))
+        return model
 
     def write_segmentation_file(self, file_name, segmentations,
                                 construction_sep=None,
@@ -308,6 +329,7 @@ class FlatcatIO(morfessor.MorfessorIO):
     def _open_text_file_read(self, file_name_or_obj):
         """Open a file for reading with the appropriate compression/encoding"""
         if isinstance(file_name_or_obj, basestring):
+            print('WTFLOL')
             file_name = file_name_or_obj
             if file_name == '-':
                 if PY3:
@@ -344,6 +366,48 @@ class FlatcatIO(morfessor.MorfessorIO):
             self.encoding = self._find_encoding(file_name)
         inp = codecs.getreader(self.encoding)(file_obj)
         return inp
+
+    # straight copypasta
+    def _read_text_file(self, file_name, raw=False):
+        """Read a text file with the appropriate compression and encoding.
+
+        Comments and empty lines are skipped unless raw is True.
+
+        """
+        inp = self._open_text_file_read(file_name)
+        try:
+            for line in inp:
+                line = line.rstrip()
+                if not raw and \
+                   (len(line) == 0 or line.startswith(self.comment_start)):
+                    continue
+                if self.lowercase:
+                    yield line.lower()
+                else:
+                    yield line
+        except KeyboardInterrupt:
+            if file_name == '-':
+                _logger.info("Finished reading from stdin")
+                return
+            else:
+                raise
+
+    # straight copypasta
+    def read_parameter_file(self, file_name):
+        """Read learned or estimated parameters from a file"""
+        params = {}
+        line_re = re.compile(r'^(.*)\s*:\s*(.*)$')
+        for line in self._read_text_file(file_name):
+            m = line_re.match(line.rstrip())
+            if m:
+                key = m.group(1)
+                val = m.group(2)
+                try:
+                    val = float(val)
+                except ValueError:
+                    pass
+                params[key] = val
+        return params
 
 
 class FakeStringIO(StringIO.StringIO):

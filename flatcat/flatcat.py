@@ -425,9 +425,11 @@ class FlatcatModel(AbstractSegmenter):
     # 'shift' is no longer included as 3rd op by default
     DEFAULT_TRAIN_OPS = ['split', 'join', 'resegment']
 
-    def __init__(self, morph_usage, forcesplit=None, nosplit=None,
+    def __init__(self, morph_usage=None, forcesplit=None, nosplit=None,
                  corpusweight=1.0, use_skips=False, ml_emissions_epoch=-1):
         # Morph usage properties
+        if morph_usage is None:
+            morph_usage = MorphUsageProperties()
         self._morph_usage = morph_usage
 
         # Cost variables

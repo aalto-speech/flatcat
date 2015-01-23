@@ -329,7 +329,6 @@ class FlatcatIO(morfessor.MorfessorIO):
     def _open_text_file_read(self, file_name_or_obj):
         """Open a file for reading with the appropriate compression/encoding"""
         if isinstance(file_name_or_obj, basestring):
-            print('WTFLOL')
             file_name = file_name_or_obj
             if file_name == '-':
                 if PY3:

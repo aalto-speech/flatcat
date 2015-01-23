@@ -386,6 +386,15 @@ class AbstractSegmenter(object):
             yield ((rcount, tuple(FlatcatModel.detag_morph(x)
                                   for x in segments)))
 
+    @staticmethod
+    def filter_untagged(segmentations):
+        """Yields only the part of the corpus that is tagged."""
+        for rcount, segments in segmentations:
+            is_tagged = all(cmorph.category is not None
+                            for cmorph in segments)
+            if is_tagged:
+                yield (rcount, segments)
+
     @property
     def word_tokens(self):
         return self._corpus_coding.boundaries
@@ -442,7 +451,7 @@ class FlatcatModel(AbstractSegmenter):
         super(FlatcatModel, self).__init__(self._corpus_coding,
                                            nosplit=nosplit)
         self._initialized = False
-        self._corpus_untagged = False
+        self._corpus_untagged = None
         self._segment_only = False
 
         # The analyzed (segmented and tagged) corpus
@@ -1758,8 +1767,13 @@ class FlatcatModel(AbstractSegmenter):
 
         self._lexicon_coding.clear()
 
+        # FIXME: unnecessary to restrict to tagged?
+        if self._corpus_untagged:
+            segs = self.segmentations
+        else:
+            segs = self.filter_untagged(self.segmentations)
         self._morph_usage.calculate_usage_features(
-            lambda: self.detag_list(self.segmentations))
+            lambda: self.detag_list(segs))
 
         for morph in self._morph_usage.seen_morphs():
             self._lexicon_coding.add(morph)
@@ -1808,7 +1822,7 @@ class FlatcatModel(AbstractSegmenter):
         """
 
         self._corpus_coding.clear_transition_counts()
-        for rcount, segments in self.segmentations:
+        for rcount, segments in self.filter_untagged(self.segmentations):
             # Only the categories matter, not the morphs themselves
             categories = [x.category for x in segments]
             # Include word boundaries
@@ -1827,7 +1841,7 @@ class FlatcatModel(AbstractSegmenter):
     def _calculate_emission_counts(self):
         """Recalculates the emission counts from a retagged segmentation."""
         self._corpus_coding.clear_emission_counts()
-        for (count, analysis) in self.segmentations:
+        for (count, analysis) in self.filter_untagged(self.segmentations):
             for morph in analysis:
                 self._corpus_coding.update_emission_count(morph.category,
                                                           morph.morph,

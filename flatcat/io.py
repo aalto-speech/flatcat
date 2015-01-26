@@ -461,6 +461,10 @@ class TarGzMember(object):
     def write(self, *args, **kwargs):
         self.strio.write(*args, **kwargs)
 
+    def __repr__(self):
+        return '{} in {}'.format(
+            self.arcname, self.tarmodel.filename)
+
 
 class TarGzModel(object):
     """A wrapper to hide the ugliness of the tarfile API.

@@ -733,26 +733,8 @@ def flatcat_main(args):
 
     #
     # Save tarball
-    # FIXME: move to io
     if args.savetarballfile is not None:
-        _logger.info("Saving model as tarball...")
-        if '.tar.gz' not in args.savetarballfile:
-            _logger.warn('Tarball model misleadingly named: {}'.format(
-                args.savetarballfile))
-        with TarGzModel(args.savetarballfile, 'w') as tarmodel:
-            with tarmodel.newmember('params') as member:
-                io.write_parameter_file(member,
-                                        model.get_params())
-            with tarmodel.newmember('analysis') as member:
-                io.write_segmentation_file(member,
-                                           model.segmentations)
-            if model._supervised:
-                with tarmodel.newmember('annotations') as member:
-                    io.write_annotations_file(
-                        member,
-                        model.annotations,
-                        construction_sep=' ',
-                        output_tags=True)
+        io.write_tarball_model_file(args.savetarballfile, model)
 
     # Old single-file saving formats (for hysterical raisins)
     # Save hyperparameters

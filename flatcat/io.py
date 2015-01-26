@@ -57,6 +57,26 @@ class FlatcatIO(morfessor.MorfessorIO):
         self._strict = strict
         self._version = get_version()
 
+    def write_tarball_model_file(self, file_name, model):
+        _logger.info("Saving model as tarball...")
+        if '.tar.gz' not in file_name:
+            _logger.warn('Tarball model misleadingly named: {}'.format(
+                file_name))
+        with TarGzModel(file_name, 'w') as tarmodel:
+            with tarmodel.newmember('params') as member:
+                io.write_parameter_file(member,
+                                        model.get_params())
+            with tarmodel.newmember('analysis') as member:
+                io.write_segmentation_file(member,
+                                           model.segmentations)
+            if model._supervised:
+                with tarmodel.newmember('annotations') as member:
+                    io.write_annotations_file(
+                        member,
+                        model.annotations,
+                        construction_sep=' ',
+                        output_tags=True)
+
     def read_tarball_model_file(self, file_name, model=None):
         """Read model from a tarball."""
         if model is None:

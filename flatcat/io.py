@@ -64,18 +64,18 @@ class FlatcatIO(morfessor.MorfessorIO):
                 file_name))
         with TarGzModel(file_name, 'w') as tarmodel:
             with tarmodel.newmember('params') as member:
-                io.write_parameter_file(member,
+                self.write_parameter_file(member,
                                         model.get_params())
             with tarmodel.newmember('analysis') as member:
-                io.write_segmentation_file(member,
+                self.write_segmentation_file(member,
                                            model.segmentations)
             if model._supervised:
                 with tarmodel.newmember('annotations') as member:
-                    io.write_annotations_file(
-                        member,
-                        model.annotations,
-                        construction_sep=' ',
-                        output_tags=True)
+                    self.write_annotations_file(
+                         member,
+                         model.annotations,
+                         construction_sep=' ',
+                         output_tags=True)
 
     def read_tarball_model_file(self, file_name, model=None):
         """Read model from a tarball."""
@@ -429,17 +429,31 @@ class FlatcatIO(morfessor.MorfessorIO):
         return params
 
 
-class FakeStringIO(StringIO.StringIO):
-    """Ugly hack to enable reading from StringIO after closing"""
+class TarGzMember(object):
+    """File-like object that writes itself into the tarfile on closing"""
+    def __init__(self, arcname, tarmodel):
+        self.arcname = arcname
+        self.tarmodel = tarmodel
+        self.strio = None
+
+    def __enter__(self):
+        self.strio = StringIO.StringIO()
+        return self
+
+    def __exit__(self, typ, value, trace):
+        self.close()
 
     def close(self):
-        """Silently ignores attempts to close it"""
-        pass
-
-    def realclose(self):
-        """Really close it this time"""
-        # StringIO is oldstyle
-        StringIO.StringIO.close(self)
+        if self.strio.closed:
+            return
+        self.strio.seek(0)
+        info = tarfile.TarInfo(name=self.arcname)
+        info.size = self.strio.len
+        self.tarmodel.tarfobj.addfile(tarinfo=info, fileobj=self.strio)
+        self.strio.close()
+    
+    def write(self, *args, **kwargs):
+        self.strio.write(*args, **kwargs)
 
 
 class TarGzModel(object):
@@ -464,27 +478,18 @@ class TarGzModel(object):
     def __exit__(self, typ, value, trace):
         self.tarfobj.close()
 
-    @contextmanager
     def newmember(self, arcname):
         """Receive a new member to the .tar.gz archive.
-        A context manager: use a "with" statement.
 
         Arguments:
             arcname - the name of the file within the archive.
-        Yields:
+        Returns:
             a file-like object into which the contents can be written.
+            This is a context manager: use a "with" statement.
         """
 
         assert 'w' in self.mode
-        stringio = FakeStringIO()
-
-        yield stringio
-
-        stringio.seek(0)
-        info = tarfile.TarInfo(name=arcname)
-        info.size = stringio.len
-        self.tarfobj.addfile(tarinfo=info, fileobj=stringio)
-        stringio.realclose()
+        return TarGzMember(arcname, self)
 
     def members(self):
         """Generates the (name, contents) pairs for each file in

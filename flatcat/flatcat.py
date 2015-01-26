@@ -87,7 +87,7 @@ class AbstractSegmenter(object):
             best_cost      :  The cost of the returned solution
         """
 
-        if isinstance(segments, basestring):
+        if _is_string(segments):
             word = segments
         else:
             # Throw away old category information, if any
@@ -589,7 +589,7 @@ class FlatcatModel(AbstractSegmenter):
                         self._corpus_tagging_level = "full"
                     else:
                         self._corpus_tagging_level = "untagged"
-                        
+
                 if not is_tagged and self._corpus_tagging_level == "full":
                     self._corpus_tagging_level = "partial"
                 if is_tagged and self._corpus_tagging_level == "untagged":

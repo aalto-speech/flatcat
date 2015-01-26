@@ -636,10 +636,9 @@ def flatcat_main(args):
         model.add_annotations(annotations,
                               args.annotationweight)
 
-    if True: #not init_is_pickle:
-        # Initialize the model
-        must_train = model.initialize_hmm(
-            min_difference_proportion=args.min_diff_prop)
+    # Initialize the model
+    must_train = model.initialize_hmm(
+        min_difference_proportion=args.min_diff_prop)
 
     # Extend the model with new unannotated data
     for f in args.extendfiles:

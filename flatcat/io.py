@@ -10,8 +10,8 @@ import bz2
 import codecs
 import gzip
 import locale
+import os
 import tarfile
-import StringIO
 from contextlib import contextmanager
 
 import morfessor
@@ -20,9 +20,14 @@ from . import get_version
 from .categorizationscheme import get_categories, CategorizedMorph
 from .exception import InvalidCategoryError
 from .flatcat import FlatcatModel
-from .utils import _generator_progress
+from .utils import _generator_progress, _is_string
 
 PY3 = sys.version_info.major == 3
+
+if PY3:
+    from io import BytesIO as StringIO
+else:
+    from StringIO import StringIO
 
 _logger = logging.getLogger(__name__)
 
@@ -326,7 +331,7 @@ class FlatcatIO(morfessor.MorfessorIO):
     #
     def _open_text_file_write(self, file_name_or_obj):
         """Open a file for writing with the appropriate compression/encoding"""
-        if isinstance(file_name_or_obj, basestring):
+        if _is_string(file_name_or_obj):
             file_name = file_name_or_obj
             if file_name == '-':
                 file_obj = sys.stdout
@@ -348,7 +353,7 @@ class FlatcatIO(morfessor.MorfessorIO):
 
     def _open_text_file_read(self, file_name_or_obj):
         """Open a file for reading with the appropriate compression/encoding"""
-        if isinstance(file_name_or_obj, basestring):
+        if _is_string(file_name_or_obj):
             file_name = file_name_or_obj
             if file_name == '-':
                 if PY3:
@@ -437,7 +442,7 @@ class TarGzMember(object):
         self.strio = None
 
     def __enter__(self):
-        self.strio = StringIO.StringIO()
+        self.strio = StringIO()
         return self
 
     def __exit__(self, typ, value, trace):
@@ -446,12 +451,13 @@ class TarGzMember(object):
     def close(self):
         if self.strio.closed:
             return
-        self.strio.seek(0)
         info = tarfile.TarInfo(name=self.arcname)
-        info.size = self.strio.len
+        self.strio.seek(0, os.SEEK_END)
+        info.size = self.strio.tell()
+        self.strio.seek(0)
         self.tarmodel.tarfobj.addfile(tarinfo=info, fileobj=self.strio)
         self.strio.close()
-    
+
     def write(self, *args, **kwargs):
         self.strio.write(*args, **kwargs)
 

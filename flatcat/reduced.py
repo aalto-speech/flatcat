@@ -26,6 +26,8 @@ class FlatcatSegmenter(AbstractSegmenter):
         super(FlatcatSegmenter, self).__init__(self._corpus_coding,
                                                model.nosplit_re)
         self._segment_only = True
+        self._initialized = True
+        self._corpus_tagging_level = 'full'
 
         if model.annotations is None:
             self.annotations = None

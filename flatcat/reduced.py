@@ -107,6 +107,9 @@ class ReducedEncoding(object):
     def log_emissionprob(self, category, morph, extrazero=False):
         """-Log of posterior emission probability P(morph|category)"""
         categories = get_categories(wb=False)
+        if morph not in self._log_emissionprob_cache:
+            # The morph is not present in this reduced model
+            return LOGPROB_ZERO
         tmp = self._log_emissionprob_cache[morph][categories.index(category)]
         if extrazero and tmp >= LOGPROB_ZERO:
             return tmp ** 2

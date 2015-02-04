@@ -46,6 +46,12 @@ class FlatcatSegmenter(AbstractSegmenter):
     def __contains__(self, morph):
         return morph in self._corpus_coding._log_emissionprob_cache
 
+    def __setstate__(self, d):
+        """Temporary hack to allow loading old reduced models"""
+        self.__dict__ = d
+        self._initialized = True
+        self._corpus_tagging_level = 'full'
+
     @property
     def num_compounds(self):
         """Compound (word) types"""

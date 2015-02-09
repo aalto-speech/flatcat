@@ -51,6 +51,8 @@ class FlatcatSegmenter(AbstractSegmenter):
         self.__dict__ = d
         self._initialized = True
         self._corpus_tagging_level = 'full'
+        if 'forcesplit' not in self.__dict__:
+            self.forcesplit = [':', '-']
 
     @property
     def num_compounds(self):

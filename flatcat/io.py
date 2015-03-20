@@ -143,8 +143,18 @@ class FlatcatIO(morfessor.MorfessorIO):
                 # first column was compound instead of count
                 count = 1
             cmorphs = []
+            is_tagged = True
             for morph_cat in analysis.split(self.construction_separator):
-                cmorphs.append(self._morph_or_cmorph(morph_cat))
+                if is_tagged:
+                    try:
+                        cmorph = self._morph_or_cmorph(morph_cat)
+                    except InvalidCategoryError:
+                        cmorph = CategorizedMorph(morph_cat, None)
+                        is_tagged = False
+                        _logger.info("The input does not appear tagged")
+                else:
+                    cmorph = CategorizedMorph(morph_cat, None)
+                cmorphs.append(cmorph)
             yield(count, tuple(cmorphs))
         _logger.info("Done.")
 

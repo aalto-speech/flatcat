@@ -625,7 +625,7 @@ class MorphUsageProperties(object):
             self._marginalizer.add(-self.count(morph),
                                    self.condprobs(morph))
         self._contexts[morph] = self._contexts[morph]._replace(count=new_count)
-        assert self.count(morph) >= 0
+        assert self.count(morph) >= 0, '{} subzero count'.format(morph)
         if self._marginalizer is not None and self.count(morph) > 0:
             self._marginalizer.add(self.count(morph),
                                    self.condprobs(morph))

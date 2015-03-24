@@ -604,7 +604,7 @@ class MorphUsageProperties(object):
                 if self._contexts[morph].count > 0]
 
     def __contains__(self, morph):
-        return morph in self._contexts
+        return morph in self._contexts and self._contexts[morph].count > 0
 
     def get_context_features(self, morph):
         """Returns the context features of a seen morph."""

@@ -1537,7 +1537,9 @@ class FlatcatModel(AbstractSegmenter):
         if self._corpus_tagging_level == "untagged":
             segs = self.segmentations
         else:
-            segs = self.filter_untagged(self.segmentations)
+            # Must make it a list, _morph_usage
+            # reads it several times expecting unchanged contents
+            segs = list(self.filter_untagged(self.segmentations))
         self._morph_usage.calculate_usage_features(
             lambda: self.detag_list(segs))
 
@@ -2042,6 +2044,9 @@ class FlatcatModel(AbstractSegmenter):
                 self._modify_morph_count(morph, -num_matches)
 
             for transform in transform_group:
+                #redundant_targets, redundant_num = self._find_in_corpus(transform.rule, targets)
+                #assert redundant_targets == matched_targets, (redundant_targets, matched_targets)
+                #assert redundant_num == num_matches, (redundant_num, num_matches)
                 detagged = self.detag_word(transform.result)
                 for morph in detagged:
                     # Add the new representation to morph counts

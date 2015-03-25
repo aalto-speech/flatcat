@@ -51,8 +51,13 @@ Morfessor FlatCat model comparison diagnostics
     add_arg('modelfiles',
         metavar='<modelfile>',
         nargs='+')
+    add_arg('-e', '--encoding', dest='encoding', metavar='<encoding>',
+            help='Encoding of input and output files (if none is given, '
+                 'both the local encoding and UTF-8 are tried).')
+
     # FIXME: hardcoded to alpha atm
     #add_arg('-x', '--variable)
+
     add_arg('--aligned-reference', dest='alignref', default=None,
             metavar='<file>',
             help='FIXME')
@@ -77,14 +82,69 @@ def load_model(io, modelfile):
             'This tool can only load tarball and binary models')
 
     if init_is_pickle:
-        return io.read_binary_model_file(modelfile)
-    return io.read_tarball_model_file(modelfile)
+        model = io.read_binary_model_file(modelfile)
+    else:
+        model = io.read_tarball_model_file(modelfile)
+    model.reestimate_probabilities()
+    return model
 
+def get_basic_stats(model):
+    corpussize = len(model.segmentations)
+    unsplit = 0
+    twopart = 0
+    multistem = 0
+    nostem = 0
+    for wa in model.segmentations:
+        mlen = len(wa.analysis)
+        stemcount = sum(1 for cmorph in wa.analysis
+                        if cmorph.category == 'STM')
+        if mlen == 1:
+            unsplit += 1
+        elif mlen == 2:
+            twopart += 1
+
+        if stemcount == 0:
+            nostem += 1
+        elif stemcount > 2:
+            multistem += 1
+    lexsize = 0
+    lexstems = 0        # morphs that are predominantly used as stem
+    lexsuffixes = 0     # morphs that are predominantly used as suffix
+    hapaxstems = 0
+    hapaxsuffixes = 0
+    for (morph, counts) in model.get_lexicon():
+        lexsize += 1
+        if counts.SUF > (counts.PRE + counts.STM + counts.ZZZ):
+            lexsuffixes += 1
+            if counts.SUF == 1:
+                hapaxsuffixes += 1
+        if counts.STM > (counts.PRE + counts.SUF + counts.ZZZ):
+            lexstems += 1
+            if counts.STM == 1:
+                hapaxstems += 1
+    return {
+        "corpussize": corpussize,
+        "unsplit": unsplit,
+        "twopart": twopart,
+        "multistem": multistem,
+        "nostem": nostem,
+        "unsplit": unsplit,
+        "twopart": twopart,
+        "multistem": multistem,
+        "nostem": nostem,
+        "lexsize": lexsize,
+        "lexstems": lexstems,
+        "lexsuffixes": lexsuffixes,
+        "hapaxstems": hapaxstems,
+        "hapaxsuffixes": hapaxsuffixes,
+    }
 
 def main(args):
-    io = flatcat.io.FlatcatIO(encoding='utf-8')    # FIXME
+    io = flatcat.io.FlatcatIO(encoding=args.encoding)
     models = [load_model(io, model)
               for model in args.modelfiles]
+    for model in models:
+        print(get_basic_stats(model))
 
 
 if __name__ == "__main__":
@@ -95,4 +155,4 @@ if __name__ == "__main__":
     except ArgumentException as e:
         parser.error(e)
     except Exception as e:
-        raise e
+        raise

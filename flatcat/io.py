@@ -384,6 +384,8 @@ class FlatcatIO(morfessor.MorfessorIO):
                     file_obj = open(file_name, 'rb')
         else:
             file_obj = file_name_or_obj
+            if self.encoding is None:
+                self.encoding = locale.getpreferredencoding()
 
         if self.encoding is None:
             # Try to determine encoding if not set so far

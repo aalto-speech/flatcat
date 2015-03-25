@@ -1175,6 +1175,7 @@ class FlatcatModel(AbstractSegmenter):
 
     def get_lexicon(self):
         """Returns morphs in lexicon, with emission counts"""
+        assert self._initialized
         for morph in sorted(self._morph_usage.seen_morphs()):
             yield (morph, self._corpus_coding.get_emission_counts(morph))
 

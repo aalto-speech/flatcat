@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 from __future__ import unicode_literals
 
 import argparse
@@ -5,6 +7,7 @@ import collections
 import sys
 
 import flatcat
+from flatcat.exception import ArgumentException
 
 LICENSE = """
 Copyright (c) 2014, Stig-Arne Gronroos
@@ -45,9 +48,8 @@ Morfessor FlatCat model comparison diagnostics
         formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False)
     add_arg = parser.add_argument
-    add_arg('modelfile',
+    add_arg('modelfiles',
         metavar='<modelfile>',
-        dest='modelfiles',
         nargs='+')
     # FIXME: hardcoded to alpha atm
     #add_arg('-x', '--variable)
@@ -62,3 +64,35 @@ Morfessor FlatCat model comparison diagnostics
             help="loss function for FIXME ('abs', 'square', 'zeroone' or"
                  "'tot'; default '%(default)s')")
     return parser
+
+def load_model(io, modelfile):
+    init_is_pickle = (modelfile.endswith('.pickled') or
+                      modelfile.endswith('.pickle') or
+                      modelfile.endswith('.bin'))
+
+    init_is_tarball = (modelfile.endswith('.tar.gz') or
+                       modelfile.endswith('.tgz'))
+    if not init_is_pickle and not init_is_tarball:
+        raise ArgumentException(
+            'This tool can only load tarball and binary models')
+
+    if init_is_pickle:
+        return io.read_binary_model_file(modelfile)
+    return io.read_tarball_model_file(modelfile)
+
+
+def main(args):
+    io = flatcat.io.FlatcatIO(encoding='utf-8')    # FIXME
+    models = [load_model(io, model)
+              for model in args.modelfiles]
+
+
+if __name__ == "__main__":
+    parser = get_argparser()
+    try:
+        args = parser.parse_args(sys.argv[1:])
+        main(args)
+    except ArgumentException as e:
+        parser.error(e)
+    except Exception as e:
+        raise e

@@ -6,6 +6,7 @@ import argparse
 import collections
 import sys
 
+import morfessor
 import flatcat
 from flatcat.exception import ArgumentException
 
@@ -58,6 +59,9 @@ Morfessor FlatCat model comparison diagnostics
     # FIXME: hardcoded to alpha atm
     #add_arg('-x', '--variable)
 
+    add_arg('--weight-threshold', dest='threshold', default=0.01,
+            metavar='<float>', type=float,
+            help='percentual stopping threshold for corpusweight updaters')
     add_arg('--aligned-reference', dest='alignref', default=None,
             metavar='<file>',
             help='FIXME')
@@ -139,12 +143,43 @@ def get_basic_stats(model):
         "hapaxsuffixes": hapaxsuffixes,
     }
 
+def aligned_token_counts(model, updater):
+    pass
+
 def main(args):
     io = flatcat.io.FlatcatIO(encoding=args.encoding)
     models = [load_model(io, model)
               for model in args.modelfiles]
+
+    updater = None
+    if args.alignref is not None:
+        if args.alignseg is None:
+            raise ArgumentException(
+                'If --aligned-reference is specified, '
+                'you must also specify --aligned-to-segment')
+        postfunc = None
+        if args.alignloss == 'abs':
+            lossfunc = abs
+        elif args.alignloss == 'square':
+            lossfunc = lambda x: x**2
+        elif args.alignloss == 'zeroone':
+            lossfunc = lambda x: 0 if x == 0 else 1
+        elif args.alignloss == 'tot':
+            lossfunc = lambda x: x
+            postfunc = abs
+        else:
+            raise ArgumentException("unknown alignloss type '%s'" % args.alignloss)
+        updater = morfessor.baseline.AlignedTokenCountCorpusWeight(
+            io._read_text_file(args.alignseg),
+            io._read_text_file(args.alignref),
+            args.threshold,
+            lossfunc,
+            postfunc)
+
     for model in models:
         print(get_basic_stats(model))
+        if updater is not None:
+            print(updater.evaluation(model))
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ from __future__ import unicode_literals
 
 import argparse
 import collections
+import locale
+import string
 import sys
 
 import flatcat
@@ -58,6 +60,10 @@ Morfessor FlatCat advanced segmentation and reformatting
     add_arg('outfile', metavar='<outfile>',
             help='The output file. The type is defined by preset '
                  'or can be specified manually.')
+    add_arg('-m', '--model', dest='model', metavar='<flatcat model>',
+            help='A FlatCat model (tarball or binary), '
+                 'for the operations that require a model to work.')
+
     add_arg('-e', '--encoding', dest='encoding', metavar='<encoding>',
             help='Encoding of input and output files (if none is given, '
                  'both the local encoding and UTF-8 are tried).')
@@ -102,14 +108,12 @@ Morfessor FlatCat advanced segmentation and reformatting
             help='Use heuristic postprocessing to remove nonmorphemes '
                  'from output segmentations.')
 
-    add_arg('-m', '--model', dest='model', metavar='<flatcat model>',
-            help='A FlatCat model (tarball or binary), '
-                 'for the operations that require a model to work.')
-
     add_arg('--restitch', dest='restitch',
             default=False, action='store_true',
             help='When given a segmented corpus, '
                  'output the recombined surface forms.')
+    
+    return parser
 
 
 IntermediaryFormat = collections.namedtuple('IntermediaryFormat',
@@ -134,13 +138,14 @@ class FlatcatWrapper(object):
             self.hpp = flatcat.categorizationscheme.HeuristicPostprocessor()
         else:
             self.hpp = None
+        self.clogp = clogp
 
     def segment(self, word):
         (analysis, cost) = self.model.viterbi_analyze(word.word)
         if self.hpp is not None:
             analysis = self.hpp.remove_nonmorphemes(analysis, self.model)
         if self.clogp:
-            clogp = model.forward_logprob(word)
+            clogp = self.model.forward_logprob(word)
         else:
             clogp = 0
         return IntermediaryFormat(
@@ -169,21 +174,23 @@ class AnalysisFormatter(object):
         self.category_sep = category_sep
         self.strip_tags = strip_tags
         self._morph_formatter = self._make_morph_formatter(category_sep,
-                                                           output_tags)
+                                                           strip_tags)
 
     def segment(self, word):
-        analysis = flatcat._wb_wrap(word.analysis)
+        analysis = flatcat.flatcat._wb_wrap(word.analysis)
         out = []
         for (i, cmorph) in enumerate(analysis):
-            out.append(self._morph_sep(analysis[i - 1].category, cmorph.category))
-            if cmorph.category = flatcat.WORD_BOUNDARY:
+            out.append(self._morph_sep(
+                analysis[i - 1].category,
+                cmorph.category))
+            if cmorph.category == flatcat.WORD_BOUNDARY:
                 continue
-            out.append(self._morph_formatter(cmorph)
+            out.append(self._morph_formatter(cmorph))
         return ''.join(out)
 
 
-    def _make_morph_formatter(self, category_sep, output_tags):
-        if output_tags:
+    def _make_morph_formatter(self, category_sep, strip_tags):
+        if not strip_tags:
             def output_morph(cmorph):
                 if cmorph.category is None:
                     return cmorph.morph
@@ -257,7 +264,7 @@ def dummy_reader(io, infile):
 
 def main(args):
     io = flatcat.io.FlatcatIO(encoding=args.encoding)
-    model = load_model(io, model)
+    model = load_model(io, args.model)  # FIXME not always
 
     outformat = args.outputformat
     csep = args.outputconseparator
@@ -270,24 +277,45 @@ def main(args):
     outformat = outformat.replace(r"\t", "\t")
     keywords = [x[1] for x in string.Formatter().parse(outformat)]
 
+    # chain of functions to apply to each item
+    item_steps = []
+
     model_wrapper = FlatcatWrapper(
         model,
         remove_nonmorphemes=args.rm_nonmorph,
         clogp=('clogprob' in keywords))
+    item_steps.append(model_wrapper.segment)
+
     analysis_formatter = AnalysisFormatter(
         csep,   # FIXME
         tsep,
         args.striptags)
-    cache = SegmentationCache(model_wrapper.segment)
+    item_steps.append(analysis_formatter.segment)
+
+    def process_item(item):
+        for func in item_steps:
+            item = func(item)
+        return item
+
+    cache = SegmentationCache(process_item)
 
     with io._open_text_file_write(args.outfile) as fobj:
-        for item in utils._generator_progress(dummy_reader(io, args.infile)):
+        pipe = dummy_reader(io, args.infile)
+        pipe = utils._generator_progress(pipe)
+        for item in pipe:
             if len(item.analysis) == 0: 
                 # is a corpus newline marker
                 if args.outputnewlines:
                     fobj.write("\n")
                 continue
             item = cache.segment(item)
+            fobj.write(outformat.format(
+                    count=item.count,
+                    compound=item.word,
+                    analysis=item.analysis,
+                    logprob=item.logp,
+                    clogprob=item.clogp))
+
 
 if __name__ == "__main__":
     parser = get_argparser()

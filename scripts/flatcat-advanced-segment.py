@@ -120,6 +120,7 @@ IntermediaryFormat = collections.namedtuple('IntermediaryFormat',
     ['count', 'word', 'analysis', 'logp', 'clogp'])
 
 # FIXME sniffer:
+# if input is a flatcat tgz or bin model: extract analysis part
 # columns? type of first whitespace? mix of spaces and tabs?
 # is first column a number?
 # is there a known morph delimiter?

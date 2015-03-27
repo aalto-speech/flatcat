@@ -186,8 +186,13 @@ class AnalysisFormatter(object):
             if cmorph.category == flatcat.WORD_BOUNDARY:
                 continue
             out.append(self._morph_formatter(cmorph))
-        return ''.join(out)
-
+        formatted = ''.join(out)
+        return IntermediaryFormat(
+            word.count,
+            word.word,
+            formatted,
+            word.logp,
+            word.clogp)
 
     def _make_morph_formatter(self, category_sep, strip_tags):
         if not strip_tags:
@@ -195,8 +200,8 @@ class AnalysisFormatter(object):
                 if cmorph.category is None:
                     return cmorph.morph
                 return '{}{}{}'.format(cmorph.morph,
-                                        category_sep,
-                                        cmorph.category)
+                                       category_sep,
+                                       cmorph.category)
         else:
             def output_morph(cmorph):
                 try:
@@ -271,8 +276,14 @@ def main(args):
     tsep = args.outputtagseparator
     if not PY3:
         outformat = _locale_decoder(outformat)
-        csep = _locale_decoder(csep)
-        tsep = _locale_decoder(tsep)
+        if csep is not None:
+            csep = _locale_decoder(csep)
+        if tsep is not None:
+            tsep = _locale_decoder(tsep)
+    if csep is None:
+        csep = ' + '    # FIXME: depends on task/preset
+    if tsep is None:
+        tsep = '/'      # FIXME: depends on task/preset
     outformat = outformat.replace(r"\n", "\n")
     outformat = outformat.replace(r"\t", "\t")
     keywords = [x[1] for x in string.Formatter().parse(outformat)]

@@ -11,7 +11,7 @@ import flatcat
 from flatcat.exception import ArgumentException
 
 LICENSE = """
-Copyright (c) 2014, Stig-Arne Gronroos
+Copyright (c) 2015, Stig-Arne Gronroos
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without

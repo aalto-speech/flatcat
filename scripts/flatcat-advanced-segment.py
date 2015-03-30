@@ -55,6 +55,7 @@ Morfessor FlatCat advanced segmentation and reformatting
         formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False)
     add_arg = parser.add_argument
+    #FIXME: mixing corpus and list formatting is just a bad idea
     add_arg('preset', metavar='<preset>', type=str,
             choices=['custom', 'segment', 'restitch', 'reformat-list'],
             help='Presets defining sensible default values for what to do. '
@@ -393,7 +394,9 @@ def main(args):
         if args.preset == 'restitch':    # FIXME
             pipe = segmented_corpus_reader(
                 io, args.infile,
-                {re.compile(r'\+ \+'): '+'},     # FIXME
+                {re.compile(r'\+ \+'):      '+',   # FIXME
+                 re.compile(r'(?<!\+) \+'): ' ',   # FIXME
+                 re.compile(r'\+ (?!\+)'):  ' '},  # FIXME
                 args.input_not_tagged
             )
         else:

@@ -73,7 +73,7 @@ Morfessor FlatCat advanced segmentation
             default=None, metavar='<id>',
             help='Output format')
 
-    add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
+    add_arg('--dont-remove-nonmorphemes', dest='no_rm_nonmorph', default=False,
             action='store_true',
             help='Use heuristic postprocessing to remove nonmorphemes '
                  'from output segmentations.')
@@ -136,22 +136,61 @@ def _make_morph_formatter(self, category_sep, strip_tags):
 # ''.join(cmorph.morph for cmorph in word.analysis)
 
 
+def split_compound(morphs):
+    out = []
+    current = []
+    prev = None
+    for morph in morphs:
+        if prev is not None and prev != 'PRE':
+            if morph.category in ('PRE', 'STM'):
+                out.append(current)
+                current = []
+        current.append(morph)
+        prev = morph.category
+    out.append(current)
+    return out
+
+def mark_by_tag(morphs):
+    for morph in morphs:
+        if morph.category == 'PRE':
+            yield '{}+'.format(morph.morph)
+        elif morph.category == 'STM':
+            yield '{}'.format(morph.morph)
+        elif morph.category == 'SUF':
+            yield '+{}'.format(morph.morph)
+        else:
+            assert False, morph.category
+
 def postprocess(fmt, morphs):
     if fmt == 'both_sides':
         #ala+ +kive+ +n+   +kolo+ +on
         return '+ +'.join(cmorph.morph for cmorph in morphs)
-    elif fmt == 'affix_only':
-        #ala+  kive  +n+    kolo  +on
-        pass
+    if fmt == 'right_only':
+        #ala  +kive  +n    +kolo  +on
+        return ' +'.join(cmorph.morph for cmorph in morphs)
+    #elif fmt == 'affix_only':
+    #    #ala+  kive  +n?    kolo  +on
+    #    compound = split_compound(morphs)
+    #    pass
     elif fmt == 'compound_symbol':
         #ala+  kive  +n <c> kolo  +on
-        pass
+        parts = split_compound(morphs)
+        parts = [mark_by_tag(part) for part in parts]
+        parts = [' '.join(part) for part in parts]
+        return ' +@+ '.join(parts)
     elif fmt == 'compound_both_sides':
         #ala+ +kive+ +n>   <kolo+ +on
-        pass
+        parts = split_compound(morphs)
+        parts = [[morph.morph for morph in part]
+                 for part in parts]
+        parts = ['+ +'.join(part) for part in parts]
+        return '@ @'.join(parts)
     elif fmt == 'compound_affix':
         #ala+  kive  +n>    kolo  +on
-        pass
+        parts = split_compound(morphs)
+        parts = [mark_by_tag(part) for part in parts]
+        parts = [' '.join(part) for part in parts]
+        return '@ '.join(parts)
 
 
 class SegmentationCache(object):
@@ -197,7 +236,7 @@ def main(args):
     model = load_model(io, args.model)
     model_wrapper = FlatcatWrapper(
         model,
-        remove_nonmorphemes=args.rm_nonmorph)
+        remove_nonmorphemes=(not args.no_rm_nonmorph))
     cache = SegmentationCache(model_wrapper.segment)
 
     with io._open_text_file_write(args.outfile) as fobj:

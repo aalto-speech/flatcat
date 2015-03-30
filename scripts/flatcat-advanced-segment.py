@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 import argparse
 import collections
 import locale
+import re
 import string
 import sys
 
@@ -88,6 +89,9 @@ Morfessor FlatCat advanced segmentation and reformatting
     add_arg('--input-category-separator', dest='catseparator', type=str,
             default=None, metavar='<regexp>',
             help='Manually set input morph category tag separator. ')
+    add_arg('--input-not-tagged', dest='input_not_tagged', default=False,
+            action='store_true',
+            help='Input format hint: input does not contain category tags.')
 
     add_arg('--output-format', dest='outputformat', type=str,
             default=None,
@@ -291,7 +295,7 @@ def dummy_reader(io, infile):
             atoms,
             0, 0)
 
-def segmented_corpus_reader(io, infile, mapping=None):
+def segmented_corpus_reader(io, infile, mapping=None, not_tagged=False):
     if mapping is None:
         mapping = {}
     for line in io._read_text_file(infile):
@@ -301,11 +305,17 @@ def segmented_corpus_reader(io, infile, mapping=None):
         words = line.split(' ')
         for word in words:
             morphs = word.split('+')
+            if not_tagged:
+                morphs = tuple(flatcat.CategorizedMorph(x, None)
+                               for x in morphs)
+            else:
+                morphs = tuple(io._morph_or_cmorph(x) for x in morphs)
             yield IntermediaryFormat(
                 1,
                 None,
                 morphs,
                 0, 0)
+        yield IntermediaryFormat(0, '\n', (), 0, 0)
 
 
 def main(args):
@@ -340,7 +350,7 @@ def main(args):
         cache = True
         outputnewlines = True
         if outformat is None:
-            outformat = r'{compound} '
+            outformat = r'{compound} '  # FIXME: extra sentence final space
     elif args.preset == 'reformat-list':
         if outformat is None:
             outformat = r'{analysis}\n'
@@ -380,10 +390,11 @@ def main(args):
     cache = SegmentationCache(process_item)
 
     with io._open_text_file_write(args.outfile) as fobj:
-        if args.preset == 'restich':    # FIXME
+        if args.preset == 'restitch':    # FIXME
             pipe = segmented_corpus_reader(
                 io, args.infile,
-                {csep: '+'}     # FIXME
+                {re.compile(r'\+ \+'): '+'},     # FIXME
+                args.input_not_tagged
             )
         else:
             pipe = dummy_reader(io, args.infile)

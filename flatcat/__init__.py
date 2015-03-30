@@ -32,7 +32,7 @@ def get_version(numeric=False):
 from .flatcat import FlatcatModel, AbstractSegmenter
 from .flatcat import FlatcatAnnotatedCorpusEncoding
 from .categorizationscheme import MorphUsageProperties, HeuristicPostprocessor
-from .categorizationscheme import WORD_BOUNDARY
+from .categorizationscheme import WORD_BOUNDARY, CategorizedMorph
 from .cmd import flatcat_main, get_flatcat_argparser
 from .exception import MorfessorException, ArgumentException
 from .io import FlatcatIO

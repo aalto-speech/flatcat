@@ -73,36 +73,13 @@ Morfessor FlatCat advanced segmentation and reformatting
 
     return parser
 
-#    if fmt == 'right_only':
-#        #ala  +kive  +n    +kolo  +on
-#        return ' +'.join(cmorph.morph for cmorph in morphs)
-#    #elif fmt == 'affix_only':
-#    #    #ala+  kive  +n?    kolo  +on
-#    #    compound = split_compound(morphs)
-#    #    pass
-#    elif fmt == 'compound_symbol':
-#        #ala+  kive  +n <c> kolo  +on
-#        parts = split_compound(morphs)
-#        parts = [mark_by_tag(part) for part in parts]
-#        parts = [' '.join(part) for part in parts]
-#        return ' +@+ '.join(parts)
-#    elif fmt == 'compound_both_sides':
-#        #ala+ +kive+ +n>   <kolo+ +on
-#        parts = split_compound(morphs)
-#        parts = [[morph.morph for morph in part]
-#                 for part in parts]
-#        parts = ['+ +'.join(part) for part in parts]
-#        return '@ @'.join(parts)
-#    elif fmt == 'compound_affix':
-#        #ala+  kive  +n>    kolo  +on
-#        parts = split_compound(morphs)
-#        parts = [mark_by_tag(part) for part in parts]
-#        parts = [' '.join(part) for part in parts]
-#        return '@ '.join(parts)
 
 RE_BOTH_SIDES = re.compile(r'\+ \+')
 RE_RIGHT_ONLY = re.compile(r'(?<!\+) \+')
 RE_LEFT_ONLY = re.compile(r'\+ (?!\+)')
+COMPOUND = r' +@+ '
+COMPOUND_BOTH = r'@ @'
+COMPOUND_LEFT = r'@ '
 def restitcher(fmt, line):
     if fmt == 'both_sides':
         #ala+ +kive+ +n+   +kolo+ +on
@@ -110,8 +87,29 @@ def restitcher(fmt, line):
         line = RE_LEFT_ONLY.sub( ' ', line)
         line = RE_BOTH_SIDES.sub('',  line)
         return line
-    pass
-
+    elif fmt == 'right_only':
+        line = RE_RIGHT_ONLY.sub('', line)
+        return line
+    elif fmt == 'compound_symbol':
+        #ala+  kive  +n <c> kolo  +on
+        line = line.replace(COMPOUND, '')
+        line = RE_RIGHT_ONLY.sub('', line)
+        line = RE_LEFT_ONLY.sub( '', line)
+        return line
+    elif fmt == 'compound_both_sides':
+        #ala+ +kive+ +n>   <kolo+ +on
+        line = line.replace(COMPOUND_BOTH, '')
+        line = RE_RIGHT_ONLY.sub(' ', line)
+        line = RE_LEFT_ONLY.sub( ' ', line)
+        line = RE_BOTH_SIDES.sub('',  line)
+        return line
+    elif fmt == 'compound_affix':
+        #ala+  kive  +n>    kolo  +on
+        line = line.replace(COMPOUND_LEFT, '')
+        line = RE_RIGHT_ONLY.sub('', line)
+        line = RE_LEFT_ONLY.sub( '', line)
+        line = RE_BOTH_SIDES.sub('',  line)
+        return line
 
 def main(args):
     io = flatcat.io.FlatcatIO(encoding=args.encoding)

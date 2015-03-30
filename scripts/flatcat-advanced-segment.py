@@ -83,7 +83,9 @@ Morfessor FlatCat advanced segmentation
 
 def corpus_reader(io, infile):
     for line in io._read_text_file(infile):
-        for token in line.split(' '):
+        for (i, token) in enumerate(line.split(' ')):
+            if i != 0:
+                yield ' '
             yield token
         yield '\n'
 
@@ -98,7 +100,7 @@ class FlatcatWrapper(object):
             self.hpp = None
 
     def segment(self, word):
-        (analysis, cost) = self.model.viterbi_analyze(word.word)
+        (analysis, cost) = self.model.viterbi_analyze(word)
         if self.hpp is not None:
             analysis = self.hpp.remove_nonmorphemes(analysis, self.model)
         return analysis
@@ -120,6 +122,7 @@ def _make_morph_formatter(self, category_sep, strip_tags):
                 return cmorph
     return output_morph
 
+# FIXME: read segmentation bypass regexes from a file
 # FIXME: adding and removing morphs from the analysis (no longer concatenative)
 # FIXME: joining some morphs depending on tags (e.g. join compound modifier)
 # FIXME: different delimiters for different surrounding tags
@@ -133,8 +136,22 @@ def _make_morph_formatter(self, category_sep, strip_tags):
 # ''.join(cmorph.morph for cmorph in word.analysis)
 
 
-def postprocess(fmt):
-    pass
+def postprocess(fmt, morphs):
+    if fmt == 'both_sides':
+        #ala+ +kive+ +n+   +kolo+ +on
+        return '+ +'.join(cmorph.morph for cmorph in morphs)
+    elif fmt == 'affix_only':
+        #ala+  kive  +n+    kolo  +on
+        pass
+    elif fmt == 'compound_symbol':
+        #ala+  kive  +n <c> kolo  +on
+        pass
+    elif fmt == 'compound_both_sides':
+        #ala+ +kive+ +n>   <kolo+ +on
+        pass
+    elif fmt == 'compound_affix':
+        #ala+  kive  +n>    kolo  +on
+        pass
 
 
 class SegmentationCache(object):
@@ -180,16 +197,16 @@ def main(args):
     model = load_model(io, args.model)
     model_wrapper = FlatcatWrapper(
         model,
-        remove_nonmorphemes=args.rm_nonmorph,
-        clogp=False)
-    cache = SegmentationCache(mode_wrapper.segment)
+        remove_nonmorphemes=args.rm_nonmorph)
+    cache = SegmentationCache(model_wrapper.segment)
 
     with io._open_text_file_write(args.outfile) as fobj:
         pipe = corpus_reader(io, args.infile)
         pipe = utils._generator_progress(pipe)
         pipe = cache.segment_from(pipe)
         # FIXME: transformations (joining/filtering) here
-        pipe = postrocessor(args.output_format)(pipe)
+        pipe = (postprocess(args.output_format, morphs)
+                for morphs in pipe)
 
         for token in pipe:
             fobj.write(token)

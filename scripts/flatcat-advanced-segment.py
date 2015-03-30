@@ -50,39 +50,24 @@ def get_argparser():
     parser = argparse.ArgumentParser(
         prog='flatcat-advanced-segment',
         description="""
-Morfessor FlatCat advanced segmentation and reformatting
+Morfessor FlatCat advanced segmentation
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False)
     add_arg = parser.add_argument
-    add_arg('preset', metavar='<subcommand>', type=str,
-            choices=['segment', 'restitch'],
-            help='Presets defining sensible default values for what to do. '
-                 'segment: reads in a corpus (running tokens, not a list), '
-                 'outputs the segmented tokens. '
-                 'restitch: reads in a segmented corpus, '
-                 'outputs the reconstructed surface forms of words.')
 
+    add_arg('model', metavar='<flatcat model>',
+            help='A FlatCat model (tarball or binary)')
     add_arg('infile', metavar='<infile>',
             help='The input file. The type will be sniffed automatically, '
                  'or can be specified manually.')
     add_arg('outfile', metavar='<outfile>',
             help='The output file. The type is defined by preset '
                  'or can be specified manually.')
-    add_arg('-m', '--model', dest='model', metavar='<flatcat model>',
-            help='A FlatCat model (tarball or binary), '
-                 'for the operations that require a model to work.')
 
     add_arg('-e', '--encoding', dest='encoding', metavar='<encoding>',
             help='Encoding of input and output files (if none is given, '
                  'both the local encoding and UTF-8 are tried).')
-
-    add_arg('--input-category-separator', dest='catseparator', type=str,
-            default=None, metavar='<regexp>',
-            help='Manually set input morph category tag separator. ')
-    add_arg('--input-format', dest='input_format', type=str,
-            default=None, metavar='<id>',
-            help='Input format')
 
     add_arg('--output-format', dest='output_format', type=str,
             default=None, metavar='<id>',
@@ -103,32 +88,6 @@ def corpus_reader(io, infile):
         yield '\n'
 
 
-def preprocessor(fmt):
-    if fmt == 'tags':
-        def _pre(pipe):
-            for token in pipe:
-                yield io._morph_or_cmorph(x)
-    else:
-        def _pre(pipe):
-            for token in pipe:
-                yield CategorizedMorph(token, None)
-        
-
-#def restitcher(fmt):
-#    if fmt == 'both_sides':
-#        def _res(pipe):
-#            prev = None
-#            expect = False
-#            for token in pipe:
-#                if token.morph[0] == '+':
-#                    if expect:
-#                        token = prev.morph + token.morph
-
-
-# FIXME: adding and removing morphs from the analysis (no longer concatenative)
-# FIXME: joining some morphs depending on tags (e.g. join compound modifier)
-# FIXME: different delimiters for different surrounding tags
-# FIXME: restitching
 
 class FlatcatWrapper(object):
     def __init__(self, model, remove_nonmorphemes=True):
@@ -144,13 +103,6 @@ class FlatcatWrapper(object):
             analysis = self.hpp.remove_nonmorphemes(analysis, self.model)
         return analysis
 
-
-
-#analysis = flatcat.flatcat._wb_wrap(word.analysis)
-#    if cmorph.category == flatcat.WORD_BOUNDARY:
-#        continue
-#    out.append(self._morph_formatter(cmorph))
-#formatted = ''.join(out)
 
 def _make_morph_formatter(self, category_sep, strip_tags):
     if not strip_tags:
@@ -168,8 +120,21 @@ def _make_morph_formatter(self, category_sep, strip_tags):
                 return cmorph
     return output_morph
 
+# FIXME: adding and removing morphs from the analysis (no longer concatenative)
+# FIXME: joining some morphs depending on tags (e.g. join compound modifier)
+# FIXME: different delimiters for different surrounding tags
+
+#analysis = flatcat.flatcat._wb_wrap(word.analysis)
+#    if cmorph.category == flatcat.WORD_BOUNDARY:
+#        continue
+#    out.append(self._morph_formatter(cmorph))
+#formatted = ''.join(out)
 
 # ''.join(cmorph.morph for cmorph in word.analysis)
+
+
+def postprocess(fmt):
+    pass
 
 
 class SegmentationCache(object):
@@ -185,6 +150,10 @@ class SegmentationCache(object):
         if word not in self._cache:
             self._cache[word] = self.seg_func(word)
         return self._cache[word]
+
+    def segment_from(self, pipe):
+        for word in pipe:
+            yield self.segment(word)
 
 
 def load_model(io, modelfile):
@@ -206,46 +175,20 @@ def load_model(io, modelfile):
     return model
 
 
-# FIXME: these should be in utils?
-_preferred_encoding = locale.getpreferredencoding()
-
-
-# FIXME: these should be in utils?
-def _locale_decoder(s):
-    """ Decodes commandline input in locale """
-    return unicode(s.decode(_preferred_encoding))
-
-
 def main(args):
     io = flatcat.io.FlatcatIO(encoding=args.encoding)
-    model = None
-    if args.model is not None:
-        model = load_model(io, args.model)
-
-    tsep = args.outputtagseparator
-    if not PY3:
-        if tsep is not None:
-            tsep = _locale_decoder(tsep)
-
-    if tsep is None:
-        tsep = '/'
-
-    if args.preset == 'segment':
-        assert model is not None
-        model_wrapper = FlatcatWrapper(
-            model,
-            remove_nonmorphemes=args.rm_nonmorph,
-            clogp=False)
-        cache = SegmentationCache(process_item)
+    model = load_model(io, args.model)
+    model_wrapper = FlatcatWrapper(
+        model,
+        remove_nonmorphemes=args.rm_nonmorph,
+        clogp=False)
+    cache = SegmentationCache(mode_wrapper.segment)
 
     with io._open_text_file_write(args.outfile) as fobj:
         pipe = corpus_reader(io, args.infile)
-        pipe = preprocessor(args.input_format)(pipe)
         pipe = utils._generator_progress(pipe)
-        if args.preset == 'segment':
-            pipe = cache.segment_from(pipe)
-        elif args.preset == 'restitch':
-            pipe = restitcher(args.input_format)(pipe)
+        pipe = cache.segment_from(pipe)
+        # FIXME: transformations (joining/filtering) here
         pipe = postrocessor(args.output_format)(pipe)
 
         for token in pipe:

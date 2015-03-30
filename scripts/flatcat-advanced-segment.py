@@ -54,6 +54,17 @@ Morfessor FlatCat advanced segmentation and reformatting
         formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False)
     add_arg = parser.add_argument
+    add_arg('preset', metavar='<preset>', type=str,
+            choices=['custom', 'segment', 'restitch', 'reformat-list'],
+            help='Presets defining sensible default values for what to do. '
+                 'custom: you must manually specify everything. '
+                 'segment: reads in a corpus (running tokens, not a list), '
+                 'outputs the segmented tokens. '
+                 'restitch: reads in a segmented corpus, '
+                 'outputs the reconstructed surface forms of words.'
+                 'reformat-list: manipulate a list(/table) of segmented '
+                 'word types.')
+
     add_arg('infile', metavar='<infile>',
             help='The input file. The type will be sniffed automatically, '
                  'or can be specified manually.')
@@ -79,7 +90,7 @@ Morfessor FlatCat advanced segmentation and reformatting
             help='Manually set input morph category tag separator. ')
 
     add_arg('--output-format', dest='outputformat', type=str,
-            default=r'{analysis}\n',  # FIXME
+            default=None,
             metavar='<format>',
             help='Format string for --output file (default: "%(default)s"). '
                  'Valid keywords are: '
@@ -107,12 +118,11 @@ Morfessor FlatCat advanced segmentation and reformatting
             action='store_true',
             help='Use heuristic postprocessing to remove nonmorphemes '
                  'from output segmentations.')
+    add_arg('--cache', dest='use_cache', default=False,
+            action='store_true',
+            help='Use a cache for segmentations. Useful for corpora (tokens) '
+                 'but wasteful for lists (types).')
 
-    add_arg('--restitch', dest='restitch',
-            default=False, action='store_true',
-            help='When given a segmented corpus, '
-                 'output the recombined surface forms.')
-    
     return parser
 
 
@@ -212,6 +222,20 @@ class AnalysisFormatter(object):
         return output_morph
 
 
+def restitch(word):
+    if word.word is None or len(word.word) == 0:
+        stitched = ''.join(cmorph.morph
+                           for cmorph in word.analysis)
+    else:
+        stitched = word.word
+    return IntermediaryFormat(
+        word.count,
+        stitched,
+        word.analysis,
+        word.logp,
+        word.clogp)
+
+
 # FIXME: has nothing specificly with segmentation to do: rename
 class SegmentationCache(object):
     def __init__(self, seg_func, limit=1000000):
@@ -267,24 +291,64 @@ def dummy_reader(io, infile):
             atoms,
             0, 0)
 
+def segmented_corpus_reader(io, infile, mapping=None):
+    if mapping is None:
+        mapping = {}
+    for line in io._read_text_file(infile):
+        for (pattern, repl) in mapping.items():
+            line = pattern.sub(repl, line)
+        # after this '+' is morph boundary, ' ' is word boundary
+        words = line.split(' ')
+        for word in words:
+            morphs = word.split('+')
+            yield IntermediaryFormat(
+                1,
+                None,
+                morphs,
+                0, 0)
+
 
 def main(args):
     io = flatcat.io.FlatcatIO(encoding=args.encoding)
-    model = load_model(io, args.model)  # FIXME not always
+    model = None
+    if args.model is not None:
+        model = load_model(io, args.model)
 
     outformat = args.outputformat
     csep = args.outputconseparator
     tsep = args.outputtagseparator
     if not PY3:
-        outformat = _locale_decoder(outformat)
+        if outformat is not None:
+            outformat = _locale_decoder(outformat)
         if csep is not None:
             csep = _locale_decoder(csep)
         if tsep is not None:
             tsep = _locale_decoder(tsep)
+
+    cache = args.use_cache
+    outputnewlines = args.outputnewlines
+    if args.preset == 'custom':
+        if csep is None: raise ArgumentException('--output-morph-separator')
+        if tsep is None: raise ArgumentException('--output-category-separator')
+        if outformat is None: raise ArgumentException('--output-format')
+    elif args.preset == 'segment':
+        cache = True
+        outputnewlines = True
+        if outformat is None:
+            outformat = r'{analysis} '
+    elif args.preset == 'restitch':
+        cache = True
+        outputnewlines = True
+        if outformat is None:
+            outformat = r'{compound} '
+    elif args.preset == 'reformat-list':
+        if outformat is None:
+            outformat = r'{analysis}\n'
+
     if csep is None:
-        csep = ' + '    # FIXME: depends on task/preset
+        csep = ' + '
     if tsep is None:
-        tsep = '/'      # FIXME: depends on task/preset
+        tsep = '/'
     outformat = outformat.replace(r"\n", "\n")
     outformat = outformat.replace(r"\t", "\t")
     keywords = [x[1] for x in string.Formatter().parse(outformat)]
@@ -292,11 +356,15 @@ def main(args):
     # chain of functions to apply to each item
     item_steps = []
 
-    model_wrapper = FlatcatWrapper(
-        model,
-        remove_nonmorphemes=args.rm_nonmorph,
-        clogp=('clogprob' in keywords))
-    item_steps.append(model_wrapper.segment)
+    if model is not None:   # FIXME: what condition?
+        model_wrapper = FlatcatWrapper(
+            model,
+            remove_nonmorphemes=args.rm_nonmorph,
+            clogp=('clogprob' in keywords))
+        item_steps.append(model_wrapper.segment)
+
+    if 'compound' in keywords:
+        item_steps.append(restitch)
 
     analysis_formatter = AnalysisFormatter(
         csep,   # FIXME
@@ -312,12 +380,18 @@ def main(args):
     cache = SegmentationCache(process_item)
 
     with io._open_text_file_write(args.outfile) as fobj:
-        pipe = dummy_reader(io, args.infile)
+        if args.preset == 'restich':    # FIXME
+            pipe = segmented_corpus_reader(
+                io, args.infile,
+                {csep: '+'}     # FIXME
+            )
+        else:
+            pipe = dummy_reader(io, args.infile)
         pipe = utils._generator_progress(pipe)
         for item in pipe:
             if len(item.analysis) == 0: 
                 # is a corpus newline marker
-                if args.outputnewlines:
+                if outputnewlines:
                     fobj.write("\n")
                 continue
             item = cache.segment(item)

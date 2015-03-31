@@ -191,6 +191,16 @@ def postprocess(fmt, morphs):
         parts = [mark_by_tag(part) for part in parts]
         parts = [' '.join(part) for part in parts]
         return '@ '.join(parts)
+    elif fmt == 'compound_modifier_affix':
+        #alakiven>          kolo  +on
+        parts = split_compound(morphs)
+        out = []
+        for part in parts[:-1]:
+            part = [morph.morph for morph in part]
+            out.append(''.join(part))
+        part = mark_by_tag(parts[-1])
+        out.append(' '.join(part))
+        return '@ '.join(out)
 
 
 class SegmentationCache(object):

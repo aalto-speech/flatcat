@@ -103,13 +103,15 @@ def restitcher(fmt, line):
         line = RE_LEFT_ONLY.sub( ' ', line)
         line = RE_BOTH_SIDES.sub('',  line)
         return line
-    elif fmt == 'compound_affix':
+    elif (fmt == 'compound_affix'
+          or fmt == 'compound_modifier_affix'):
         #ala+  kive  +n>    kolo  +on
         line = line.replace(COMPOUND_LEFT, '')
         line = RE_RIGHT_ONLY.sub('', line)
         line = RE_LEFT_ONLY.sub( '', line)
         line = RE_BOTH_SIDES.sub('',  line)
         return line
+        
 
 def main(args):
     io = flatcat.io.FlatcatIO(encoding=args.encoding)

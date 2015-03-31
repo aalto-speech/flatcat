@@ -77,6 +77,10 @@ Morfessor FlatCat advanced segmentation
             action='store_true',
             help='Use heuristic postprocessing to remove nonmorphemes '
                  'from output segmentations.')
+    add_arg('--passthrough-regex-file', dest='re_file', type=str,
+            default=None, metavar='<file>',
+            help='File containing regular expressions for tokens '
+                 'that should be passed through without segmentation.')
 
     return parser
 
@@ -158,6 +162,8 @@ def mark_by_tag(morphs):
             yield '{}'.format(morph.morph)
         elif morph.category == 'SUF':
             yield '+{}'.format(morph.morph)
+        elif morph.category is None:
+            yield morph.morph
         else:
             assert False, morph.category
 
@@ -204,12 +210,19 @@ def postprocess(fmt, morphs):
 
 
 class SegmentationCache(object):
-    def __init__(self, seg_func, limit=1000000):
+    def __init__(self, seg_func, passthrough=None, limit=1000000):
         self.seg_func = seg_func
+        if passthrough is not None:
+            self.passthrough = passthrough
+        else:
+            self.passthrough = []
         self.limit = limit
         self._cache = {}
 
     def segment(self, word):
+        if any(pattern.match(word)
+               for pattern in self.passthrough):
+            return [flatcat.CategorizedMorph(word, None)]
         if len(self._cache) > self.limit:
             # brute solution clears whole cache once limit is reached
             self._cache = {}
@@ -243,11 +256,17 @@ def load_model(io, modelfile):
 
 def main(args):
     io = flatcat.io.FlatcatIO(encoding=args.encoding)
+
+    passthrough = []
+    if args.re_file is not None:
+        for line in io._read_text_file(args.re_file):
+            passthrough.append(
+                re.compile(line))
     model = load_model(io, args.model)
     model_wrapper = FlatcatWrapper(
         model,
         remove_nonmorphemes=(not args.no_rm_nonmorph))
-    cache = SegmentationCache(model_wrapper.segment)
+    cache = SegmentationCache(model_wrapper.segment, passthrough)
 
     with io._open_text_file_write(args.outfile) as fobj:
         pipe = corpus_reader(io, args.infile)

@@ -46,6 +46,7 @@ ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 """
 
+
 def get_argparser():
     parser = argparse.ArgumentParser(
         prog='flatcat-advanced-segment',
@@ -80,6 +81,8 @@ RE_LEFT_ONLY = re.compile(r'\+ (?!\+)')
 COMPOUND = r' +@+ '
 COMPOUND_BOTH = r'@ @'
 COMPOUND_LEFT = r'@ '
+
+
 def restitcher(fmt, line):
     if fmt == 'both_sides':
         #ala+ +kive+ +n+   +kolo+ +on
@@ -111,7 +114,7 @@ def restitcher(fmt, line):
         line = RE_LEFT_ONLY.sub( '', line)
         line = RE_BOTH_SIDES.sub('',  line)
         return line
-        
+
 
 def main(args):
     io = flatcat.io.FlatcatIO(encoding=args.encoding)

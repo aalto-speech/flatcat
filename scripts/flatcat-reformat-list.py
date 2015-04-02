@@ -46,6 +46,7 @@ ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 """
 
+
 def get_argparser():
     parser = argparse.ArgumentParser(
         prog='flatcat-advanced-segment',
@@ -118,7 +119,6 @@ Morfessor FlatCat advanced segmentation and reformatting
             help='For each newline in input, print newline in --output file '
             '(default: "%(default)s")')
 
-
     add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
             action='store_true',
             help='Use heuristic postprocessing to remove nonmorphemes '
@@ -146,6 +146,7 @@ IntermediaryFormat = collections.namedtuple('IntermediaryFormat',
 # FIXME: joining some morphs depending on tags (e.g. join compound modifier)
 # FIXME: different delimiters for different surrounding tags
 # FIXME: restitching
+
 
 class FlatcatWrapper(object):
     def __init__(self, model, remove_nonmorphemes=True, clogp=False):
@@ -296,6 +297,7 @@ def dummy_reader(io, infile):
             atoms,
             0, 0)
 
+
 def segmented_corpus_reader(io, infile, mapping=None, not_tagged=False):
     if mapping is None:
         mapping = {}
@@ -403,18 +405,18 @@ def main(args):
             pipe = dummy_reader(io, args.infile)
         pipe = utils._generator_progress(pipe)
         for item in pipe:
-            if len(item.analysis) == 0: 
+            if len(item.analysis) == 0:
                 # is a corpus newline marker
                 if outputnewlines:
                     fobj.write("\n")
                 continue
             item = cache.segment(item)
             fobj.write(outformat.format(
-                    count=item.count,
-                    compound=item.word,
-                    analysis=item.analysis,
-                    logprob=item.logp,
-                    clogprob=item.clogp))
+                       count=item.count,
+                       compound=item.word,
+                       analysis=item.analysis,
+                       logprob=item.logp,
+                       clogprob=item.clogp))
 
 
 if __name__ == "__main__":

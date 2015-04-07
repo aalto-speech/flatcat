@@ -195,7 +195,8 @@ def distrplot(stats, xvar, yvar):
         (x, model) = pair
         plt.subplot(len(models), 1, i + 1)
 
-        labels, values = zip(*stats[model][yvar].items())
+        s = sorted(stats[model][yvar].items())
+        labels, values = zip(*s)
         indexes = np.arange(len(labels))
         width = 1
         plt.bar(indexes, values, width)

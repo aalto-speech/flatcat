@@ -5,6 +5,8 @@ from __future__ import unicode_literals
 import argparse
 import collections
 import sys
+import numpy as np
+from matplotlib import pyplot as plt
 
 import morfessor
 import flatcat
@@ -57,7 +59,7 @@ Morfessor FlatCat model comparison diagnostics
                  'both the local encoding and UTF-8 are tried).')
 
     # FIXME: hardcoded to alpha atm
-    #add_arg('-x', '--variable)
+    add_arg('-x', '--variable', dest='xvar', default='corpusweight')
 
     add_arg('--weight-threshold', dest='threshold', default=0.01,
             metavar='<float>', type=float,
@@ -91,6 +93,7 @@ def load_model(io, modelfile):
         model = io.read_tarball_model_file(modelfile)
     model.reestimate_probabilities()
     return model
+
 
 def get_basic_stats(model):
     corpussize = len(model.segmentations)
@@ -143,7 +146,62 @@ def get_basic_stats(model):
         "hapaxsuffixes": hapaxsuffixes,
     }
 
+def get_aligned_token_cost(updater, model):
+    distribution = collections.Counter()
+    (cost, direction) = updater.evaluation(
+        model, distribution=distribution)
+    return {
+        'align_cost': cost,
+        'align_dir': direction,
+        'align_distribution': distribution}
+
 def aligned_token_counts(model, updater):
+    pass
+
+def lineplot(stats, xvar, yvars,
+    normalize=None, direction=None, ylab=None):
+    # FIXME direction not implemented
+    plt.figure()
+    models = sorted((stats[model][xvar], model)
+                     for model in stats.keys())
+    xs = [x for (x, model) in models]
+    models = [model for (x, model) in models]
+    for yvar in yvars:
+        ys = [stats[model][yvar] for model in models]
+        if normalize is not None:
+            ys = [float(y) / stats[model][normalize] for y in ys]
+        if direction is None:
+            marker = 'o'
+            markers = None
+        else:
+            marker = None
+            dirs = [stats[model][direction] for model in models]
+            markers = ['^' if y > 0 else 'v' for y in dirs]
+        print(xs, ys)
+        plt.plot(xs, ys, marker=marker, label=yvar)
+        if markers is not None:
+            for (x, y, m) in zip(xs, ys, markers):
+                color = 'green' if m == '^' else 'red'
+                plt.plot(x, y, marker=m, markerfacecolor=color)
+    plt.legend()
+    plt.xlabel(xvar)
+    if ylab is not None:
+        plt.ylabel(ylab)
+
+def distrplot(stats, xvar, yvar):
+    models = sorted((stats[model][xvar], model)
+                     for model in stats.keys())
+    for (i, pair) in enumerate(models):
+        (x, model) = pair
+        plt.subplot(len(models), 1, i + 1)
+
+        labels, values = zip(*stats[model][yvar].items())
+        indexes = np.arange(len(labels))
+        width = 1
+        plt.bar(indexes, values, width)
+        plt.xticks(indexes + width * 0.5, labels)
+        plt.xlabel(yvar)
+        plt.title(model)
     pass
 
 def main(args):
@@ -168,7 +226,8 @@ def main(args):
             lossfunc = lambda x: x
             postfunc = abs
         else:
-            raise ArgumentException("unknown alignloss type '%s'" % args.alignloss)
+            raise ArgumentException(
+                "unknown alignloss type '{}'".format(args.alignloss))
         updater = morfessor.baseline.AlignedTokenCountCorpusWeight(
             io._read_text_file(args.alignseg),
             io._read_text_file(args.alignref),
@@ -176,11 +235,26 @@ def main(args):
             lossfunc,
             postfunc)
 
-    for model in models:
-        print(get_basic_stats(model))
+    stats = collections.defaultdict(dict)
+    for (name, model) in zip(args.modelfiles, models):
+        stats[name].update(model.get_params())
+        stats[name].update(get_basic_stats(model))
         if updater is not None:
-            print(updater.evaluation(model))
+            stats[name].update(get_aligned_token_cost(updater, model))
+        print(stats[name])
 
+    # FIXME: save and load stats (or separate tool?)
+
+    lineplot(stats, args.xvar,
+             ['unsplit', 'twopart', 'multistem', 'nostem', ],
+             normalize='corpussize', ylab='proportion of corpus')
+    lineplot(stats, args.xvar,
+             ['hapaxstems', 'lexstems', 'hapaxsuffixes', 'lexsuffixes'],
+             ylab='morph types')
+    lineplot(stats, args.xvar, ['lexsize'], ylab='morph types')
+    lineplot(stats, args.xvar, ['align_cost'], direction='align_dir')
+    distrplot(stats, args.xvar, 'align_distribution')
+    plt.show()
 
 if __name__ == "__main__":
     parser = get_argparser()

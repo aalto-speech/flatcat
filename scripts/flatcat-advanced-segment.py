@@ -218,6 +218,8 @@ class SegmentationCache(object):
             self.passthrough = []
         self.limit = limit
         self._cache = {}
+        self.seg_count = 0
+        self.unseg_count = 0
 
     def segment(self, word):
         if any(pattern.match(word)
@@ -228,7 +230,12 @@ class SegmentationCache(object):
             self._cache = {}
         if word not in self._cache:
             self._cache[word] = self.seg_func(word)
-        return self._cache[word]
+        seg = self._cache[word]
+        if len(seg) > 1:
+            self.seg_count += 1
+        else:
+            self.unseg_count += 1
+        return seg
 
     def segment_from(self, pipe):
         for word in pipe:
@@ -278,6 +285,10 @@ def main(args):
 
         for token in pipe:
             fobj.write(token)
+    tot_count = cache.seg_count + cache_unseg_count
+    seg_prop = float(cache.seg_count) / float(tot_count)
+    print('{} segmented ({}), {} unsegmented, {} total'.format(
+        cache.seg_count, seg_prop, cache_unseg_count, tot_count))
 
 
 if __name__ == "__main__":

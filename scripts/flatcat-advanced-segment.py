@@ -277,7 +277,7 @@ def main(args):
 
     with io._open_text_file_write(args.outfile) as fobj:
         pipe = corpus_reader(io, args.infile)
-        pipe = utils._generator_progress(pipe)
+        pipe = utils._generator_progress(pipe, 10000)
         pipe = cache.segment_from(pipe)
         # FIXME: transformations (joining/filtering) here
         pipe = (postprocess(args.output_format, morphs)

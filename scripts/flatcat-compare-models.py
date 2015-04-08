@@ -202,13 +202,11 @@ def distrplot(stats, xvar, yvar):
         plt.bar(indexes, values, width)
         plt.xticks(indexes + width * 0.5, labels)
         plt.xlabel(yvar)
-        plt.title(model)
+        plt.title('{} = {}'.format(xvar, x))
     pass
 
 def main(args):
     io = flatcat.io.FlatcatIO(encoding=args.encoding)
-    models = [load_model(io, model)
-              for model in args.modelfiles]
 
     updater = None
     if args.alignref is not None:
@@ -237,7 +235,8 @@ def main(args):
             postfunc)
 
     stats = collections.defaultdict(dict)
-    for (name, model) in zip(args.modelfiles, models):
+    for name in args.modelfiles:
+        model = load_model(io, name)
         stats[name].update(model.get_params())
         stats[name].update(get_basic_stats(model))
         if updater is not None:

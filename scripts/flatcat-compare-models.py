@@ -149,14 +149,24 @@ def get_basic_stats(model):
         "hapaxsuffixes": hapaxsuffixes,
     }
 
+class OnlyDiffDistr(object):
+    def __init__(self):
+        self.distribution = collections.Counter()
+       
+    def count(self, ref, unsegcount, diff):
+        self.distribution[diff] += 1
+
+    def get_diff_distr(self):
+        return self.distribution
+
 def get_aligned_token_cost(updater, model):
-    distribution = collections.Counter()
+    distribution = OnlyDiffDistr()
     (cost, direction) = updater.evaluation(
-        model, distribution=distribution)
+        model, distribution=distribution.count)
     return {
         'align_cost': cost,
         'align_dir': direction,
-        'align_distribution': distribution}
+        'align_distribution': distribution.get_diff_distr()}
 
 def aligned_token_counts(model, updater):
     pass

@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 import argparse
 import collections
 import sys
+import cPickle as pickle
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -53,12 +54,14 @@ Morfessor FlatCat model comparison diagnostics
     add_arg = parser.add_argument
     add_arg('modelfiles',
         metavar='<modelfile>',
-        nargs='+')
+        nargs='*')
     add_arg('-e', '--encoding', dest='encoding', metavar='<encoding>',
             help='Encoding of input and output files (if none is given, '
                  'both the local encoding and UTF-8 are tried).')
 
-    # FIXME: hardcoded to alpha atm
+    add_arg('-s', '--save', dest='savefile', default=None)
+    add_arg('-l', '--load', dest='loadfile', default=None)
+
     add_arg('-x', '--variable', dest='xvar', default='corpusweight')
 
     add_arg('--weight-threshold', dest='threshold', default=0.01,
@@ -191,22 +194,32 @@ def lineplot(stats, xvar, yvars,
 def distrplot(stats, xvar, yvar):
     models = sorted((stats[model][xvar], model)
                      for model in stats.keys())
+    absmax = 0
+    for (_, model) in models:
+        absmax = max([absmax] + [abs(y) for y in stats[model][yvar].keys()])
+    plt.figure()
     for (i, pair) in enumerate(models):
         (x, model) = pair
         plt.subplot(len(models), 1, i + 1)
 
-        s = sorted(stats[model][yvar].items())
-        labels, values = zip(*s)
+        labels = range(-absmax, absmax + 1)
+        values = [stats[model][yvar][xx]
+                  for xx in labels]
         indexes = np.arange(len(labels))
         width = 1
         plt.bar(indexes, values, width)
         plt.xticks(indexes + width * 0.5, labels)
         plt.xlabel(yvar)
+        plt.xlim([0, 2*absmax])
         plt.title('{} = {}'.format(xvar, x))
     pass
 
 def main(args):
     io = flatcat.io.FlatcatIO(encoding=args.encoding)
+
+    if args.loadfile is None and len(args.modelfiles) == 0:
+        raise ArgumentException(
+            'Must specify either modelfiles or --load')
 
     updater = None
     if args.alignref is not None:
@@ -234,7 +247,11 @@ def main(args):
             lossfunc,
             postfunc)
 
-    stats = collections.defaultdict(dict)
+    if args.loadfile is not None:
+        with open(args.loadfile, 'rb') as fobj:
+            stats = pickle.load(fobj)
+    else:
+        stats = collections.defaultdict(dict)
     for name in args.modelfiles:
         model = load_model(io, name)
         stats[name].update(model.get_params())
@@ -243,7 +260,9 @@ def main(args):
             stats[name].update(get_aligned_token_cost(updater, model))
         print(stats[name])
 
-    # FIXME: save and load stats (or separate tool?)
+    if args.savefile is not None:
+        with open(args.savefile, 'wb') as fobj:
+            pickle.dump(stats, fobj, pickle.HIGHEST_PROTOCOL)
 
     lineplot(stats, args.xvar,
              ['unsplit', 'twopart', 'multistem', 'nostem', ],
@@ -252,8 +271,9 @@ def main(args):
              ['hapaxstems', 'lexstems', 'hapaxsuffixes', 'lexsuffixes'],
              ylab='morph types')
     lineplot(stats, args.xvar, ['lexsize'], ylab='morph types')
-    lineplot(stats, args.xvar, ['align_cost'], direction='align_dir')
-    distrplot(stats, args.xvar, 'align_distribution')
+    if updater is not None or 'align_cost' in stats.itervalues().next():
+        lineplot(stats, args.xvar, ['align_cost'], direction='align_dir')
+        distrplot(stats, args.xvar, 'align_distribution')
     plt.show()
 
 if __name__ == "__main__":

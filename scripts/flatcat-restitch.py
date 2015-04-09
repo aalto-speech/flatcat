@@ -121,7 +121,8 @@ def main(args):
 
     with io._open_text_file_write(args.outfile) as fobj:
         pipe = io._read_text_file(args.infile)
-        pipe = utils._generator_progress(pipe)
+        if args.outfile != '-':
+            pipe = utils._generator_progress(pipe)
         pipe = (restitcher(args.input_format, line)
                 for line in pipe)
 

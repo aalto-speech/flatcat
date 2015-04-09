@@ -152,21 +152,35 @@ def get_basic_stats(model):
 class OnlyDiffDistr(object):
     def __init__(self):
         self.distribution = collections.Counter()
-       
+
     def count(self, ref, unsegcount, diff):
         self.distribution[diff] += 1
 
     def get_diff_distr(self):
         return self.distribution
 
+class ScatterDistr(OnlyDiffDistr):
+    def __init__(self):
+        super(ScatterDistr, self).__init__()
+        self.ref_diff = collections.Counter()
+        self.ref_unseg = collections.Counter()
+        self.diff_unseg = collections.Counter()
+
+    def count(self, ref, unsegcount, diff):
+        super(ScatterDistr, self).count(ref, unsegcount, diff)
+        self.ref_diff[(ref, diff)] += 1
+        self.ref_unseg[(ref, unsegcount)] += 1
+        self.diff_unseg[(diff, unsegcount)] += 1
+
 def get_aligned_token_cost(updater, model):
-    distribution = OnlyDiffDistr()
+    #distribution = OnlyDiffDistr()
+    distribution = ScatterDistr()
     (cost, direction) = updater.evaluation(
         model, distribution=distribution.count)
     return {
         'align_cost': cost,
         'align_dir': direction,
-        'align_distribution': distribution.get_diff_distr()}
+        'align_distribution': distribution}
 
 def aligned_token_counts(model, updater):
     pass
@@ -206,14 +220,16 @@ def distrplot(stats, xvar, yvar):
                      for model in stats.keys())
     absmax = 0
     for (_, model) in models:
-        absmax = max([absmax] + [abs(y) for y in stats[model][yvar].keys()])
+        distr = stats[model][yvar].get_diff_distr()
+        absmax = max([absmax] + [abs(y) for y in distr.keys()])
     plt.figure()
     for (i, pair) in enumerate(models):
         (x, model) = pair
+        distr = stats[model][yvar].get_diff_distr()
         plt.subplot(len(models), 1, i + 1)
 
         labels = range(-absmax, absmax + 1)
-        values = [stats[model][yvar][xx]
+        values = [distr[xx]
                   for xx in labels]
         indexes = np.arange(len(labels))
         width = 1
@@ -223,6 +239,48 @@ def distrplot(stats, xvar, yvar):
         plt.xlim([0, 2*absmax])
         plt.title('{} = {}'.format(xvar, x))
     pass
+
+def scatterplot(stats):
+    # just one arbitrary model (recommended to run with just one)
+    model = stats.itervalues().next()
+    try:
+        distr = model['align_distribution'].ref_diff
+    except AttributeError:
+        return
+    plt.figure()
+    norm = None
+    for (pair, val) in distr.most_common():
+        if norm is None:
+            normdiv = max(1., float(val) / 25.)
+            norm = lambda x: max(0.5, float(val) / normdiv)
+        (ref, diff) = pair
+        plt.plot(ref, diff, marker='o', ms=norm(val))
+    plt.xlabel('ref')
+    plt.ylabel('diff')
+
+    distr = model['align_distribution'].diff_unseg
+    plt.figure()
+    for (pair, val) in distr.most_common():
+        (diff, unseg) = pair
+        plt.plot(unseg, diff, marker='o', ms=norm(val))
+    plt.xlabel('unseg')
+    plt.ylabel('diff')
+
+    distr = model['align_distribution'].ref_unseg
+    plt.figure()
+    maxref = maxus = 0
+    for (pair, val) in distr.most_common():
+        (ref, unseg) = pair
+        maxref = max(ref, maxref)
+        maxus = max(unseg, maxus)
+        plt.plot(ref, unseg, marker='o', ms=norm(val))
+    discardlim = 15
+    linemax = min(maxref, maxus)
+    plt.plot([discardlim, linemax], [0, linemax-discardlim], color=(.8,.8,.8))
+    plt.plot([0, linemax-discardlim], [discardlim, linemax], color=(.8,.8,.8))
+    plt.xlabel('ref')
+    plt.ylabel('unseg')
+
 
 def main(args):
     io = flatcat.io.FlatcatIO(encoding=args.encoding)
@@ -284,6 +342,7 @@ def main(args):
     if updater is not None or 'align_cost' in stats.itervalues().next():
         lineplot(stats, args.xvar, ['align_cost'], direction='align_dir')
         distrplot(stats, args.xvar, 'align_distribution')
+        scatterplot(stats)
     plt.show()
 
 if __name__ == "__main__":

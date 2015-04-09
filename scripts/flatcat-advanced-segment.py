@@ -285,10 +285,10 @@ def main(args):
 
         for token in pipe:
             fobj.write(token)
-    tot_count = cache.seg_count + cache_unseg_count
+    tot_count = cache.seg_count + cache.unseg_count
     seg_prop = float(cache.seg_count) / float(tot_count)
     print('{} segmented ({}), {} unsegmented, {} total'.format(
-        cache.seg_count, seg_prop, cache_unseg_count, tot_count))
+        cache.seg_count, seg_prop, cache.unseg_count, tot_count))
 
 
 if __name__ == "__main__":

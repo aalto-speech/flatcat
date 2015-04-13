@@ -167,6 +167,16 @@ def mark_by_tag(morphs):
         else:
             assert False, morph.category
 
+def long_to_stems(morphs):
+    for morph in morphs:
+        if morph.category == 'STM':
+            # avoids unnecessary NOOP re-wrapping
+            yield morph
+        elif len(morph) >= 5:
+            yield flatcat.CategorizedMorph(morph.morph, 'STM')
+        else:
+            yield morph
+
 def postprocess(fmt, morphs):
     if fmt == 'both_sides':
         #ala+ +kive+ +n+   +kolo+ +on
@@ -207,6 +217,18 @@ def postprocess(fmt, morphs):
         part = mark_by_tag(parts[-1])
         out.append(' '.join(part))
         return '@ '.join(out)
+    elif fmt == 'advanced':
+        #alakiven+          kolo +on
+        morphs = long_to_stems(morphs)
+        parts = split_compound(morphs)
+        for part in parts[:-1]:
+            part = [morph.morph for morph in part]
+            out.append(''.join(part))
+        part = mark_by_tag(parts[-1])
+        out.append(' '.join(part))
+        return '+ '.join(out)
+    else:
+        assert False, 'unknown output format {}'.format(fmt)
 
 
 class SegmentationCache(object):

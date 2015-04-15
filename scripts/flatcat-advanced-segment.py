@@ -181,7 +181,7 @@ def postprocess(fmt, morphs):
     if fmt == 'both_sides':
         #ala+ +kive+ +n+   +kolo+ +on
         return '+ +'.join(cmorph.morph for cmorph in morphs)
-    if fmt == 'right_only':
+    elif fmt == 'right_only':
         #ala  +kive  +n    +kolo  +on
         return ' +'.join(cmorph.morph for cmorph in morphs)
     #elif fmt == 'affix_only':
@@ -221,6 +221,7 @@ def postprocess(fmt, morphs):
         #alakiven+          kolo +on
         morphs = long_to_stems(morphs)
         parts = split_compound(morphs)
+        out = []
         for part in parts[:-1]:
             part = [morph.morph for morph in part]
             out.append(''.join(part))

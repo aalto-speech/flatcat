@@ -114,6 +114,11 @@ def restitcher(fmt, line):
         line = RE_LEFT_ONLY.sub( '', line)
         line = RE_BOTH_SIDES.sub('',  line)
         return line
+    elif fmt == 'advanced':
+        line = RE_RIGHT_ONLY.sub('', line)
+        line = RE_LEFT_ONLY.sub( '', line)
+        line = RE_BOTH_SIDES.sub('',  line)
+        return line
 
 
 def main(args):

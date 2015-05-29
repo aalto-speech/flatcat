@@ -223,15 +223,13 @@ class AbstractSegmenter(object):
             pos -= len(backtrace.backpointer[1])
         return tuple(result), best.cost
 
-    def viterbi_nbest(self, segments, strict_annot=True):
+    def viterbi_nbest(self, segments):
         """Simultaneously segment and tag a word using the learned model.
         Can be used to segment unseen words.
 
         Arguments:
             segments :  A word (or a list of morphs which will be
                         concatenated into a word) to resegment and tag.
-            strict_annot :  If the word occurs in the annotated corpus,
-                            only consider the segmentations in the annotation.
         Returns:
             best_analysis, :  The resegmented, retagged word
             best_cost      :  The cost of the returned solution
@@ -249,20 +247,6 @@ class AbstractSegmenter(object):
             # Merge potential segments
             word = ''.join(segments)
 
-        # Return the best alternative from annotations if the word occurs there
-        if word in self.annotations and strict_annot:
-            annotation = self.annotations[word]
-            alternatives = annotation.alternatives
-
-            if not self._annotations_tagged:
-                alternatives = tuple(self.viterbi_tag(alt, forbid_zzz=True)
-                                     for alt in alternatives)
-
-            sorted_alts = self.rank_analyses([AnalysisAlternative(alt, 0)
-                                              for alt in alternatives])
-            best = sorted_alts[0]
-            return best.analysis, best.cost
-
         # To make sure that internally impossible states are penalized
         # even more than impossible states caused by zero parameters.
         extrazero = LOGPROB_ZERO ** 2
@@ -276,22 +260,23 @@ class AbstractSegmenter(object):
         wb = categories.index(WORD_BOUNDARY)
 
         # Grid consisting of
-        # the lowest accumulated cost ending in each possible state.
+        # the n lowest accumulated costs ending in each possible state.
         # and back pointers that indicate the best path.
-        # The grid is 3-dimensional:
+        # The grid is 4-dimensional:
         # grid [POSITION_IN_WORD]
         #      [MORPHLEN_OF_MORPH_ENDING_AT_POSITION - 1]
         #      [TAGINDEX_OF_MORPH_ENDING_AT_POSITION]
+        #      [RANK_OF_HYPOTHESIS]
         # Initialized to pseudo-zero for all states
         zeros = [ViterbiNode(extrazero, None)] * len(categories)
-        grid = [[zeros]]
+        grid = [[[zeros]]]
         # Except probability one that first state is a word boundary
-        grid[0][0][wb] = ViterbiNode(0, None)
+        grid[0][0][wb] = [ViterbiNode(0, None)]
 
         # Temporaries
         # Cumulative costs for each category at current time step
         cost = None
-        best = ViterbiNode(extrazero, None)
+        bestn = ViterbiNode(extrazero, None)
 
         for pos in range(1, len(word) + 1):
             grid.append([])

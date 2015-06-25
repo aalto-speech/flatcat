@@ -77,6 +77,8 @@ Morfessor FlatCat model comparison diagnostics
             metavar='<type>', choices=['abs', 'square', 'zeroone', 'tot'],
             help="loss function for FIXME ('abs', 'square', 'zeroone' or"
                  "'tot'; default '%(default)s')")
+    add_arg('--join-modifiers', dest='joinmodifs', default=False,
+            action='store_true', help='join compound modifiers')
     return parser
 
 def load_model(io, modelfile):
@@ -282,6 +284,43 @@ def scatterplot(stats):
     plt.ylabel('unseg')
 
 
+def split_compound(morphs):
+    out = []
+    current = []
+    prev = None
+    for morph in morphs:
+        if prev is not None and prev != 'PRE':
+            if morph.category in ('PRE', 'STM'):
+                out.append(current)
+                current = []
+        current.append(morph)
+        prev = morph.category
+    out.append(current)
+    return out
+
+
+def long_to_stems(morphs):
+    for morph in morphs:
+        if morph.category == 'STM':
+            # avoids unnecessary NOOP re-wrapping
+            yield morph
+        elif len(morph) >= 5:
+            yield flatcat.CategorizedMorph(morph.morph, 'STM')
+        else:
+            yield morph
+
+
+def join_modifiers(morphs):
+    morphs = long_to_stems(morphs)
+    parts = split_compound(morphs)
+    out = []
+    for part in parts[:-1]:
+        part = [morph.morph for morph in part]
+        out.append(''.join(part))
+    out.append([morph.morph for morph in parts[-1]])
+    return out
+    
+
 def main(args):
     io = flatcat.io.FlatcatIO(encoding=args.encoding)
 
@@ -308,12 +347,17 @@ def main(args):
         else:
             raise ArgumentException(
                 "unknown alignloss type '{}'".format(args.alignloss))
+        if args.joinmodifs:
+            manglefunc = join_modifiers
+        else:
+            manglefunc = lambda x: x
         updater = morfessor.baseline.AlignedTokenCountCorpusWeight(
             io._read_text_file(args.alignseg),
             io._read_text_file(args.alignref),
             args.threshold,
             lossfunc,
-            postfunc)
+            postfunc,
+            manglefunc)
 
     if args.loadfile is not None:
         with open(args.loadfile, 'rb') as fobj:

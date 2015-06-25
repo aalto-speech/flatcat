@@ -67,7 +67,7 @@ class AbstractSegmenter(object):
     def initialize_hmm(self, min_difference_proportion=None):
         pass
 
-    def viterbi_segment(self, segments, addcount=None, maxlen=None):
+    def viterbi_segment(self, segments, addcount=None, maxlen=None, manglefunc=None):
         """Compatibility with Morfessor Baseline.
         Heuristics are applied to remove nonmorphemes.
 
@@ -77,6 +77,8 @@ class AbstractSegmenter(object):
         analysis, logp = self.viterbi_analyze(segments)
         analysis = HeuristicPostprocessor().remove_nonmorphemes(
             analysis, self)
+        if manglefunc is not None:
+            analysis = manglefunc(analysis)
         return (self.detag_word(analysis), logp)
 
     def viterbi_analyze(self, segments, strict_annot=True):

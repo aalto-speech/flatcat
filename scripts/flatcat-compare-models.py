@@ -342,7 +342,10 @@ def main(args):
     if updater is not None or 'align_cost' in stats.itervalues().next():
         lineplot(stats, args.xvar, ['align_cost'], direction='align_dir')
         distrplot(stats, args.xvar, 'align_distribution')
-        scatterplot(stats)
+        if len(stats) == 1:
+            scatterplot(stats)
+        else:
+            print('More than one model, omitting scatterplot')
     plt.show()
 
 if __name__ == "__main__":

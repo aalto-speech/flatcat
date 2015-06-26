@@ -376,6 +376,13 @@ def main(args):
         with open(args.savefile, 'wb') as fobj:
             pickle.dump(stats, fobj, pickle.HIGHEST_PROTOCOL)
 
+    # print corpus weights and align costs, for commandline access
+    for s in stats.values():
+        print('{} {} align_cost {}'.format(
+            args.xvar,
+            s[args.xvar],
+            s['align_cost']))
+
     lineplot(stats, args.xvar,
              ['unsplit', 'twopart', 'multistem', 'nostem', ],
              normalize='corpussize', ylab='proportion of corpus')

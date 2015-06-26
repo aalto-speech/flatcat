@@ -317,7 +317,7 @@ def join_modifiers(morphs):
     for part in parts[:-1]:
         part = [morph.morph for morph in part]
         out.append(''.join(part))
-    out.append([morph.morph for morph in parts[-1]])
+    out.extend([morph.morph for morph in parts[-1]])
     return out
     
 

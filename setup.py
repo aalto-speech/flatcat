@@ -32,8 +32,7 @@ setup(name='Morfessor FlatCat',
       scripts=['scripts/flatcat',
                'scripts/flatcat-train',
                'scripts/flatcat-segment',
-               'scripts/flatcat-diagnostics',
-               'scripts/flatcat-reformat'
+               # FIXME: new aux tools
                ],
       install_requires=requires,
       extras_require={

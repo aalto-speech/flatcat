@@ -164,7 +164,7 @@ class FlatcatIO(morfessor.MorfessorIO):
         _logger.info("Reading annotations from '%s'..." % file_name)
         for line in self._read_text_file(file_name):
             compound, analyses_line = line.split(None, 1)
-            analysis = self._read_annotation(analyses_line,
+            analysis = self.read_annotation(analyses_line,
                                              construction_sep,
                                              analysis_sep)
             annotations[compound].extend(analysis)
@@ -208,7 +208,7 @@ class FlatcatIO(morfessor.MorfessorIO):
         """
         for line in self._read_text_file(file_name):
             if line.startswith(annotation_prefix):
-                analysis = self._read_annotation(
+                analysis = self.read_annotation(
                     line[len(annotation_prefix):],
                     construction_sep=construction_sep,
                     analysis_sep=analysis_sep)[0]
@@ -299,7 +299,7 @@ class FlatcatIO(morfessor.MorfessorIO):
                                 num_nonmorphemes=num_nonmorphemes,
                                 num_letters=num_letters))
 
-    def _read_annotation(self, line, construction_sep, analysis_sep):
+    def read_annotation(self, line, construction_sep, analysis_sep):
         if analysis_sep is not None:
             analyses = line.split(analysis_sep)
         else:

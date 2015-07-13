@@ -2998,6 +2998,13 @@ class ForceSplitter(object):
                                     or mapper.segmentation_changed)
         return list(segmentations), segmentation_changed
 
+    def enforce_one(self, analysis):
+        if self.forcesplit:
+            analysis = self._enforce_forcesplit(analysis)
+        if self.nosplit_re:
+            analysis = self._enforce_nosplit(analysis)
+        return analysis
+
     def _enforce_forcesplit(self, analysis):
         out = []
         for cmorph in analysis:

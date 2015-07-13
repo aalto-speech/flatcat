@@ -299,7 +299,7 @@ class FlatcatIO(morfessor.MorfessorIO):
                                 num_nonmorphemes=num_nonmorphemes,
                                 num_letters=num_letters))
 
-    def read_annotation(self, line, construction_sep, analysis_sep):
+    def read_annotation(self, line, construction_sep, analysis_sep=None):
         if analysis_sep is not None:
             analyses = line.split(analysis_sep)
         else:

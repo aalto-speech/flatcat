@@ -15,15 +15,17 @@ def main(argv):
 Simple usage example (load a Baseline model, perform FlatCat training
                       and save it into files):
 
-  %(prog)s baseline_segmentation.txt -p 10 -s analysis.gz -S parameters.txt
+  %(prog)s baseline_segmentation.txt -p 10 -s analysis.tar.gz
 
 """
-    keep_options = ['initfile', 'extendfiles', 'saveanalysisfile',
+    keep_options = ['initfile', 'extendfiles',
+                    'savetarballfile', 'savereduced', 'saveanalysisfile',
                     'saveannotsfile', 'savepicklefile', 'loadparamsfile',
                     'saveparamsfile', 'lexfile', 'trainmode',
                     'encoding', 'cseparator', 'consseparator',
                     'analysisseparator', 'catseparator',
                     'dampening', 'ppl_threshold', 'ppl_slope',
+                    'pre_ppl_threshold',
                     'length_threshold', 'length_slope', 'type_ppl',
                     'min_ppl_length', 'forcesplit', 'nosplit',
                     'skips', 'freqthreshold', 'max_shift_distance',

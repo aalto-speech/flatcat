@@ -77,11 +77,11 @@ Perform the Morfessor Baseline segmentation::
 
 Perform Morfessor FlatCat training::
 
-    flatcat-train baseline.gz -p 100 -w 1.0 -A data/annotations.txt -W 0.1 -s analysis.gz -S parameters.txt
+    flatcat-train baseline.gz -p 100 -w 1.0 -A data/annotations.txt -W 0.1 -s analysis.tar.gz
 
 Segment the test data with the trained Morfessor FlatCat model::
     
-    flatcat-segment analysis.gz -L parameters.txt data/test.txt -o test_corpus.segmented --remove-nonmorphemes --output-categories 
+    flatcat-segment analysis.tar.gz data/test.txt -o test_corpus.segmented --remove-nonmorphemes --output-categories 
 
 
 .. _Morpho project homepage: http://www.cis.hut.fi/projects/morpho/

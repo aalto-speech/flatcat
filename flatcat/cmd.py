@@ -51,6 +51,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 _preferred_encoding = locale.getpreferredencoding()
 
+DEFAULT_CORPUSWEIGHT = 1.0
 
 def _locale_decoder(s):
     """ Decodes commandline input in locale """
@@ -384,9 +385,10 @@ def add_semisupervised_arguments(argument_groups):
             action='append', metavar='<file>',
             help='Load annotated data for semi-supervised learning.')
     add_arg('-w', '--corpusweight', dest='corpusweight', type=float,
-            default=1.0, metavar='<float>',
-            help='Corpus weight parameter (default %(default)s); '
-                 'sets the initial value if --develset is used.')
+            default=None, metavar='<float>',
+            help='Corpus weight parameter (default {}); '
+                 'sets the initial value if --develset is used.'.format(
+                    DEFAULT_CORPUSWEIGHT))
     add_arg('-W', '--annotationweight', dest='annotationweight',
             type=float, default=None, metavar='<float>',
             help='Corpus weight parameter for annotated data (if unset, the '
@@ -607,11 +609,15 @@ def flatcat_main(args):
             type_perplexity=args.type_ppl,
             min_perplexity_length=args.min_ppl_length,
             pre_ppl_threshold=args.pre_ppl_threshold)
+        if args.corpusweight is None:
+            corpusweight = DEFAULT_CORPUSWEIGHT
+        else:
+            corpusweight = args.corpusweight
         model = flatcat.FlatcatModel(
             m_usage,
             forcesplit=args.forcesplit,
             nosplit=args.nosplit,
-            corpusweight=args.corpusweight,
+            corpusweight=corpusweight,
             use_skips=args.skips,
             ml_emissions_epoch=args.ml_emissions_epoch)
         _logger.info('Initializing from segmentation...')
@@ -635,6 +641,12 @@ def flatcat_main(args):
         annotations = io.read_annotations_file(f)
         model.add_annotations(annotations,
                               args.annotationweight)
+
+    # Override loaded values with values specified on the commandline
+    if args.corpusweight is not None:
+        model.set_corpus_coding_weight(args.corpusweight)
+    if args.annotationweight is not None:
+        model.set_annotation_coding_weight(args.annotationweight)
 
     # Initialize the model
     must_train = model.initialize_hmm(

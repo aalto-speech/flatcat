@@ -1160,8 +1160,8 @@ class FlatcatModel(AbstractSegmenter):
         if self._supervised and 'annotationweight' in params:
             _logger.info('Setting annotation weight to {}'.format(
                 params['annotationweight']))
-            self._annot_coding.weight = float(params['annotationweight'])
-            self._annot_coding.do_update_weight = False
+            self.set_annotation_coding_weight(
+                float(params['annotationweight']))
         if 'forcesplit' in params:
             self.forcesplit = [x for x in params['forcesplit']]
         if 'nosplit' in params:
@@ -1173,6 +1173,10 @@ class FlatcatModel(AbstractSegmenter):
 
     def set_corpus_coding_weight(self, weight):
         self._corpus_coding.weight = weight
+
+    def set_annotation_coding_weight(self, weight):
+        self._annot_coding.weight = weight
+        self._annot_coding.do_update_weight = False
 
     def get_lexicon(self):
         """Returns morphs in lexicon, with emission counts"""

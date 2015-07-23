@@ -53,6 +53,9 @@ Are you using the correct construction separator?"""
 
 class AbstractSegmenter(object):
     def __init__(self, corpus_coding, nosplit=None):
+        self._initialized = False
+        # None (= no corpus), "untagged", "partial", "full"
+        self._corpus_tagging_level = None
         self._corpus_coding = corpus_coding
         # Do not allow splitting between a letter pair matching this regex
         if nosplit is None:
@@ -383,7 +386,7 @@ class AbstractSegmenter(object):
             return True
 
         return self._viterbi_tag_helper(segments, constraint,
-                                        FlatcatModel.detag_morph)
+                                        AbstractSegmenter.detag_morph)
 
     def _viterbi_tag_helper(self, segments,
                             constraint=None, mapping=lambda x: x,
@@ -629,13 +632,13 @@ class AbstractSegmenter(object):
 
     @staticmethod
     def detag_word(segments):
-        return tuple(FlatcatModel.detag_morph(x) for x in segments)
+        return tuple(AbstractSegmenter.detag_morph(x) for x in segments)
 
     @staticmethod
     def detag_list(segmentations):
         """Removes category tags from a segmented corpus."""
         for rcount, segments in segmentations:
-            yield ((rcount, tuple(FlatcatModel.detag_morph(x)
+            yield ((rcount, tuple(AbstractSegmenter.detag_morph(x)
                                   for x in segments)))
 
     @staticmethod
@@ -919,7 +922,11 @@ class FlatcatModel(AbstractSegmenter):
 
         must_train = False
 
-        ForceSplitter(self).enforce()
+        fs = ForceSplitter(self.forcesplit, self.nosplit_re)
+        (self.segmentations, must_reestimate) = fs.enforce(self.segmentations)
+        if must_reestimate:
+            self.reestimate_probabilities()
+            self._calculate_morph_backlinks()
         self.reestimate_probabilities()
 
         if self._corpus_tagging_level == "untagged":
@@ -1264,12 +1271,6 @@ class FlatcatModel(AbstractSegmenter):
             self._annot_coding.reset_contributions()
         self._initialized = True
 
-    def map_segmentations(self, func):
-        """Apply a mapping to the analysis part of segmentations.
-        Convenience function."""
-        for word in self.segmentations:
-            yield WordAnalysis(word.count, func(word.analysis))
-
     def get_params(self):
         """Returns a dict of hyperparameters."""
         params = {'corpusweight': self.get_corpus_coding_weight()}
@@ -1290,8 +1291,8 @@ class FlatcatModel(AbstractSegmenter):
         if self._supervised and 'annotationweight' in params:
             _logger.info('Setting annotation weight to {}'.format(
                 params['annotationweight']))
-            self._annot_coding.weight = float(params['annotationweight'])
-            self._annot_coding.do_update_weight = False
+            self.set_annotation_coding_weight(
+                float(params['annotationweight']))
         if 'forcesplit' in params:
             self.forcesplit = [x for x in params['forcesplit']]
         if 'nosplit' in params:
@@ -1303,6 +1304,10 @@ class FlatcatModel(AbstractSegmenter):
 
     def set_corpus_coding_weight(self, weight):
         self._corpus_coding.weight = weight
+
+    def set_annotation_coding_weight(self, weight):
+        self._annot_coding.weight = weight
+        self._annot_coding.do_update_weight = False
 
     def get_lexicon(self):
         """Returns morphs in lexicon, with emission counts"""
@@ -3110,23 +3115,32 @@ class CostBreakdown(object):
 
 
 class ForceSplitter(object):
-    def __init__(self, model):
-        self.model = model
-        self.must_reestimate = False
+    def __init__(self, forcesplit, nosplit_re):
+        self.forcesplit = forcesplit
+        self.nosplit_re = nosplit_re
 
-    def enforce(self):
-        self.must_reestimate = False
-        if self.model.forcesplit:
-            self.model.segmentations = list(self.model.map_segmentations(
-                self._forcesplit))
-        if self.model.nosplit_re:
-            self.model.segmentations = list(self.model.map_segmentations(
-                self._nosplit))
-        if self.must_reestimate:
-            self.model.reestimate_probabilities()
-            self.model._calculate_morph_backlinks()
+    def enforce(self, segmentations):
+        segmentation_changed = False
+        if self.forcesplit:
+            mapper = SegmentationMapper(self._enforce_forcesplit)
+            segmentations = mapper.map(segmentations)
+            segmentation_changed = (segmentation_changed
+                                    or mapper.segmentation_changed)
+        if self.nosplit_re:
+            mapper = SegmentationMapper(self._enforce_nosplit)
+            segmentations = mapper.map(segmentations)
+            segmentation_changed = (segmentation_changed
+                                    or mapper.segmentation_changed)
+        return list(segmentations), segmentation_changed
 
-    def _forcesplit(self, analysis):
+    def enforce_one(self, analysis):
+        if self.forcesplit:
+            analysis = self._enforce_forcesplit(analysis)
+        if self.nosplit_re:
+            analysis = self._enforce_nosplit(analysis)
+        return analysis
+
+    def _enforce_forcesplit(self, analysis):
         out = []
         for cmorph in analysis:
             if len(cmorph) == 1:
@@ -3134,7 +3148,7 @@ class ForceSplitter(object):
                 continue
             j = 0
             for i in range(1, len(cmorph)):
-                if cmorph[i] in self.model.forcesplit:
+                if cmorph[i] in self.forcesplit:
                     if len(cmorph[j:i]) > 0:
                         out.append(self._part(cmorph, j, i))
                     out.append(self._part(cmorph, i, i + 1))
@@ -3143,14 +3157,14 @@ class ForceSplitter(object):
                 out.append(self._part(cmorph, j, len(cmorph)))
         return out
 
-    def _nosplit(self, analysis):
+    def _enforce_nosplit(self, analysis):
         out = []
         prev = None
         for cmorph in analysis:
             if prev is None:
                 prev = cmorph
                 continue
-            if self.model.nosplit_re.match(prev[-1:] + cmorph[0]):
+            if self.nosplit_re.match(prev[-1:] + cmorph[0]):
                 prev = CategorizedMorph(prev.morph + cmorph.morph,
                                         DEFAULT_CATEGORY)
             else:
@@ -3161,6 +3175,21 @@ class ForceSplitter(object):
 
     def _part(self, cmorph, j, i):
         return CategorizedMorph(cmorph[j:i], cmorph.category)
+
+
+class SegmentationMapper(object):
+    def __init__(self, func):
+        self.func = func
+        self.segmentation_changed = False
+
+    def map(self, segmentations):
+        """Apply a mapping to the analysis part of segmentations.
+        Convenience function."""
+        for word in segmentations:
+            newseg = self.func(word.analysis)
+            if not self.segmentation_changed and newseg != word.analysis:
+                self.segmentation_changed = True
+            yield WordAnalysis(word.count, newseg)
 
 
 def _log_catprobs(probs):

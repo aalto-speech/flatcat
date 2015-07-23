@@ -11,6 +11,7 @@ __author__ = 'Stig-Arne Gronroos'
 __author_email__ = "morfessor@cis.hut.fi"
 
 import collections
+import heapq
 import logging
 import math
 import random
@@ -228,13 +229,14 @@ class AbstractSegmenter(object):
             pos -= len(backtrace.backpointer[1])
         return tuple(result), best.cost
 
-    def viterbi_nbest(self, segments):
+    def viterbi_nbest(self, segments, n):
         """Simultaneously segment and tag a word using the learned model.
         Can be used to segment unseen words.
 
         Arguments:
             segments :  A word (or a list of morphs which will be
                         concatenated into a word) to resegment and tag.
+            n: lenght of n-best list
         Returns:
             best_analysis, :  The resegmented, retagged word
             best_cost      :  The cost of the returned solution
@@ -263,6 +265,12 @@ class AbstractSegmenter(object):
         categories_nowb = [i for (i, c) in enumerate(categories)
                            if c != WORD_BOUNDARY]
         wb = categories.index(WORD_BOUNDARY)
+
+        def truncated_heap_push(heap, item):
+            if len(heap) < n:
+                heapq.heappush(heap, item)
+            else:
+                heapq.heappushpop(heap, item)
 
         # Grid consisting of
         # the n lowest accumulated costs ending in each possible state.
@@ -314,33 +322,36 @@ class AbstractSegmenter(object):
                         cost = self._corpus_coding.transit_emit_cost(
                             WORD_BOUNDARY, categories[next_cat], morph)
                         truncated_heap_push(bestn,
-                            ViterbiNode(cost, ((0, wb),
+                            ViterbiNode(cost, ((0, wb, 0),
                                 CategorizedMorph(morph, categories[next_cat]))))
-                    # implicit else: for-loop will be empty if prev_pos == 0
                     for prev_cat in categories_nowb:
                         t_e_cost = self._corpus_coding.transit_emit_cost(
                                         categories[prev_cat],
                                         categories[next_cat],
                                         morph)
+                        # implicit else: for-loop will be empty if prev_pos == 0
                         for prev_len in range(1, prev_pos + 1):
-                            cost = (t_e_cost +
-                                grid[prev_pos][prev_len - 1][prev_cat][0].cost)
-                            truncated_heap_push(bestn,
-                                ViterbiNode(cost, ((prev_len, prev_cat),
-                                    CategorizedMorph(morph, categories[next_cat]))))
+                            for k in range(len(
+                                    grid[prev_pos][prev_len - 1][prev_cat])):
+                                cost = (t_e_cost +
+                                    grid[prev_pos][prev_len - 1][prev_cat][k].cost)
+                                truncated_heap_push(bestn,
+                                    ViterbiNode(cost, ((prev_len, prev_cat, k),
+                                        CategorizedMorph(morph, categories[next_cat]))))
                     grid[pos][next_len - 1][next_cat] = bestn
 
         # Last transition must be to word boundary
         bestn = [ViterbiNode(extrazero, None)]
         for prev_len in range(1, len(word) + 1):
             for prev_cat in categories_nowb:
-                cost = (grid[-1][prev_len - 1][prev_cat][0].cost +
-                        self._corpus_coding.log_transitionprob(
-                            categories[prev_cat],
-                            WORD_BOUNDARY))
-                truncated_heap_push(bestn,
-                    ViterbiNode(cost, ((prev_len, prev_cat),
-                        CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY))))
+                for k in range(len(grid[-1][prev_len - 1][prev_cat])):
+                    cost = (grid[-1][prev_len - 1][prev_cat][k].cost +
+                            self._corpus_coding.log_transitionprob(
+                                categories[prev_cat],
+                                WORD_BOUNDARY))
+                    truncated_heap_push(bestn,
+                        ViterbiNode(cost, ((prev_len, prev_cat, k),
+                            CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY))))
 
         if bestn[0].cost >= LOGPROB_ZERO:
             #_logger.warning(
@@ -353,12 +364,10 @@ class AbstractSegmenter(object):
             cost = backtrace.cost
             result = []
             pos = len(word)
-            bt_len = backtrace.backpointer[0][0]
-            bt_cat = backtrace.backpointer[0][1]
+            bt_len, bt_cat, bt_k = backtrace.backpointer[0]
             while pos > 0:
-                backtrace = grid[pos][bt_len - 1][bt_cat]   # FIXME!
-                bt_len = backtrace.backpointer[0][0]
-                bt_cat = backtrace.backpointer[0][1]
+                backtrace = grid[pos][bt_len - 1][bt_cat][bt_k]
+                bt_len, bt_cat, bt_k = backtrace.backpointer[0]
                 result.insert(0, backtrace.backpointer[1])
                 pos -= len(backtrace.backpointer[1])
             results.append((tuple(result), cost))

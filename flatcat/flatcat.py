@@ -273,20 +273,25 @@ class AbstractSegmenter(object):
         #      [TAGINDEX_OF_MORPH_ENDING_AT_POSITION]
         #      [RANK_OF_HYPOTHESIS]
         # Initialized to pseudo-zero for all states
-        zeros = [ViterbiNode(extrazero, None)] * len(categories)
-        grid = [[[zeros]]]
+        def make_zeros():
+            z = []
+            for _ in range(len(categories)):
+                z.append([ViterbiNode(extrazero, None)])
+            return z
+        zeros = make_zeros()
+        grid = [[zeros]]
         # Except probability one that first state is a word boundary
         grid[0][0][wb] = [ViterbiNode(0, None)]
 
         # Temporaries
         # Cumulative costs for each category at current time step
         cost = None
-        bestn = ViterbiNode(extrazero, None)
+        bestn = [ViterbiNode(extrazero, None)]
 
         for pos in range(1, len(word) + 1):
             grid.append([])
             for next_len in range(1, pos + 1):
-                grid[pos].append(list(zeros))
+                grid[pos].append(make_zeros())
                 prev_pos = pos - next_len
                 morph = self._interned_morph(word[prev_pos:pos])
 
@@ -294,23 +299,23 @@ class AbstractSegmenter(object):
                         pos < len(word) and
                         self.nosplit_re.match(word[(pos - 1):(pos + 1)])):
                     # Splitting at this point is forbidden
-                    grid[pos][next_len - 1] = zeros
+                    grid[pos][next_len - 1] = make_zeros()
                     continue
                 if morph not in self:
                     # The morph corresponding to this substring has not
                     # been encountered: zero probability for this solution
-                    grid[pos][next_len - 1] = zeros
+                    grid[pos][next_len - 1] = make_zeros()
                     continue
 
                 for next_cat in categories_nowb:
-                    best = ViterbiNode(extrazero, None)
+                    bestn = [ViterbiNode(extrazero, None)]
                     if prev_pos == 0:
                         # First morph in word
                         cost = self._corpus_coding.transit_emit_cost(
                             WORD_BOUNDARY, categories[next_cat], morph)
-                        if cost <= best.cost:
-                            best = ViterbiNode(cost, ((0, wb),
-                                CategorizedMorph(morph, categories[next_cat])))
+                        truncated_heap_push(bestn,
+                            ViterbiNode(cost, ((0, wb),
+                                CategorizedMorph(morph, categories[next_cat]))))
                     # implicit else: for-loop will be empty if prev_pos == 0
                     for prev_cat in categories_nowb:
                         t_e_cost = self._corpus_coding.transit_emit_cost(
@@ -319,43 +324,45 @@ class AbstractSegmenter(object):
                                         morph)
                         for prev_len in range(1, prev_pos + 1):
                             cost = (t_e_cost +
-                                grid[prev_pos][prev_len - 1][prev_cat].cost)
-                            if cost <= best.cost:
-                                best = ViterbiNode(cost, ((prev_len, prev_cat),
-                                    CategorizedMorph(morph,
-                                                     categories[next_cat])))
-                    grid[pos][next_len - 1][next_cat] = best
+                                grid[prev_pos][prev_len - 1][prev_cat][0].cost)
+                            truncated_heap_push(bestn,
+                                ViterbiNode(cost, ((prev_len, prev_cat),
+                                    CategorizedMorph(morph, categories[next_cat]))))
+                    grid[pos][next_len - 1][next_cat] = bestn
 
         # Last transition must be to word boundary
-        best = ViterbiNode(extrazero, None)
+        bestn = [ViterbiNode(extrazero, None)]
         for prev_len in range(1, len(word) + 1):
             for prev_cat in categories_nowb:
-                cost = (grid[-1][prev_len - 1][prev_cat].cost +
+                cost = (grid[-1][prev_len - 1][prev_cat][0].cost +
                         self._corpus_coding.log_transitionprob(
                             categories[prev_cat],
                             WORD_BOUNDARY))
-                if cost <= best.cost:
-                    best = ViterbiNode(cost, ((prev_len, prev_cat),
-                        CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY)))
+                truncated_heap_push(bestn,
+                    ViterbiNode(cost, ((prev_len, prev_cat),
+                        CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY))))
 
-        if best.cost >= LOGPROB_ZERO:
+        if bestn[0].cost >= LOGPROB_ZERO:
             #_logger.warning(
             #    'No possible segmentation for word {}'.format(word))
-            return [CategorizedMorph(word, DEFAULT_CATEGORY)], LOGPROB_ZERO
+            return [[CategorizedMorph(word, DEFAULT_CATEGORY)], LOGPROB_ZERO]
 
-        # Backtrace for the best morph-category sequence
-        result = []
-        backtrace = best
-        pos = len(word)
-        bt_len = backtrace.backpointer[0][0]
-        bt_cat = backtrace.backpointer[0][1]
-        while pos > 0:
-            backtrace = grid[pos][bt_len - 1][bt_cat]
+        # Backtrace for the best morph-category sequences
+        results = []
+        for backtrace in bestn:
+            cost = backtrace.cost
+            result = []
+            pos = len(word)
             bt_len = backtrace.backpointer[0][0]
             bt_cat = backtrace.backpointer[0][1]
-            result.insert(0, backtrace.backpointer[1])
-            pos -= len(backtrace.backpointer[1])
-        return tuple(result), best.cost
+            while pos > 0:
+                backtrace = grid[pos][bt_len - 1][bt_cat]   # FIXME!
+                bt_len = backtrace.backpointer[0][0]
+                bt_cat = backtrace.backpointer[0][1]
+                result.insert(0, backtrace.backpointer[1])
+                pos -= len(backtrace.backpointer[1])
+            results.append((tuple(result), cost))
+        return results
 
     def viterbi_tag(self, segments, forbid_zzz=False):
         """Tag a pre-segmented word using the learned model.

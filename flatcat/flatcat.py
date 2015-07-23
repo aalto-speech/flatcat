@@ -256,7 +256,7 @@ class AbstractSegmenter(object):
 
         # To make sure that internally impossible states are penalized
         # even more than impossible states caused by zero parameters.
-        extrazero = LOGPROB_ZERO ** 2
+        extrazero = -(LOGPROB_ZERO ** 2)
 
         # This function uses internally indices of categories,
         # instead of names and the word boundary object,
@@ -319,13 +319,13 @@ class AbstractSegmenter(object):
                     bestn = [ViterbiNode(extrazero, None)]
                     if prev_pos == 0:
                         # First morph in word
-                        cost = self._corpus_coding.transit_emit_cost(
+                        cost = -self._corpus_coding.transit_emit_cost(
                             WORD_BOUNDARY, categories[next_cat], morph)
                         truncated_heap_push(bestn,
                             ViterbiNode(cost, ((0, wb, 0),
                                 CategorizedMorph(morph, categories[next_cat]))))
                     for prev_cat in categories_nowb:
-                        t_e_cost = self._corpus_coding.transit_emit_cost(
+                        t_e_cost = -self._corpus_coding.transit_emit_cost(
                                         categories[prev_cat],
                                         categories[next_cat],
                                         morph)
@@ -346,14 +346,14 @@ class AbstractSegmenter(object):
             for prev_cat in categories_nowb:
                 for k in range(len(grid[-1][prev_len - 1][prev_cat])):
                     cost = (grid[-1][prev_len - 1][prev_cat][k].cost +
-                            self._corpus_coding.log_transitionprob(
+                            -self._corpus_coding.log_transitionprob(
                                 categories[prev_cat],
                                 WORD_BOUNDARY))
                     truncated_heap_push(bestn,
                         ViterbiNode(cost, ((prev_len, prev_cat, k),
                             CategorizedMorph(WORD_BOUNDARY, WORD_BOUNDARY))))
 
-        if bestn[0].cost >= LOGPROB_ZERO:
+        if max(item.cost for item in bestn) <= -LOGPROB_ZERO:
             #_logger.warning(
             #    'No possible segmentation for word {}'.format(word))
             return [[CategorizedMorph(word, DEFAULT_CATEGORY)], LOGPROB_ZERO]
@@ -364,14 +364,16 @@ class AbstractSegmenter(object):
             cost = backtrace.cost
             result = []
             pos = len(word)
+            if backtrace.backpointer is None:
+                continue
             bt_len, bt_cat, bt_k = backtrace.backpointer[0]
             while pos > 0:
                 backtrace = grid[pos][bt_len - 1][bt_cat][bt_k]
                 bt_len, bt_cat, bt_k = backtrace.backpointer[0]
                 result.insert(0, backtrace.backpointer[1])
                 pos -= len(backtrace.backpointer[1])
-            results.append((tuple(result), cost))
-        return results
+            results.append((-cost, tuple(result)))
+        return [(analysis, cost) for (cost, analysis) in sorted(results)]
 
     def viterbi_tag(self, segments, forbid_zzz=False):
         """Tag a pre-segmented word using the learned model.

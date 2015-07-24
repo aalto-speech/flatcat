@@ -356,7 +356,7 @@ class AbstractSegmenter(object):
         if max(item.cost for item in bestn) <= -LOGPROB_ZERO:
             #_logger.warning(
             #    'No possible segmentation for word {}'.format(word))
-            return [[CategorizedMorph(word, DEFAULT_CATEGORY)], LOGPROB_ZERO]
+            return (([CategorizedMorph(word, DEFAULT_CATEGORY)], LOGPROB_ZERO),)
 
         # Backtrace for the best morph-category sequences
         results = []
@@ -373,7 +373,7 @@ class AbstractSegmenter(object):
                 result.insert(0, backtrace.backpointer[1])
                 pos -= len(backtrace.backpointer[1])
             results.append((-cost, tuple(result)))
-        return [(analysis, cost) for (cost, analysis) in sorted(results)]
+        return tuple((analysis, cost) for (cost, analysis) in sorted(results))
 
     def viterbi_tag(self, segments, forbid_zzz=False):
         """Tag a pre-segmented word using the learned model.

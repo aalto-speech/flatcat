@@ -314,6 +314,8 @@ class MorphUsageProperties(object):
 
     def set_params(self, params):
         """Sets hyperparameters to loaded values."""
+        params = {key: val for (key, val) in params.items()
+                  if val is not None}
         if 'perplexity-threshold' in params:
             _logger.info('Setting perplexity-threshold to {}'.format(
                 params['perplexity-threshold']))

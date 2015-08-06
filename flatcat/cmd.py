@@ -647,6 +647,11 @@ def flatcat_main(args):
         model.set_corpus_coding_weight(args.corpusweight)
     if args.annotationweight is not None:
         model.set_annotation_coding_weight(args.annotationweight)
+    if args.ppl_threshold is not None:
+        model._morph_usage.set_params({
+            'perplexity-threshold': args.ppl_threshold,
+            'perplexity-slope': args.ppl_slope,
+            'pre-perplexity-threshold': args.pre_ppl_threshold})
 
     # Initialize the model
     must_train = model.initialize_hmm(

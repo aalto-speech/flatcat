@@ -418,11 +418,10 @@ class FlatcatIO(morfessor.MorfessorIO):
             else:
                 raise
 
-    # straight copypasta
     def read_parameter_file(self, file_name):
         """Read learned or estimated parameters from a file"""
         params = {}
-        line_re = re.compile(r'^(.*)\s*:\s*(.*)$')
+        line_re = re.compile(r'^([^:]*)\s*:\s*(.*)$')
         for line in self._read_text_file(file_name):
             m = line_re.match(line.rstrip())
             if m:

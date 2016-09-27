@@ -221,6 +221,8 @@ def _generator_progress(generator, freq=None):
 
 def _is_string(obj):
     try:
+        # Python 2
         return isinstance(obj, basestring)
     except NameError:
+        # Python 3
         return isinstance(obj, str)

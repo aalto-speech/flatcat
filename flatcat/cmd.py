@@ -12,7 +12,7 @@ from . import get_version, _logger, flatcat, reduced
 from . import categorizationscheme
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
-from .io import FlatcatIO, TarGzModel
+from .io import FlatcatIO, TarGzModel, BINARY_ENDINGS, TARBALL_ENDINGS
 from .utils import _generator_progress
 
 PY3 = sys.version_info.major == 3
@@ -568,12 +568,10 @@ def flatcat_main(args):
         raise ArgumentException(
             'An initial Baseline or FlatCat model must be given.')
 
-    init_is_pickle = (args.initfile.endswith('.pickled') or
-                      args.initfile.endswith('.pickle') or
-                      args.initfile.endswith('.bin'))
-
-    init_is_tarball = (args.initfile.endswith('.tar.gz') or
-                       args.initfile.endswith('.tgz'))
+    init_is_pickle = any(args.initfile.endswith(ending)
+                         for ending in BINARY_ENDINGS)
+    init_is_tarball = any(args.initfile.endswith(ending)
+                          for ending in TARBALL_ENDINGS)
     init_is_complete = (init_is_tarball or init_is_pickle)
 
     io = FlatcatIO(encoding=args.encoding,
@@ -1162,7 +1160,12 @@ def main_evaluation(args):
     """ Separate main for running evaluation and statistical significance
     testing. Takes as argument the results of an get_evaluation_argparser()
     """
-    io = MorfessorIO(encoding=args.encoding)
+    io = FlatcatIO(encoding=args.encoding,
+                   construction_separator=args.consseparator,
+                   compound_separator=args.cseparator,
+                   analysis_separator=args.analysisseparator,
+                   category_separator=args.catseparator,
+                   strict=False)
 
     ev = MorfessorEvaluation(io.read_annotations_file(args.goldstandard[0]))
 

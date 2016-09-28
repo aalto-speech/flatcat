@@ -31,6 +31,9 @@ else:
 
 _logger = logging.getLogger(__name__)
 
+BINARY_ENDINGS = ('.pickled', '.pickle', '.bin')
+TARBALL_ENDINGS = ('.tar.gz', '.tgz')
+
 
 class FlatcatIO(morfessor.MorfessorIO):
     """Definition for all input and output files. Also handles all
@@ -101,6 +104,16 @@ class FlatcatIO(morfessor.MorfessorIO):
                     _logger.warn(
                         'Unknown model component {}'.format(name))
         return model
+
+    def read_any_model(self, file_name):
+        """Read a complete model in either binary or tarball format.
+           This method can NOT be used to initialize from a
+           Morfessor 1.0 style segmentation"""
+        if any(file_name.endswith(ending) for ending in BINARY_ENDINGS):
+            return self.read_binary_model_file(file_name)
+        if any(file_name.endswith(ending) for ending in TARBALL_ENDINGS):
+            return self.read_tarball_model_file(file_name)
+        raise Exception('No indentified file ending in "{}"'.format(file_name))
 
     def write_segmentation_file(self, file_name, segmentations,
                                 construction_sep=None,

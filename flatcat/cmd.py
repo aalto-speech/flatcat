@@ -1159,8 +1159,8 @@ Command-line arguments:
     add_arg('goldstandard', metavar='<goldstandard>', nargs=1,
             help='gold standard file in standard annotation format')
     add_arg('models', metavar='<model>', nargs='+',
-            help='model files to segment (either binary or Morfessor 1.0 style'
-                 ' segmentation models).')
+            help='model files to segment with (either tarball or binary. '
+                 'Morfessor 1.0 style models NOT supported).')
     add_arg('-t', '--testsegmentation', dest='test_segmentations', default=[],
             action='append',
             help='Segmentation of the test set. Note that all words in the '
@@ -1174,10 +1174,6 @@ def main_evaluation(args):
     testing. Takes as argument the results of an get_evaluation_argparser()
     """
     io = FlatcatIO(encoding=args.encoding,
-                   construction_separator=args.consseparator,
-                   compound_separator=args.cseparator,
-                   analysis_separator=args.analysisseparator,
-                   category_separator=args.catseparator,
                    strict=False)
     blio = MorfessorIO(encoding=args.encoding)
 
@@ -1213,7 +1209,7 @@ def main_evaluation(args):
         results.append(result)
         print(result.format(f_string))
 
-    if len(results) > 1:
+    if len(results) > 1 and num_samples > 1:
         wsr = bleval.WilcoxonSignedRank()
         r = wsr.significance_test(results)
         bleval.WilcoxonSignedRank.print_table(r)

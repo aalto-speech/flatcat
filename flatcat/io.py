@@ -110,10 +110,14 @@ class FlatcatIO(morfessor.MorfessorIO):
            This method can NOT be used to initialize from a
            Morfessor 1.0 style segmentation"""
         if any(file_name.endswith(ending) for ending in BINARY_ENDINGS):
-            return self.read_binary_model_file(file_name)
-        if any(file_name.endswith(ending) for ending in TARBALL_ENDINGS):
-            return self.read_tarball_model_file(file_name)
-        raise Exception('No indentified file ending in "{}"'.format(file_name))
+            model = self.read_binary_model_file(file_name)
+        elif any(file_name.endswith(ending) for ending in TARBALL_ENDINGS):
+            model = self.read_tarball_model_file(file_name)
+        else:
+            raise Exception(
+                'No indentified file ending in "{}"'.format(file_name))
+        model.initialize_hmm()
+        return model
 
     def write_segmentation_file(self, file_name, segmentations,
                                 construction_sep=None,

@@ -4,9 +4,13 @@ import collections
 import locale
 import logging
 import math
+import os
 import string
 import sys
 import time
+
+from morfessor import evaluation as bleval
+from morfessor.io import MorfessorIO
 
 from . import get_version, _logger, flatcat, reduced
 from . import categorizationscheme
@@ -16,6 +20,12 @@ from .io import FlatcatIO, TarGzModel, BINARY_ENDINGS, TARBALL_ENDINGS
 from .utils import _generator_progress
 
 PY3 = sys.version_info.major == 3
+
+# _str is used to convert command line arguments to the right type (str for PY3, unicode for PY2
+if PY3:
+    _str = str
+else:
+    _str = lambda x: unicode(x, encoding=locale.getpreferredencoding())
 
 _logger = logging.getLogger(__name__)
 
@@ -55,7 +65,7 @@ DEFAULT_CORPUSWEIGHT = 1.0
 
 def _locale_decoder(s):
     """ Decodes commandline input in locale """
-    return unicode(s.decode(_preferred_encoding))
+    return _str(s.decode(_preferred_encoding))
 
 
 class ArgumentGroups(object):
@@ -1082,19 +1092,22 @@ def reformat_main(args):
 # slightly modified copypasta from baseline
 def get_evaluation_argparser():
     import argparse
-    #TODO factor out redundancies with get_default_argparser()
-    standard_parser = get_default_argparser()
     parser = argparse.ArgumentParser(
-        prog="morfessor-evaluate",
+        prog="flatcat-evaluate",
         epilog="""Simple usage example:
 
-  %(prog)s gold_standard model1 model2
+  %(prog)s gold_standard model1.tar.gz model2.tar.gz
 """,
-        description=standard_parser.description,
+        description="""
+Morfessor {version} evaluation tool
+
+{license}
+
+Command-line arguments:
+""" .format(version=get_version(), license=LICENSE),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False
     )
-
     add_arg = parser.add_argument_group('evaluation options').add_argument
     add_arg('--num-samples', dest='numsamples', type=int, metavar='<int>',
             default=10, help='number of samples to take for testing')
@@ -1166,8 +1179,10 @@ def main_evaluation(args):
                    analysis_separator=args.analysisseparator,
                    category_separator=args.catseparator,
                    strict=False)
+    blio = MorfessorIO(encoding=args.encoding)
 
-    ev = MorfessorEvaluation(io.read_annotations_file(args.goldstandard[0]))
+    ev = bleval.MorfessorEvaluation(
+        io.read_annotations_file(args.goldstandard[0]))
 
     results = []
 
@@ -1176,29 +1191,29 @@ def main_evaluation(args):
 
     f_string = args.formatstring
     if f_string is None:
-        f_string = FORMAT_STRINGS[args.template]
+        f_string = bleval.FORMAT_STRINGS[args.template]
 
     for f in args.models:
         result = ev.evaluate_model(io.read_any_model(f),
-                                   configuration=EvaluationConfig(num_samples,
-                                                                  sample_size),
+                                   configuration=bleval.EvaluationConfig(
+                                        num_samples, sample_size),
                                    meta_data={'name': os.path.basename(f)})
         results.append(result)
         print(result.format(f_string))
 
     io.construction_separator = args.cseparator
     for f in args.test_segmentations:
-        segmentation = io.read_segmentation_file(f, False)
+        segmentation = blio.read_segmentation_file(f, False)
         result = ev.evaluate_segmentation(segmentation,
                                           configuration=
-                                          EvaluationConfig(num_samples,
-                                                           sample_size),
+                                          bleval.EvaluationConfig(
+                                                num_samples, sample_size),
                                           meta_data={'name':
                                                      os.path.basename(f)})
         results.append(result)
         print(result.format(f_string))
 
     if len(results) > 1:
-        wsr = WilcoxonSignedRank()
+        wsr = bleval.WilcoxonSignedRank()
         r = wsr.significance_test(results)
-        WilcoxonSignedRank.print_table(r)
+        bleval.WilcoxonSignedRank.print_table(r)

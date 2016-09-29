@@ -4,10 +4,20 @@ only this file should need to be modified.
 """
 from __future__ import unicode_literals
 import collections
+import locale
 import logging
 import math
+import sys
 
 from . import utils
+
+PY3 = sys.version_info.major == 3
+
+# _str is used to convert command line arguments to the right type (str for PY3, unicode for PY2
+if PY3:
+    _str = str
+else:
+    _str = lambda x: unicode(x, encoding=locale.getpreferredencoding())
 
 _logger = logging.getLogger(__name__)
 
@@ -792,7 +802,7 @@ class CategorizedMorph(object):
 
     def __repr__(self):
         if self.category is None:
-            return unicode(self.morph)
+            return _str(self.morph)
         return self.morph + '/' + self.category
 
     def __eq__(self, other):

@@ -13,6 +13,7 @@ import flatcat
 from flatcat.exception import ArgumentException
 from flatcat import utils
 
+BND_MARKER = '\u2059' # 5-dot punctuation
 
 PY3 = sys.version_info.major == 3
 
@@ -130,11 +131,6 @@ def _make_morph_formatter(self, category_sep, strip_tags):
                 return cmorph
     return output_morph
 
-# FIXME: read segmentation bypass regexes from a file
-# FIXME: adding and removing morphs from the analysis (no longer concatenative)
-# FIXME: joining some morphs depending on tags (e.g. join compound modifier)
-# FIXME: different delimiters for different surrounding tags
-
 #analysis = flatcat.flatcat._wb_wrap(word.analysis)
 #    if cmorph.category == flatcat.WORD_BOUNDARY:
 #        continue
@@ -166,32 +162,6 @@ def mark_by_tag(morphs):
             yield '{}'.format(morph.morph)
         elif morph.category == 'SUF':
             yield '+{}'.format(morph.morph)
-        elif morph.category is None:
-            yield morph.morph
-        else:
-            assert False, morph.category
-
-BND_MARKER = '\u2059' # 5-dot punctuation
-def mark_by_tag_16(morphs):
-    if len(morphs) == 1:
-        yield(morphs[0].morph)
-        return
-    for (i, morph) in enumerate(morphs):
-        if BND_MARKER in morph.morph:
-            yield(morph.morph)
-        elif morph.category == 'PRE':
-            yield '{}{}'.format(morph.morph, BND_MARKER)
-        elif morph.category == 'STM':
-            yield '{}'.format(morph.morph)
-        elif morph.category == 'SUF':
-            yield '{}{}'.format(BND_MARKER, morph.morph)
-        elif morph.category == 'ZZZ':
-            if i == 0:
-                yield '{}{}'.format(morph.morph, BND_MARKER)
-            elif i == len(morphs) - 1:
-                yield '{}{}'.format(BND_MARKER, morph.morph)
-            else: 
-                yield '{}{}{}'.format(BND_MARKER, morph.morph, BND_MARKER)
         elif morph.category is None:
             yield morph.morph
         else:
@@ -258,12 +228,19 @@ def postprocess(fmt, morphs):
         part = mark_by_tag(parts[-1])
         out.append(' '.join(part))
         return '+ '.join(out)
-    elif fmt == '2016':
-        #ala+  kive  +n+    kolo  +on
+    elif fmt == 'compound_splitter':
+        #alakiven+          koloon (except 5-point, not plus)
+        morphs = long_to_stems(morphs)
         parts = split_compound(morphs)
-        parts = [mark_by_tag_16(part) for part in parts]
-        parts = [' '.join(part) for part in parts]
-        return (BND_MARKER + ' ').join(parts)
+        out = []
+        for part in parts:
+            part = [morph.morph for morph in part]
+            out.append(''.join(part))
+        return (BND_MARKER + ' ').join(out)
+    elif fmt == '2016':
+        #ala  +kive  +n    +kolo  +on (except 5-point, not plus)
+        return (' ' + BND_MARKER).join(
+            cmorph.morph for cmorph in morphs)
     else:
         assert False, 'unknown output format {}'.format(fmt)
 
@@ -329,6 +306,8 @@ def main(args):
         for line in io._read_text_file(args.re_file):
             passthrough.append(
                 re.compile(line))
+    if args.output_format in ('2016', 'compound_splitter'):
+        passthrough.append(re.compile(BND_MARKER + '.*'))
     model = load_model(io, args.model)
     model_wrapper = FlatcatWrapper(
         model,

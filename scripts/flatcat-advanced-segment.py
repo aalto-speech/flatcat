@@ -68,6 +68,10 @@ Morfessor FlatCat advanced segmentation
     add_arg('-e', '--encoding', dest='encoding', metavar='<encoding>',
             help='Encoding of input and output files (if none is given, '
                  'both the local encoding and UTF-8 are tried).')
+    add_arg('--category-separator', dest='catseparator', type=str, default='/',
+            metavar='<string>',
+            help='separator for the category tag following a morph. '
+                 '(default %(default)s).')
 
     add_arg('--output-format', dest='output_format', type=str,
             default=None, metavar='<id>',
@@ -167,6 +171,32 @@ def mark_by_tag(morphs):
         else:
             assert False, morph.category
 
+BND_MARKER = '\u2059' # 5-dot punctuation
+def mark_by_tag_16(morphs):
+    if len(morphs) == 1:
+        yield(morphs[0].morph)
+        return
+    for (i, morph) in enumerate(morphs):
+        if BND_MARKER in morph.morph:
+            yield(morph.morph)
+        elif morph.category == 'PRE':
+            yield '{}{}'.format(morph.morph, BND_MARKER)
+        elif morph.category == 'STM':
+            yield '{}'.format(morph.morph)
+        elif morph.category == 'SUF':
+            yield '{}{}'.format(BND_MARKER, morph.morph)
+        elif morph.category == 'ZZZ':
+            if i == 0:
+                yield '{}{}'.format(morph.morph, BND_MARKER)
+            elif i == len(morphs) - 1:
+                yield '{}{}'.format(BND_MARKER, morph.morph)
+            else: 
+                yield '{}{}{}'.format(BND_MARKER, morph.morph, BND_MARKER)
+        elif morph.category is None:
+            yield morph.morph
+        else:
+            assert False, morph.category
+
 def long_to_stems(morphs):
     for morph in morphs:
         if morph.category == 'STM':
@@ -228,6 +258,12 @@ def postprocess(fmt, morphs):
         part = mark_by_tag(parts[-1])
         out.append(' '.join(part))
         return '+ '.join(out)
+    elif fmt == '2016':
+        #ala+  kive  +n+    kolo  +on
+        parts = split_compound(morphs)
+        parts = [mark_by_tag_16(part) for part in parts]
+        parts = [' '.join(part) for part in parts]
+        return (BND_MARKER + ' ').join(parts)
     else:
         assert False, 'unknown output format {}'.format(fmt)
 
@@ -285,7 +321,8 @@ def load_model(io, modelfile):
 
 
 def main(args):
-    io = flatcat.io.FlatcatIO(encoding=args.encoding)
+    io = flatcat.io.FlatcatIO(encoding=args.encoding,
+                              category_separator=args.catseparator)
 
     passthrough = []
     if args.re_file is not None:

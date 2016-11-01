@@ -344,6 +344,61 @@ class FlatcatIO(morfessor.MorfessorIO):
         cmorph = CategorizedMorph(morph, category)
         return cmorph
 
+    #### Copypasta from pre-12.2015 version of Baseline ###
+    # (io API was changed in a noncompatible way)
+    def read_corpus_files(self, file_names):
+        """Read one or more corpus files.
+
+        Yield for each compound found (1, compound, compound_atoms).
+
+        """
+        for file_name in file_names:
+            for item in self.read_corpus_file(file_name):
+                yield item
+
+    def read_corpus_list_files(self, file_names):
+        """Read one or more corpus list files.
+
+        Yield for each compound found (count, compound, compound_atoms).
+
+        """
+        for file_name in file_names:
+            for item in self.read_corpus_list_file(file_name):
+                yield item
+
+    def read_corpus_file(self, file_name):
+        """Read one corpus file.
+
+        For each compound, yield (1, compound, compound_atoms).
+        After each line, yield (0, \"\\n\", ()).
+
+        """
+        _logger.info("Reading corpus from '%s'..." % file_name)
+        for line in self._read_text_file(file_name, raw=True):
+            for compound in self.compound_sep_re.split(line):
+                if len(compound) > 0:
+                    yield 1, compound, self._split_atoms(compound)
+            yield 0, "\n", ()
+        _logger.info("Done.")
+
+    def read_corpus_list_file(self, file_name):
+        """Read a corpus list file.
+
+        Each line has the format:
+        <count> <compound>
+
+        Yield tuples (count, compound, compound_atoms) for each compound.
+
+        """
+        _logger.info("Reading corpus from list '%s'..." % file_name)
+        for line in self._read_text_file(file_name):
+            try:
+                count, compound = line.split(None, 1)
+                yield int(count), compound, self._split_atoms(compound)
+            except ValueError:
+                yield 1, line, self._split_atoms(line)
+        _logger.info("Done.")
+
     #### This can be removed once it finds its way to Baseline ####
     #
     def _open_text_file_write(self, file_name_or_obj):

@@ -52,7 +52,7 @@ Are you using the correct construction separator?"""
 
 
 class AbstractSegmenter(object):
-    def __init__(self, corpus_coding, nosplit=None):
+    def __init__(self, corpus_coding, nosplit=None, postprocessing=None):
         self._initialized = False
         # None (= no corpus), "untagged", "partial", "full"
         self._corpus_tagging_level = None
@@ -66,20 +66,21 @@ class AbstractSegmenter(object):
             self.nosplit_re = nosplit
         self.annotations = None
         self._annotations_tagged = None
+        self.postprocessing = postprocessing \
+            if postprocessing is not None else []
 
     def initialize_hmm(self, min_difference_proportion=None):
         pass
 
     def viterbi_segment(self, segments, addcount=None, maxlen=None):
         """Compatibility with Morfessor Baseline.
-        Heuristics are applied to remove nonmorphemes.
+        Postprocessing heuristics are applied to modify the segmentation.
 
         Note that the addcount and maxlen arguments are silently ignored.
         """
-        # FIXME: both this and baseline should hide the logp
         analysis, logp = self.viterbi_analyze(segments)
-        analysis = HeuristicPostprocessor().remove_nonmorphemes(
-            analysis, self)
+        for processor in self.postprocessing:
+            analysis = processor.apply_to(analysis, self)
         return (self.detag_word(analysis), logp)
 
     def viterbi_analyze(self, segments, strict_annot=True):

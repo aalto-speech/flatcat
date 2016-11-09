@@ -177,7 +177,12 @@ def add_model_io_arguments(argument_groups):
     add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
             action='store_true',
             help='Use heuristic postprocessing to remove nonmorphemes '
-                 'from output segmentations.')
+                 'from output segmentations by joining or retagging morphs.')
+    add_arg('--compound-splitter', dest='compound_split', default=False,
+            action='store_true',
+            help='Use FlatCat as a compound splitter. '
+                 'Affixes will be joined with stems, '
+                 'leaving only boundaries between compound parts')
 
 
 def add_common_io_arguments(argument_groups):
@@ -683,10 +688,18 @@ def flatcat_main(args):
             stats.set_gold_standard(
                 io.read_annotations_file(args.statsannotfile))
 
-    # Heuristic nonmorpheme removal
-    heuristic = None
+    # Heuristic output postprocessing
+    # nonmorpheme removal
     if args.rm_nonmorph:
-        heuristic = categorizationscheme.HeuristicPostprocessor()
+        processor = categorizationscheme.HeuristicPostprocessor()
+        if processor not in model.postprocessing:
+            model.postprocessing.append(processor)
+    # compound splitter
+    if args.compound_split:
+        processor = categorizationscheme.CompoundSegmentationPostprocessor()
+        if processor not in model.postprocessing:
+            model.postprocessing.append(processor)
+    # FIXME: stemmer as postprocessor?
 
     # Perform weight learning using development annotations
 #     if args.develfile is not None:
@@ -819,9 +832,8 @@ def flatcat_main(args):
         def segment_func(item):
             (count, compound, atoms) = item
             (constructions, logp) = model.viterbi_analyze(atoms)
-            if heuristic is not None:
-                constructions = heuristic.remove_nonmorphemes(
-                                    constructions, model)
+            for processor in model.postprocessing:
+                constructions = processor.apply_to(constructions, model)
             if 'clogprob' in keywords:
                 clogp = model.forward_logprob(atoms)
             else:
@@ -1149,6 +1161,18 @@ Command-line arguments:
             help="write log messages to file in addition to standard "
                  "error stream")
 
+    # Output post-processing
+    add_arg = argument_groups.get('output post-processing options')
+    add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
+            action='store_true',
+            help='Use heuristic postprocessing to remove nonmorphemes '
+                 'from output segmentations by joining or retagging morphs.')
+    add_arg('--compound-splitter', dest='compound_split', default=False,
+            action='store_true',
+            help='Use FlatCat as a compound splitter. '
+                 'Affixes will be joined with stems, '
+                 'leaving only boundaries between compound parts')
+
     add_arg = parser.add_argument_group('other options').add_argument
     add_arg('-h', '--help', action='help',
             help="show this help message and exit")
@@ -1190,7 +1214,20 @@ def main_evaluation(args):
         f_string = bleval.FORMAT_STRINGS[args.template]
 
     for f in args.models:
-        result = ev.evaluate_model(io.read_any_model(f),
+        model = io.read_any_model(f)
+        # Heuristic output postprocessing
+        # nonmorpheme removal
+        if args.rm_nonmorph:
+            processor = categorizationscheme.HeuristicPostprocessor()
+            if processor not in model.postprocessing:
+                model.postprocessing.append(processor)
+        # compound splitter
+        if args.compound_split:
+            processor = categorizationscheme.CompoundSegmentationPostprocessor()
+            if processor not in model.postprocessing:
+                model.postprocessing.append(processor)
+        # FIXME: stemmer as postprocessor?
+        result = ev.evaluate_model(model,
                                    configuration=bleval.EvaluationConfig(
                                         num_samples, sample_size),
                                    meta_data={'name': os.path.basename(f)})

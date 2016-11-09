@@ -87,8 +87,30 @@ CONTEXT_TYPE_BOTH = (CONTEXT_TYPE_INTERNAL + CONTEXT_FLAG_INITIAL +
 # being generated.
 NON_MORPHEME_PENALTY = 50
 
+class Postprocessor(object):
+    """abstract base class for heuristic output postprocessors"""
+    def _join_at(self, analysis, i):
+        """Helper function for joins"""
+        tag = analysis[i].category
+        if analysis[i + 1].category != 'ZZZ':
+            tag = analysis[i + 1].category
+        if tag == 'ZZZ':
+            tag = 'STM'
+        morph = analysis[i].morph + analysis[i + 1].morph
+        cmorph = CategorizedMorph(morph, tag)
+        self.temporaries.add(cmorph)
+        out = list(analysis[:i]) + [cmorph]
+        if len(analysis) > (i + 2):
+            out.extend(analysis[(i + 2):])
+        return out
 
-class HeuristicPostprocessor(object):
+    def __eq__(self, other):
+        return type(self) == type(other)
+
+
+
+# FIXME: badly named, should be NonmorphemeRemovalPostprocessor
+class HeuristicPostprocessor(Postprocessor):
     """Heuristic post-processing to remove non-morphemes from the
     final segmentation. Unlike in Morfessor Cat-ML,
     this is not necessary during training for controlling model
@@ -99,7 +121,7 @@ class HeuristicPostprocessor(object):
         self.temporaries = set()
         self.max_join_stem_len = max_join_stem_len
 
-    def remove_nonmorphemes(self, analysis, model):
+    def apply_to(self, analysis, model):
         """Remove nonmorphemes from the analysis by joining or retagging
         morphs, using heuristics."""
 
@@ -194,20 +216,46 @@ class HeuristicPostprocessor(object):
             out.append(prev)
         return out
 
-    def _join_at(self, analysis, i):
-        """Helper function for joins"""
-        tag = analysis[i].category
-        if analysis[i + 1].category != 'ZZZ':
-            tag = analysis[i + 1].category
-        if tag == 'ZZZ':
-            tag = 'STM'
-        morph = analysis[i].morph + analysis[i + 1].morph
-        cmorph = CategorizedMorph(morph, tag)
-        self.temporaries.add(cmorph)
-        out = list(analysis[:i]) + [cmorph]
-        if len(analysis) > (i + 2):
-            out.extend(analysis[(i + 2):])
+class CompoundSegmentationPostprocessor(Postprocessor):
+    """Postprocessor that makes FlatCat perform compound segmentation"""
+    def __init__(self, long_to_stems=True):
+        self._long_to_stems = long_to_stems
+
+    def apply_to(self, analysis, model=None):
+        if self._long_to_stems:
+            analysis = long_to_stems(analysis)
+        parts = split_compound(analysis)
+        out = []
+        for part in parts:
+            part = [morph.morph for morph in part]
+            part = ''.join(part)
+            out.append(CategorizedMorph(part, 'STM'))
         return out
+
+    def long_to_stems(analysis):
+        for morph in analysis:
+            if morph.category == 'STM':
+                # avoids unnecessary NOOP re-wrapping
+                yield morph
+            elif len(morph) >= 5:
+                yield flatcat.CategorizedMorph(morph.morph, 'STM')
+            else:
+                yield morph
+
+    def split_compound(analysis):
+        out = []
+        current = []
+        prev = None
+        for morph in analysis:
+            if prev is not None and prev != 'PRE':
+                if morph.category in ('PRE', 'STM'):
+                    out.append(current)
+                    current = []
+            current.append(morph)
+            prev = morph.category
+        out.append(current)
+        return out
+
 
 
 class MorphContextBuilder(object):

@@ -202,10 +202,9 @@ def _generator_progress(generator, freq=None):
 
     This function wraps the argument generator, returning a new generator.
     """
-
     if freq is None:
         freq = GENERATOR_DOT_FREQ
-    if freq <= 0:
+    if freq <= 0 or not show_progress_bar:
         return generator
 
     def _progress_wrapper(generator):

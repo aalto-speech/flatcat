@@ -13,7 +13,7 @@ from morfessor import evaluation as bleval
 from morfessor.io import MorfessorIO
 
 from . import get_version, _logger, flatcat, reduced
-from . import categorizationscheme
+from . import categorizationscheme, utils
 from .diagnostics import IterationStatistics
 from .exception import ArgumentException
 from .io import FlatcatIO, TarGzModel, BINARY_ENDINGS, TARBALL_ENDINGS
@@ -554,13 +554,12 @@ def configure_logging(args):
 
     # If debug messages are printed to screen or if stderr is not a tty (but
     # a pipe or a file), don't show the progressbar
-    global show_progress_bar
     if (ch.level > logging.INFO or
             (hasattr(sys.stderr, 'isatty') and not sys.stderr.isatty())):
-        show_progress_bar = False
+        utils.show_progress_bar = False
 
     if args.progress:
-        show_progress_bar = True
+        utils.show_progress_bar = True
         ch.setLevel(min(ch.level, logging.INFO))
 
 
@@ -700,6 +699,7 @@ def flatcat_main(args):
         if processor not in model.postprocessing:
             model.postprocessing.append(processor)
     # FIXME: stemmer as postprocessor?
+    print(model.postprocessing)
 
     # Perform weight learning using development annotations
 #     if args.develfile is not None:
@@ -807,6 +807,8 @@ def flatcat_main(args):
 
     # Segment test data
     if len(args.testfiles) > 0:
+        if args.outfile == '-':
+            utils.show_progress_bar = False
         _logger.info("Segmenting test data...")
         outformat = args.outputformat
         csep = args.outputconseparator
@@ -1162,7 +1164,7 @@ Command-line arguments:
                  "error stream")
 
     # Output post-processing
-    add_arg = argument_groups.get('output post-processing options')
+    add_arg = parser.add_argument_group('output post-processing options').add_argument
     add_arg('--remove-nonmorphemes', dest='rm_nonmorph', default=False,
             action='store_true',
             help='Use heuristic postprocessing to remove nonmorphemes '

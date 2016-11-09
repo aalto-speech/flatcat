@@ -223,8 +223,8 @@ class CompoundSegmentationPostprocessor(Postprocessor):
 
     def apply_to(self, analysis, model=None):
         if self._long_to_stems:
-            analysis = long_to_stems(analysis)
-        parts = split_compound(analysis)
+            analysis = list(self.long_to_stems(analysis))
+        parts = self.split_compound(analysis)
         out = []
         for part in parts:
             part = [morph.morph for morph in part]
@@ -232,17 +232,17 @@ class CompoundSegmentationPostprocessor(Postprocessor):
             out.append(CategorizedMorph(part, 'STM'))
         return out
 
-    def long_to_stems(analysis):
+    def long_to_stems(self, analysis):
         for morph in analysis:
             if morph.category == 'STM':
                 # avoids unnecessary NOOP re-wrapping
                 yield morph
             elif len(morph) >= 5:
-                yield flatcat.CategorizedMorph(morph.morph, 'STM')
+                yield CategorizedMorph(morph.morph, 'STM')
             else:
                 yield morph
 
-    def split_compound(analysis):
+    def split_compound(self, analysis):
         out = []
         current = []
         prev = None

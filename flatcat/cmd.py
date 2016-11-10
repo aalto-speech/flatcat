@@ -1146,10 +1146,21 @@ Command-line arguments:
                  'If format-string is defined this option is ignored')
 
     add_arg = parser.add_argument_group('file options').add_argument
-    add_arg('--construction-separator', dest="cseparator", type=_str,
+    add_arg('--construction-separator', dest="consseparator", type=_str,
             default=' ', metavar='<regexp>',
             help="construction separator for test segmentation files"
                  " (default '%(default)s')")
+    add_arg('--compound-separator', dest='cseparator', type=str, default='\s+',
+            metavar='<regexp>',
+            help='Compound separator regexp (default "%(default)s").')
+    add_arg('--analysis-separator', dest='analysisseparator', type=str,
+            default=',', metavar='<regexp>',
+            help='Separator for different analyses in an annotation file. Use '
+                 'NONE for only allowing one analysis per line.')
+    add_arg('--category-separator', dest='catseparator', type=str, default='/',
+            metavar='<regexp>',
+            help='separator for the category tag following a morph. '
+                 '(default %(default)s).')
     add_arg('-e', '--encoding', dest='encoding', metavar='<encoding>',
             help="encoding of input and output files (if none is given, "
                  "both the local encoding and UTF-8 are tried)")
@@ -1200,6 +1211,10 @@ def main_evaluation(args):
     testing. Takes as argument the results of an get_evaluation_argparser()
     """
     io = FlatcatIO(encoding=args.encoding,
+                     construction_separator=args.consseparator,
+                     compound_separator=args.cseparator,
+                     analysis_separator=args.analysisseparator,
+                     category_separator=args.catseparator,
                    strict=False)
     blio = MorfessorIO(encoding=args.encoding)
 

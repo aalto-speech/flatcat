@@ -699,7 +699,6 @@ def flatcat_main(args):
         if processor not in model.postprocessing:
             model.postprocessing.append(processor)
     # FIXME: stemmer as postprocessor?
-    print(model.postprocessing)
 
     # Perform weight learning using development annotations
 #     if args.develfile is not None:

@@ -1146,7 +1146,7 @@ Command-line arguments:
 
     add_arg = parser.add_argument_group('file options').add_argument
     add_arg('--construction-separator', dest="consseparator", type=_str,
-            default=' ', metavar='<regexp>',
+            default=' + ', metavar='<regexp>',
             help="construction separator for test segmentation files"
                  " (default '%(default)s')")
     add_arg('--compound-separator', dest='cseparator', type=str, default='\s+',

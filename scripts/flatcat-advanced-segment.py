@@ -111,7 +111,7 @@ class FlatcatWrapper(object):
     def segment(self, word):
         (analysis, cost) = self.model.viterbi_analyze(word)
         if self.hpp is not None:
-            analysis = self.hpp.remove_nonmorphemes(analysis, self.model)
+            analysis = self.hpp.apply_to(analysis, self.model)
         return analysis
 
 

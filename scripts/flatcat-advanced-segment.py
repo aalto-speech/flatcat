@@ -241,6 +241,14 @@ def postprocess(fmt, morphs):
         #ala  +kive  +n    +kolo  +on (except 5-point, not plus)
         return (' ' + BND_MARKER).join(
             cmorph.morph for cmorph in morphs)
+    elif fmt == '2016b':
+        # same as 2016, except names and numbers spelled out
+        firstchar = morphs[0].morph[0]
+        if firstchar.isupper() or firstchar.isdigit():
+            chars = ''.join(cmorph.morph for cmorph in morphs)
+            return (' ' + BND_MARKER).join(chars)
+        return (' ' + BND_MARKER).join(
+            cmorph.morph for cmorph in morphs)
     else:
         assert False, 'unknown output format {}'.format(fmt)
 

@@ -314,7 +314,8 @@ def main(args):
         for line in io._read_text_file(args.re_file):
             passthrough.append(
                 re.compile(line))
-    if args.output_format in ('2016', 'compound_splitter'):
+    if args.output_format.startswith('2016') \
+            or args.output_format == 'compound_splitter':
         passthrough.append(re.compile(BND_MARKER + '.*'))
     model = load_model(io, args.model)
     model_wrapper = FlatcatWrapper(

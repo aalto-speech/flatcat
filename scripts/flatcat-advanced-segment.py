@@ -107,12 +107,22 @@ class FlatcatWrapper(object):
             self.hpp = flatcat.categorizationscheme.HeuristicPostprocessor()
         else:
             self.hpp = None
+        self._top_morphs = None
 
     def segment(self, word):
         (analysis, cost) = self.model.viterbi_analyze(word)
         if self.hpp is not None:
             analysis = self.hpp.apply_to(analysis, self.model)
         return analysis
+
+    def is_top_freq_morph(self, morph, threshold=5000):
+        if self._top_morphs is None:
+            morphs = sorted(
+                self.model._morph_usage._contexts.items(),
+                key=lambda pair: pair[1].count,
+                reverse=True)
+            self._top_morphs = set(m for (m, c) in morphs[:threshold])
+        return morph in self._top_morphs
 
 
 def _make_morph_formatter(self, category_sep, strip_tags):
@@ -177,7 +187,7 @@ def long_to_stems(morphs):
         else:
             yield morph
 
-def postprocess(fmt, morphs):
+def postprocess(fmt, morphs, model_wrapper):
     if fmt == 'both_sides':
         #ala+ +kive+ +n+   +kolo+ +on
         return '+ +'.join(cmorph.morph for cmorph in morphs)
@@ -249,6 +259,20 @@ def postprocess(fmt, morphs):
             return (' ' + BND_MARKER).join(chars)
         return (' ' + BND_MARKER).join(
             cmorph.morph for cmorph in morphs)
+    elif fmt == '2016c':
+        out = []
+        for cmorph in morphs:
+            morph = cmorph.morph
+            if model_wrapper.is_top_freq_morph(morph, 5000):
+                # include most frequent morphs in lexicon
+                out.append(morph)
+            elif BND_MARKER in morph[0]:
+                # avoid breaking already forcesplit
+                out.append(morph)
+            else:
+                # spell out everything else
+                out.extend([char for char in morph])
+        return (' ' + BND_MARKER).join(out)
     else:
         assert False, 'unknown output format {}'.format(fmt)
 
@@ -316,6 +340,7 @@ def main(args):
                 re.compile(line))
     if args.output_format.startswith('2016') \
             or args.output_format == 'compound_splitter':
+        print('Passing through boundary marker')
         passthrough.append(re.compile(BND_MARKER + '.*'))
     model = load_model(io, args.model)
     model_wrapper = FlatcatWrapper(
@@ -328,7 +353,7 @@ def main(args):
         pipe = utils._generator_progress(pipe, 10000)
         pipe = cache.segment_from(pipe)
         # FIXME: transformations (joining/filtering) here
-        pipe = (postprocess(args.output_format, morphs)
+        pipe = (postprocess(args.output_format, morphs, model_wrapper)
                 for morphs in pipe)
 
         for token in pipe:

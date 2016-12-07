@@ -91,7 +91,7 @@ Morfessor FlatCat advanced segmentation
 
 
 def corpus_reader(io, infile):
-    for line in io._read_text_file(infile):
+    for line in io._read_text_file(infile, raw=True):
         for (i, token) in enumerate(line.split(' ')):
             if i != 0:
                 yield ' '

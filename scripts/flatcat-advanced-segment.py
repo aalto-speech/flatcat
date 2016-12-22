@@ -15,6 +15,11 @@ from flatcat import utils
 
 BND_MARKER = '\u2059' # 5-dot punctuation
 
+SPACE_MARKER = '\u2e2a' # square 4-dot
+LETTERING_BEG = '\u2e2b' # v 3-dot
+LETTERING_MID = '\u2e2c' # ^ 3-dot
+LETTERING_END = '\u2e2d' # + 4-dot
+
 PY3 = sys.version_info.major == 3
 
 LICENSE = """
@@ -266,13 +271,37 @@ def postprocess(fmt, morphs, model_wrapper):
             if model_wrapper.is_top_freq_morph(morph, 5000):
                 # include most frequent morphs in lexicon
                 out.append(morph)
-            elif BND_MARKER in morph[0]:
+            elif BND_MARKER in morph:
                 # avoid breaking already forcesplit
                 out.append(morph)
             else:
                 # spell out everything else
                 out.extend([char for char in morph])
         return (' ' + BND_MARKER).join(out)
+    elif fmt == '2016d':
+        # similar to 2016b, but different marker scheme
+        firstchar = morphs[0].morph[0]
+        if firstchar == ' ':
+            return ' '
+        if firstchar.isupper() or firstchar.isdigit():
+            chars = ''.join(cmorph.morph for cmorph in morphs)
+            if len(chars) == 1:
+                return SPACE_MARKER + chars
+            chars = list(chars)
+            firstmarked = LETTERING_BEG + chars.pop(0)
+            lastmarked = LETTERING_END + chars.pop(-1)
+            midmarked = [LETTERING_MID + char for char in chars]
+            marked = [firstmarked] + midmarked + [lastmarked]
+            return SPACE_MARKER + (' '.join(marked))
+        out = ' '.join(
+            cmorph.morph for cmorph in morphs)
+        if out[0] == BND_MARKER:
+            # remove leading boundary markers from forcesplit
+            return out[1:]
+        else:
+            # mark leading space
+            return SPACE_MARKER + out
+
     else:
         assert False, 'unknown output format {}'.format(fmt)
 

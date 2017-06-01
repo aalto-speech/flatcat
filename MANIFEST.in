@@ -1,3 +1,4 @@
 include LICENSE
-include ez_setup.py
 include docs/build_requirements.txt
+# Include the data files for tests
+recursive-include flatcat/tests/reference_data *

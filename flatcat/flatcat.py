@@ -691,7 +691,7 @@ class FlatcatModel(AbstractSegmenter):
             count, analysis = row
             if count < freqthreshold:
                 continue
-            if count_modifier != None:
+            if count_modifier is not None:
                 count = count_modifier(count)
             if len(analysis) == 0:
                 continue
@@ -2309,13 +2309,13 @@ class FlatcatLexiconEncoding(baseline.LexiconEncoding):
             return 0.0
 
         n = self.tokens + self.boundaries
-        return  ((n * math.log(n)
-                  - self.boundaries * math.log(self.boundaries)
-                  - self.logtokensum
-                  + self.permutations_cost()
-                  + self.logfeaturesum
-                 )  # * self.weight       # always 1
-                 + self.frequency_distribution_cost())
+        return ((n * math.log(n)
+                 - self.boundaries * math.log(self.boundaries)
+                 - self.logtokensum
+                 + self.permutations_cost()
+                 + self.logfeaturesum
+                )  # * self.weight       # always 1
+                + self.frequency_distribution_cost())
 
     def get_codelength(self, morph):
         cost = super(FlatcatLexiconEncoding, self).get_codelength(morph)
@@ -2606,14 +2606,14 @@ class FlatcatEncoding(baseline.CorpusEncoding):
             return 0.0
 
         n = self.tokens + self.boundaries
-        return  ((self.tokens * math.log(self.tokens)
-                  - self.logtokensum
-                  - self.logcondprobsum
-                  - self.logtransitionsum()
-                  + n * math.log(n)
-                 ) * self.weight
-                 + self.frequency_distribution_cost()
-                )
+        return ((self.tokens * math.log(self.tokens)
+                 - self.logtokensum
+                 - self.logcondprobsum
+                 - self.logtransitionsum()
+                 + n * math.log(n)
+                ) * self.weight
+                + self.frequency_distribution_cost()
+               )
 
 
 class FlatcatAnnotatedCorpusEncoding(object):

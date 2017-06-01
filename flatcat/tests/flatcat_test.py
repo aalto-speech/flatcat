@@ -45,7 +45,7 @@ def _load_flatcat(baseline_seg, init='full'):
         Arguments:
             baseline_seg -- Segmentation of corpus using the baseline method.
                              Format: (count, (morph1, morph2, ...))
-            init -- Controls how far the initialization with regard to 
+            init -- Controls how far the initialization with regard to
                     retagging/reestimation
                     will be performed.
                     Transition probabilities will remain as unigram
@@ -290,12 +290,12 @@ class TestOnline(unittest.TestCase):
 
         self.model.training_focus = [5, 10, 2]
         self.assertEqual(len(list(self.model._training_focus_filter())), 3)
-        self.assertEqual(self.model._training_focus_filter().next(),
+        self.assertEqual(next(self.model._training_focus_filter()),
                          self.model.segmentations[2])
 
         self.model.training_focus = [0, len(self.model.segmentations) - 1]
         self.assertEqual(len(list(self.model._training_focus_filter())), 2)
-        self.assertEqual(self.model._training_focus_filter().next(),
+        self.assertEqual(next(self.model._training_focus_filter()),
                          self.model.segmentations[0])
 
 
@@ -437,11 +437,11 @@ class TestModelConsistency(unittest.TestCase):
 #         self.model.add_annotations(TestModelConsistency.one_split_annotation)
 #         self._presplit()
 #         self.model._update_annotation_choices()
-# 
+#
 #         tmp = ((('AA', 'BBBBB'), ('AABBBBB',)),           # join
 #                (('AAXXXXX',), ('AA', 'XXXXX')),           # split
 #                (('BBBBB',), ('BB', 'B', 'BB')))           # silly
-# 
+#
 #         def simple_transformation(old_analysis, new_analysis):
 #             return flatcat.Transformation(
 #                 flatcat.TransformationRule(
@@ -449,16 +449,16 @@ class TestModelConsistency(unittest.TestCase):
 #                         for morph in old_analysis]),
 #                 [flatcat.CategorizedMorph(morph, None)
 #                     for morph in new_analysis])
-# 
+#
 #         def apply_transformation(transformation):
 #             self.model.viterbi_tag_corpus()
 #             self.model.reestimate_probabilities()
 #             self.model.viterbi_tag_corpus()
 #             self.model.reestimate_probabilities()
-# 
+#
 #             matched_targets, num_matches = self.model._find_in_corpus(
 #                 transformation.rule, None)
-# 
+#
 #             for morph in self.model.detag_word(transformation.rule):
 #                 # Remove the old representation, but only from
 #                 # morph counts (emissions and transitions updated later)
@@ -466,7 +466,7 @@ class TestModelConsistency(unittest.TestCase):
 #             for morph in self.model.detag_word(transformation.result):
 #                 # Add the new representation to morph counts
 #                 self.model._modify_morph_count(morph, num_matches)
-# 
+#
 #             for i in matched_targets:
 #                 new_analysis = transformation.apply(
 #                     self.model.segmentations[i],
@@ -476,23 +476,22 @@ class TestModelConsistency(unittest.TestCase):
 #             if self.model._supervised:
 #                 self.model._annot_coding.reset_contributions()
 #             self.model._morph_usage.remove_zeros()
-# 
+#
 #             self.model.viterbi_tag_corpus()
 #             self.model.reestimate_probabilities()
 #             self.model.viterbi_tag_corpus()
 #             self.model.reestimate_probabilities()
-# 
+#
 #         for a, b in tmp:
 #             forward = simple_transformation(a, b)
 #             backward = simple_transformation(b, a)
-# 
+#
 #             self._apply_revert(
 #                 lambda: apply_transformation(forward),
 #                 lambda: apply_transformation(backward),
 #                 None)
 #         self._destructive_backlink_check()
 
-    
     def _apply_revert(self, apply_func, revert_func, is_remove):
         state_exact, state_approx = self._store_state()
         old_cost = self.model.get_cost()
@@ -555,7 +554,7 @@ class TestModelConsistency(unittest.TestCase):
         self.assertAlmostEqual(sum(category_totals), 2.0, places=9)
 
         # morph usage
-        self.assertEqual(self.model._morph_usage.seen_morphs(),
+        self.assertEqual(sorted(self.model._morph_usage.seen_morphs()),
                          ['AA', 'BBBBB'])
         self.assertEqual(self.model._morph_usage._contexts,
                          {'AA': scheme.MorphContext(1, 1.0, 1.0),
@@ -666,6 +665,7 @@ class TestModelConsistency(unittest.TestCase):
         for seg in self.model.segmentations:
             self.assertEqual(len(seg.analysis), 0,
                              msg='missing backlinks: {}'.format(seg))
+
 
 def _zexp(x):
     if x >= LOGPROB_ZERO:

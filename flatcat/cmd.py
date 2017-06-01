@@ -21,7 +21,8 @@ from .utils import _generator_progress
 
 PY3 = sys.version_info.major == 3
 
-# _str is used to convert command line arguments to the right type (str for PY3, unicode for PY2
+# _str is used to convert command line arguments to the right type
+# (str for PY3, unicode for PY2)
 if PY3:
     _str = str
 else:
@@ -62,6 +63,7 @@ POSSIBILITY OF SUCH DAMAGE.
 _preferred_encoding = locale.getpreferredencoding()
 
 DEFAULT_CORPUSWEIGHT = 1.0
+
 
 def _locale_decoder(s):
     """ Decodes commandline input in locale """

@@ -13,7 +13,8 @@ from . import utils
 
 PY3 = sys.version_info.major == 3
 
-# _str is used to convert command line arguments to the right type (str for PY3, unicode for PY2
+# _str is used to convert command line arguments to the right type
+# (str for PY3, unicode for PY2)
 if PY3:
     _str = str
 else:
@@ -87,7 +88,11 @@ CONTEXT_TYPE_BOTH = (CONTEXT_TYPE_INTERNAL + CONTEXT_FLAG_INITIAL +
 # being generated.
 NON_MORPHEME_PENALTY = 50
 
+
 class Postprocessor(object):
+    def __init__(self):
+        self.temporaries = set()
+
     """abstract base class for heuristic output postprocessors"""
     def _join_at(self, analysis, i):
         """Helper function for joins"""
@@ -108,7 +113,6 @@ class Postprocessor(object):
         return type(self) == type(other)
 
 
-
 # FIXME: badly named, should be NonmorphemeRemovalPostprocessor
 class HeuristicPostprocessor(Postprocessor):
     """Heuristic post-processing to remove non-morphemes from the
@@ -118,7 +122,7 @@ class HeuristicPostprocessor(Postprocessor):
     meaningful categories.
     """
     def __init__(self, max_join_stem_len=4):
-        self.temporaries = set()
+        super(HeuristicPostprocessor, self).__init__()
         self.max_join_stem_len = max_join_stem_len
 
     def apply_to(self, analysis, model):
@@ -216,6 +220,7 @@ class HeuristicPostprocessor(Postprocessor):
             out.append(prev)
         return out
 
+
 class CompoundSegmentationPostprocessor(Postprocessor):
     """Postprocessor that makes FlatCat perform compound segmentation"""
     def __init__(self, long_to_stems=True):
@@ -255,7 +260,6 @@ class CompoundSegmentationPostprocessor(Postprocessor):
             prev = morph.category
         out.append(current)
         return out
-
 
 
 class MorphContextBuilder(object):

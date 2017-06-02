@@ -65,11 +65,6 @@ _preferred_encoding = locale.getpreferredencoding()
 DEFAULT_CORPUSWEIGHT = 1.0
 
 
-def _locale_decoder(s):
-    """ Decodes commandline input in locale """
-    return _str(s.decode(_preferred_encoding))
-
-
 class ArgumentGroups(object):
     """Helper class for modular sharing of arguments."""
     def __init__(self, parser):
@@ -815,9 +810,9 @@ def flatcat_main(args):
         csep = args.outputconseparator
         tsep = args.outputtagseparator
         if not PY3:
-            outformat = _locale_decoder(outformat)
-            csep = _locale_decoder(csep)
-            tsep = _locale_decoder(tsep)
+            outformat = _str(outformat)
+            csep = _str(csep)
+            tsep = _str(tsep)
         outformat = outformat.replace(r"\n", "\n")
         outformat = outformat.replace(r"\t", "\t")
         keywords = [x[1] for x in string.Formatter().parse(outformat)]
@@ -1061,7 +1056,7 @@ def reformat_main(args):
 
     outformat = args.outputformat
     if not PY3:
-        outformat = _locale_decoder(outformat)
+        outformat = _str(outformat)
     outformat = outformat.replace(r"\n", "\n")
     outformat = outformat.replace(r"\t", "\t")
 

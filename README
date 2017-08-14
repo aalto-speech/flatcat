@@ -12,6 +12,13 @@ python setup.py install
 
 For details, see http://docs.python.org/install/
 
+Morfessor FlatCat 1.0 is also availabe through PyPI
+
+https://pypi.python.org/pypi/Morfessor-FlatCat
+
+To install, type
+
+pip install Morfessor-FlatCat
 
 Documentation
 -------------
@@ -30,4 +37,4 @@ Grönroos, S.-A. and Virpioja, S. (2014). Morfessor FlatCat: An HMM-based method
 Contact
 -------
 
-Questions or feedback? Email: morfessor@cis.hut.fi
+Questions or feedback? Email: morpho@aalto.fi

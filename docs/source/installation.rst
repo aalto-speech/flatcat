@@ -39,22 +39,19 @@ The setup command also installs Morfessor Baseline, which is a dependency of Fla
 ..     pip install morfessor-VERSION.tar.gz
 
 
-.. Installation from PyPI
-.. ----------------------
-.. 
-.. Morfessor 2.0 is also distributed through the `Python Package Index (PyPI)`_.
-.. This means that tools like pip and easy_install can automatically download and
-.. install the latest version of Morfessor.
-.. 
-.. Simply type::
-.. 
-..     pip install morfessor
-.. 
-.. or alternatively::
-.. 
-..     easy_install morfessor
-.. 
-.. To install the morfessor library and tools.
+
+Installation from PyPI
+----------------------
+
+Morfessor FlatCat is also distributed through the `Python Package Index (PyPI)`_.
+This means that tools like pip and easy_install can automatically download and
+install the latest version of Morfessor.
+
+Simply type::
+
+    pip install Morfessor-FlatCat
+
+To install Morfessor FlatCat.
 
 Basic workflow
 --------------
@@ -84,6 +81,6 @@ Segment the test data with the trained Morfessor FlatCat model::
     flatcat-segment analysis.tar.gz data/test.txt -o test_corpus.segmented --remove-nonmorphemes --output-categories 
 
 
-.. _Morpho project homepage: http://www.cis.hut.fi/projects/morpho/
+.. _Morpho project homepage: http://morpho.aalto.fi/projects/morpho/
 .. _FlatCat Github page: https://github.com/aalto-speech/flatcat/releases
 .. _Python Package Index (PyPI): https://pypi.python.org/pypi/Morfessor

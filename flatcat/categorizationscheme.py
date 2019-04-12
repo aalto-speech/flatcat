@@ -280,7 +280,11 @@ class MorphContextBuilder(object):
     @staticmethod
     def _perplexity(contexts):
         entropy = 0
-        total_tokens = float(sum(contexts.values()))
+        if isinstance(contexts, int):
+            total_tokens = float(contexts)
+            contexts = {i: 1. for i in range(contexts)}
+        else:
+            total_tokens = float(sum(contexts.values()))
         for c in contexts:
             p = float(contexts[c]) / total_tokens
             entropy -= p * math.log(p)
@@ -309,7 +313,7 @@ class MorphUsageProperties(object):
 
     def __init__(self, ppl_threshold=100, ppl_slope=None, length_threshold=3,
                  length_slope=2, type_perplexity=False,
-                 min_perplexity_length=4, pre_ppl_threshold=None):
+                 min_perplexity_length=4, pre_ppl_threshold=None, uncapped_ppl=False):
         """Initialize the model parameters describing morph usage.
 
         Arguments:
@@ -349,6 +353,7 @@ class MorphUsageProperties(object):
         else:
             self._ppl_slope = 10.0 / self._ppl_threshold
             self._pre_ppl_slope = 10.0 / self._pre_ppl_threshold
+        self._uncapped_ppl = uncapped_ppl
 
         # Counts of different contexts in which a morph occurs
         self._contexts = utils.Sparse(default=MorphContext(0, 1.0, 1.0))
@@ -580,7 +585,7 @@ class MorphUsageProperties(object):
         return (universalprior(context.right_perplexity) +
                 universalprior(context.left_perplexity))
 
-    def estimate_contexts(self, old_morphs, new_morphs):
+    def estimate_contexts(self, old_morphs, new_morphs, max_contexts=None):
         """Estimates context features for new unseen morphs.
 
         Arguments:
@@ -597,6 +602,12 @@ class MorphUsageProperties(object):
             These should be removed by the caller if no longer necessary.
             The removal is done using MorphContext.remove_temporaries.
         """
+        try:
+            uncapped_ppl = self._uncapped_ppl
+        except AttributeError:
+            uncapped_ppl = True
+        if not uncapped_ppl and max_contexts is not None:
+            max_ppl = MorphContextBuilder._perplexity(max_contexts)
         temporaries = []
         for (i, morph) in enumerate(new_morphs):
             if morph in self:
@@ -605,12 +616,16 @@ class MorphUsageProperties(object):
             if i == 0:
                 # Prefix inherits left perplexity of leftmost parent
                 l_ppl = self._contexts[old_morphs[0]].left_perplexity
+                if not uncapped_ppl:
+                    l_ppl = min(l_ppl, max_ppl)
             else:
                 # Otherwise assume that the morph doesn't appear in any
                 # other contexts, which gives perplexity 1.0
                 l_ppl = 1.0
             if i == len(new_morphs) - 1:
                 r_ppl = self._contexts[old_morphs[-1]].right_perplexity
+                if not uncapped_ppl:
+                    r_ppl = min(r_ppl, max_ppl)
             else:
                 r_ppl = 1.0
             count = 0   # estimating does not add instances of the morph

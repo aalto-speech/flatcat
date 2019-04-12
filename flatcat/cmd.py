@@ -339,6 +339,10 @@ def add_training_arguments(argument_groups):
                  'instead of using the morph property based probability. '
                  'These are performed after the normal training. '
                  '(default: do not switch over to ML estimation.')
+    add_arg('--uncapped-ppl-estimate', dest='uncapped_ppl', default=False,
+            action='store_true',
+            help='Use old uncapped estimate of perplexity for new morphs.')
+
 
     # Options for controlling training iteration sequence
     add_arg = argument_groups.get('training iteration sequence options')
@@ -617,7 +621,8 @@ def flatcat_main(args):
             length_slope=args.length_slope,
             type_perplexity=args.type_ppl,
             min_perplexity_length=args.min_ppl_length,
-            pre_ppl_threshold=args.pre_ppl_threshold)
+            pre_ppl_threshold=args.pre_ppl_threshold,
+            uncapped_ppl=args.uncapped_ppl)
         if args.corpusweight is None:
             corpusweight = DEFAULT_CORPUSWEIGHT
         else:

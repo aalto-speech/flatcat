@@ -1403,16 +1403,17 @@ class FlatcatModel(AbstractSegmenter):
             transforms = []
             changed_morphs = set((prefix.morph, suffix.morph))
             results = result_func(prefix, suffix)
-            for result in results:
-                detagged = self.detag_word(result)
-                changed_morphs.update(detagged)
-                temporaries.update(self._morph_usage.estimate_contexts(
-                    (prefix.morph, suffix.morph), detagged))
-                transforms.append(Transformation(rule, result))
             # targets will be a subset of the intersection of the
             # occurences of both submorphs
             targets = set(self.morph_backlinks[prefix.morph])
             targets.intersection_update(self.morph_backlinks[suffix.morph])
+            for result in results:
+                detagged = self.detag_word(result)
+                changed_morphs.update(detagged)
+                temporaries.update(self._morph_usage.estimate_contexts(
+                    (prefix.morph, suffix.morph), detagged,
+                    max_contexts=len(targets)))
+                transforms.append(Transformation(rule, result))
             if len(targets) > 0:
                 yield(transforms, targets, changed_morphs, temporaries)
 
@@ -1452,8 +1453,10 @@ class FlatcatModel(AbstractSegmenter):
                 changed_morphs.update((prefix, suffix))
                 # Make sure that there are context features available
                 # (real or estimated) for the submorphs
-                tmp = (self._morph_usage.estimate_contexts(morph,
-                                                           (prefix, suffix)))
+                tmp = (self._morph_usage.estimate_contexts(
+                    morph,
+                    (prefix, suffix),
+                    max_contexts=len(targets)))
                 temporaries.update(tmp)
                 transforms.append(
                     Transformation(rule,
@@ -1822,6 +1825,10 @@ class FlatcatModel(AbstractSegmenter):
             else:
                 force_another = False
 
+            if update_func is not None:
+                _logger.info('{:24s} Cost: {}'.format(
+                    'After  iteration update.', cost))
+
             for callback in self.iteration_callbacks:
                 callback(self, iteration)
 
@@ -1968,7 +1975,9 @@ class FlatcatModel(AbstractSegmenter):
                 update_func=update_func,
                 min_cost_gain=min_iteration_cost_gain,
                 max_iterations=max_iterations)
+            _logger.info('Cost before reestimate_probabilities: {}'.format(self.get_cost()))
             self.reestimate_probabilities()
+            _logger.info('Cost after  reestimate_probabilities: {}'.format(self.get_cost()))
             self._operation_number += 1
             for callback in self.operation_callbacks:
                 callback(self)

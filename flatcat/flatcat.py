@@ -779,9 +779,15 @@ class FlatcatModel(AbstractSegmenter):
             self._calculate_transition_counts()
             self._calculate_emission_counts()
 
+        def tag_and_calculate():
+            ret = self.viterbi_tag_corpus()
+            self._calculate_transition_counts()
+            self._calculate_emission_counts()
+            return ret
+
         self._convergence_of_analysis(
             reestimate_with_unchanged_segmentation,
-            self.viterbi_tag_corpus,
+            tag_and_calculate,
             min_difference_proportion=min_difference_proportion,
             min_cost_gain=-10.0)     # Cost gain will be ~zero.
 
